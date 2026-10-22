@@ -9,6 +9,7 @@ Bối cảnh cho session Claude Code mới: [CLAUDE.md](CLAUDE.md).
 - [docs/setup-bazzite.md](docs/setup-bazzite.md): cài đặt trên Bazzite (Docker qua bazzite-dx, SSH, conda/`chia_env`, image CHIA, Hello World, agent AI, Chipyard native trong distrobox).
 - [docs/usage-local.md](docs/usage-local.md): dùng CHIA trên một máy: bật/tắt cluster, chạy job, viết loop (`@ChiaFunction`, resources), LLM và `ChiaTool`, các node có sẵn, cache/bypass, profiling, loop mẫu.
 - [docs/usage-remote.md](docs/usage-remote.md): dùng thêm worker trên máy remote: chuẩn bị máy, firewall, SSH, `cluster-lan.yaml`, ghim và rải task qua nhiều máy, Tailscale/`tailnet:`.
+- [docs/prompt-template.md](docs/prompt-template.md): template prompt để mở session Claude Code mới cho một project, kèm bước phỏng vấn để dựng prompt.
 
 ## Config
 
