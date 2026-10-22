@@ -1,0 +1,104 @@
+# CHIA cluster across two machines that can reach each other directly
+# (same LAN, or both on a kernel-mode Tailscale/WireGuard network).
+#
+#   HEAD   = this Bazzite machine: Ray head + driver + 1 Chipyard + 1 Verilator + OpenCode
+#   REMOTE = the remote worker:    1 Chipyard + 2 Verilator (only needs Docker + sshd)
+#
+# Before `chia up` (see docs/usage-remote.md):
+#   export HEAD_IP=192.168.1.3          # head IP that the remote can reach
+#   export REMOTE_IP=192.168.1.20       # remote IP that the head can reach
+#   export REMOTE_USER=ubuntu           # SSH user on the remote (may differ from $USER)
+#   bash scripts/check-remote-worker.sh "$REMOTE_USER@$REMOTE_IP"
+#   chia up configs/cluster-lan.yaml -y
+#
+# Each Chipyard worker gets a machine-specific resource (cy_head / cy_remote) on
+# top of "chipyard". Containers do not share files, so a loop that edits RTL
+# with a BashTool and then builds must pin both to the same worker. See
+# docs/usage-remote.md, section 7.1.
+
+cluster_name: lan
+
+provider:
+    head_ip: ${HEAD_IP}
+
+auth:
+    ssh_user: ${USER}
+    overrides:
+        "${REMOTE_IP}":
+            ssh_user: ${REMOTE_USER}
+            # ssh_private_key: ~/.ssh/id_ed25519
+
+available_node_types:
+    # ---------------- head machine ----------------
+    chipyard_head:
+        resources: {"chipyard": 1, "cy_head": 1}
+        num_workers: 1
+        compatible_ips: ["${HEAD_IP}"]
+        worker_setup_commands: ["source /home/ray/chipyard/env.sh"]
+        docker:
+            image: "ghcr.io/ucb-bar/chia-chisel-build:latest"
+            container_name: "chia-chipyard-${USER}"
+            run_options:
+                - --shm-size=10.24gb
+            pull_timeout: 7200
+
+    verilator_head:
+        resources: {"verilator_run": 1}
+        num_workers: 1
+        compatible_ips: ["${HEAD_IP}"]
+        docker:
+            image: "ghcr.io/ucb-bar/chia-verilator-run:latest"
+            container_name: "chia-verilator-${USER}"
+            run_options:
+                - --ulimit nofile=65536:65536
+                - --shm-size=10.24gb
+
+    opencode:
+        resources: {"opencode_creds": 1}
+        worker_setup_commands: ["source ~/.bashrc"]
+        num_workers: 1
+        compatible_ips: ["${HEAD_IP}"]
+        docker:
+            image: "ghcr.io/ucb-bar/chia-opencode:latest"
+            container_name: "chia-opencode-${USER}"
+
+    # ---------------- remote machine ----------------
+    chipyard_remote:
+        resources: {"chipyard": 1, "cy_remote": 1}
+        num_workers: 1
+        compatible_ips: ["${REMOTE_IP}"]
+        worker_setup_commands: ["source /home/ray/chipyard/env.sh"]
+        docker:
+            image: "ghcr.io/ucb-bar/chia-chisel-build:latest"
+            container_name: "chia-chipyard-${USER}"
+            run_options:
+                - --shm-size=10.24gb
+            pull_timeout: 7200
+
+    verilator_remote:
+        resources: {"verilator_run": 1}
+        num_workers: 2                       # two containers, -0 and -1
+        compatible_ips: ["${REMOTE_IP}"]
+        docker:
+            image: "ghcr.io/ucb-bar/chia-verilator-run:latest"
+            container_name: "chia-verilator-${USER}"
+            run_options:
+                - --ulimit nofile=65536:65536
+                - --shm-size=10.24gb
+
+head_env_commands: ["source ~/.bashrc && conda activate chia_env"]
+head_setup_commands: ["source ~/.bashrc && conda activate chia_env"]
+
+# --node-ip-address pins the address the remote workers use to reach the head.
+head_start_ray_commands:
+    - "source ~/.bashrc && conda activate chia_env && ray stop"
+    - "source ~/.bashrc && conda activate chia_env && \
+        systemd-run --user --scope --quiet \
+        ray start --head --port=6379 --node-ip-address=${HEAD_IP} \
+        --include-dashboard=True --dashboard-agent-listen-port=0 --disable-usage-stats"
+
+# Workers run inside containers via `docker exec`, so logind cannot kill them
+# when the SSH session ends: no systemd-run needed here, even on a Bazzite remote.
+worker_start_ray_commands:
+    - "ray stop"
+    - "ray start --address=$RAY_HEAD_IP:6379 --dashboard-agent-listen-port=0"
