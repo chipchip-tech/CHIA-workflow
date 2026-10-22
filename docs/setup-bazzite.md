@@ -210,6 +210,29 @@ docker pull ghcr.io/ucb-bar/chia-opencode:latest       # agent OpenCode (có mod
 
 ## 5. Chạy thử Hello World (theo Quickstart)
 
+> **Bắt buộc trên Bazzite:** systemd-logind tắt mọi tiến trình của một phiên SSH
+> khi phiên đó đóng. Vì vậy Ray head mà `chia up` bật qua SSH sẽ chết ngay, dù CHIA
+> vẫn in `Head node ready`. Sau đó worker báo `Failed to connect to GCS at ...:6379`.
+> Để sửa, bật linger một lần, rồi chạy Ray head trong một scope systemd của user:
+>
+> ```bash
+> loginctl enable-linger $USER
+> ```
+>
+> Sửa `head_start_ray_commands` trong `cluster.yaml`:
+>
+> ```yaml
+> head_start_ray_commands:
+>     - "source ~/.bashrc && conda activate chia_env && ray stop"
+>     - "source ~/.bashrc && conda activate chia_env && \
+>         systemd-run --user --scope --quiet \
+>         ray start --head --port=6379 --node-ip-address=${THIS_MACHINE} \
+>         --include-dashboard=True --dashboard-agent-listen-port=0 --disable-usage-stats"
+> ```
+>
+> Cách khác: tạo file `/etc/systemd/logind.conf.d/99-chia.conf` chứa
+> `[Login]` và `KillUserProcesses=no`, rồi reboot.
+
 ```bash
 conda activate chia_env
 cp -r ~/work/chia/examples/hello-world ~/chia-hello-world   # hoặc tự tạo file như trong docs
@@ -341,6 +364,7 @@ sshd, SSH không mật khẩu, conda, `chia_env`, phiên bản Python/Ray, `rsyn
 |---|---|
 | `'docker' not found in login-shell PATH` | Chưa dùng bazzite-dx, hoặc shim `~/.local/bin/docker` chưa có trong PATH của `bash --login` |
 | `permission denied ... docker.sock` | Chưa chạy `ujust dx-group`, hoặc chưa đăng nhập lại |
+| `Head node ready` nhưng worker báo `Failed to connect to GCS` | logind tắt Ray head khi phiên SSH đóng. Xem ghi chú đầu mục 5 (`enable-linger` + `systemd-run --user --scope`) |
 | Worker không join cluster | Python/Ray trên head lệch với container (cần 3.10.x / 2.54.0) |
 | `chia up` hỏi mật khẩu hoặc treo ở SSH | Chưa thêm key vào `authorized_keys`, `ssh-agent` chưa có key, hoặc `sshd` chưa bật |
 | `Permission denied` trong file mount (`-v`) | SELinux: thêm `:z`. Podman: dùng `--userns=keep-id` |
