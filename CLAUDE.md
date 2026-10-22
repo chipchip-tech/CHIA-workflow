@@ -11,21 +11,6 @@ trên Ray và Docker. Tài liệu chính thức nằm ở <https://docs.chialoop
 Từ sandbox của Claude Code thường không resolve được domain này, nên đọc thẳng
 `docs/*.rst` trong repo `ucb-bar/chia`. Paper: arXiv:2606.27350.
 
-## Cấu trúc repo
-
-| Đường dẫn | Nội dung |
-|---|---|
-| `docs/setup-bazzite.md` | Cài đặt: bazzite-dx/Docker, SSH, Miniforge + `chia_env`, image, Hello World, agent AI, Chipyard native (distrobox) |
-| `docs/usage-local.md` | Dùng CHIA trên một máy: CLI, `@ChiaFunction`, resources, LLM + `ChiaTool`, node có sẵn, cache/bypass, profiling, loop mẫu |
-| `docs/usage-remote.md` | Thêm máy remote làm worker: chuẩn bị máy, firewall 2 chiều, SSH, `cluster-lan.yaml`, ghim và rải task, Tailscale/`tailnet:` |
-| `docs/prompt-template.md` | Template prompt cho session mới làm project; Bước 0 là phỏng vấn để dựng prompt |
-| `configs/cluster-local.yaml` | Cluster 1 máy: head + chipyard + verilator + opencode |
-| `configs/cluster-lan.yaml` | Head + 1 remote. Resource `cy_head`/`cy_remote` dùng để ghim container chipyard |
-| `scripts/check-bazzite-env.sh` | Chạy trên head, kiểm tra môi trường (chỉ đọc) |
-| `scripts/prepare-remote-worker.sh` | Chạy trên máy remote: sshd, Docker, rsync, firewall (hỏi trước mỗi bước) |
-| `scripts/check-remote-worker.sh` | Chạy trên head, kiểm tra remote qua SSH (chỉ đọc) |
-| `examples/rtl_agent_loop.py` | Loop: agent sửa RTL → build → mô phỏng song song → đưa lỗi vào prompt vòng sau |
-
 ## Máy của người dùng (head)
 
 - OS: `ghcr.io/ublue-os/bazzite-dx-nvidia:stable`. Đã chạy `ujust dx-group`; `docker`
@@ -89,8 +74,8 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 ## Quy ước làm việc
 
 - Trả lời người dùng bằng **tiếng Việt**.
-- Phát triển trên nhánh `claude/zen-pasteur-gygy0m`, push bằng
-  `git push -u origin claude/zen-pasteur-gygy0m`. **Không tạo PR** trừ khi người dùng yêu cầu.
+- Phát triển trên nhánh `claude/stoic-cerf-lbnq0h`, push bằng
+  `git push -u origin claude/stoic-cerf-lbnq0h`. **Không tạo PR** trừ khi người dùng yêu cầu.
 - Trước khi tạo, xoá hoặc tách file tài liệu, **liệt kê file hiện có và file dự định
   thay đổi để người dùng duyệt**.
 - Claude không chạy được lệnh trên máy người dùng: đưa lệnh cho người dùng chạy, rồi đọc
