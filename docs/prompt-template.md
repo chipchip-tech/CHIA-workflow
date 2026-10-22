@@ -7,6 +7,78 @@ vào **project**: mục tiêu, phạm vi, tài nguyên, thế nào là "xong", v
 Nhớ mở session trên nhánh `claude/zen-pasteur-gygy0m`, hoặc bảo session checkout nhánh
 đó trước.
 
+## Bước 0: Phỏng vấn để dựng prompt
+
+Khi chưa rõ project cần nêu những gì (resource, worker, tiêu chí "xong", giới hạn máy),
+hãy mở một session riêng **chỉ để phỏng vấn và soạn prompt**. Session này chưa viết
+code. Kết quả là một prompt hoàn chỉnh theo Template ở dưới, để dán vào session làm
+project.
+
+### Prompt phỏng vấn
+
+```
+Đọc CLAUDE.md, docs/usage-local.md và docs/prompt-template.md.
+Tôi muốn làm một project bằng CHIA nhưng chưa rõ cần nêu những gì.
+Hãy phỏng vấn tôi, MỖI LẦN TỐI ĐA 3 CÂU, theo bộ câu hỏi trong prompt-template.md.
+Dựa vào câu trả lời, đề xuất phương án (node, resource, worker, image) khi tôi chưa biết.
+Khi đủ thông tin, xuất ra MỘT prompt hoàn chỉnh theo Template, kèm danh sách
+giả định bạn tự đặt. Chưa viết code hay sửa file nào.
+```
+
+### Bộ câu hỏi
+
+| Nhóm | Câu hỏi | Ảnh hưởng tới phần nào của loop |
+|---|---|---|
+| Mục tiêu | Muốn trả lời câu hỏi gì? Kết quả cuối là gì (bảng số, RTL đã sửa, patch, báo cáo)? | Tiêu chí hoàn thành, định dạng đầu ra |
+| Thiết kế | Core/config nào? Có sửa RTL không? Ai sửa: bạn, agent hay không ai? | `ChiselBuildNode` config, có cần `BashTool` và ghim worker không |
+| Workload | Chạy chương trình gì? Đã có sẵn hay phải viết? Đo gì (cycle, pass/fail, area/timing)? | Node biên dịch, `VerilatorRunNode`, gem5/Hammer |
+| Agent | Có dùng LLM không? Model nào? Có API key/credentials chưa? Bao nhiêu vòng? | `OpenCodeLLM`/`ClaudeCodeLLM`, worker `*_creds`, timeout |
+| Quy mô | Bao nhiêu cấu hình × benchmark × vòng? Có cần song song không? | Số slot resource, `num_workers`, fan-out |
+| Tài nguyên | Chỉ máy local hay có remote? Thời gian chấp nhận cho mỗi lần chạy? | `cluster-local.yaml` hay `cluster-lan.yaml`, giới hạn RAM |
+| Lặp lại / tái lập | Có cần chạy lại rẻ (cache), thử orchestration không tốn tiền (bypass), đo thời gian (profiling)? | `_chia_tag`, cache/bypass, profiler |
+| Lưu kết quả | Lưu ở đâu (CSV, SQLite, patch)? Có cần giữ RTL sau khi `chia down`? | Mount volume, lưu patch, `SQLiteNode` |
+| Mốc | Mốc nhỏ đầu tiên muốn thấy chạy là gì? | Mốc 1 trong prompt |
+
+### Ví dụ một lượt phỏng vấn
+
+> **Claude:** (1) Bạn muốn trả lời câu hỏi gì, kết quả cuối là gì? (2) Có sửa RTL không,
+> ai sửa? (3) Chạy chương trình gì để đo?
+>
+> **Bạn:** Muốn xem cache L1D lớn hơn giúp matmul nhanh bao nhiêu. Kết quả là bảng cycle.
+> Không sửa RTL tay, chỉ đổi config. Chạy matmul 32x32 tự viết.
+>
+> **Claude:** (4) Mấy kích thước cache? (5) Chỉ máy local? (6) Có cần chạy lại rẻ không?
+>
+> **Bạn:** 3 kích thước. Chỉ local. Có, muốn đổi benchmark mà không build lại.
+
+Prompt được sinh ra:
+
+```
+Đọc CLAUDE.md và docs/usage-local.md trước.
+
+## Mục tiêu
+Đo ảnh hưởng của kích thước L1 D-cache tới số cycle của matmul 32x32 trên Rocket.
+
+## Phạm vi
+- Config: 3 config Chipyard kế thừa RocketConfig với L1D 16/32/64 KiB
+  (đề xuất cách khai báo config mới trong generators/chipyard trước).
+- Workload: matmul 32x32 int32, đo bằng rdcycle, in "CYCLES=<n>".
+- Không dùng agent.
+
+## Tài nguyên
+- configs/cluster-local.yaml: 1 slot chipyard, nên 3 build chạy tuần tự.
+
+## Tiêu chí hoàn thành
+- In bảng kích thước L1D × cycles, ghi results.csv.
+- Build được cache theo _chia_tag = tên config; đổi benchmark không phải build lại.
+
+## Cách làm việc
+- Liệt kê file để tôi duyệt trước. Đưa lệnh, tôi chạy rồi gửi log.
+
+Giả định: config mới thêm vào Chipyard bên trong container và mất khi chia down,
+nên loop phải tự ghi file config trước khi build.
+```
+
 ## Template
 
 ```
@@ -90,6 +162,7 @@ viết test C gọi lệnh custom, build và mô phỏng, phản hồi lỗi cho
 
 ## Mẹo
 
+- **Chưa rõ project cần gì** → bắt đầu bằng Bước 0 (phỏng vấn).
 - **Chia mốc nhỏ.** Ví dụ: (1) dựng khung loop và chạy bằng bypass; (2) thêm build và sim
   thật; (3) bật agent; (4) chạy song song hoặc trên nhiều máy. Mỗi mốc bảo session dừng
   lại chờ log của bạn.

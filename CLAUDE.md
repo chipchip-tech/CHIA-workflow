@@ -18,6 +18,7 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 | `docs/setup-bazzite.md` | Cài đặt: bazzite-dx/Docker, SSH, Miniforge + `chia_env`, image, Hello World, agent AI, Chipyard native (distrobox) |
 | `docs/usage-local.md` | Dùng CHIA trên một máy: CLI, `@ChiaFunction`, resources, LLM + `ChiaTool`, node có sẵn, cache/bypass, profiling, loop mẫu |
 | `docs/usage-remote.md` | Thêm máy remote làm worker: chuẩn bị máy, firewall 2 chiều, SSH, `cluster-lan.yaml`, ghim và rải task, Tailscale/`tailnet:` |
+| `docs/prompt-template.md` | Template prompt cho session mới làm project; Bước 0 là phỏng vấn để dựng prompt |
 | `configs/cluster-local.yaml` | Cluster 1 máy: head + chipyard + verilator + opencode |
 | `configs/cluster-lan.yaml` | Head + 1 remote. Resource `cy_head`/`cy_remote` dùng để ghim container chipyard |
 | `scripts/check-bazzite-env.sh` | Chạy trên head, kiểm tra môi trường (chỉ đọc) |
