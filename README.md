@@ -5,8 +5,8 @@ Ghi chú, config và script để chạy [CHIA](https://github.com/ucb-bar/chia)
 ## Tài liệu
 
 - [docs/setup-bazzite.md](docs/setup-bazzite.md): cài đặt trên Bazzite (Docker qua bazzite-dx, SSH, conda/`chia_env`, image CHIA, Hello World, agent AI, Chipyard native trong distrobox).
-- [docs/remote-worker.md](docs/remote-worker.md): thêm máy remote làm worker (LAN, Tailscale, chế độ `tailnet:` của CHIA).
-- [docs/chia-usage.md](docs/chia-usage.md): cách dùng framework (`@ChiaFunction`, resources, LLM và `ChiaTool`, các node có sẵn, cache/bypass, profiling, loop mẫu).
+- [docs/usage-local.md](docs/usage-local.md): dùng CHIA trên một máy: bật/tắt cluster, chạy job, viết loop (`@ChiaFunction`, resources), LLM và `ChiaTool`, các node có sẵn, cache/bypass, profiling, loop mẫu.
+- [docs/usage-remote.md](docs/usage-remote.md): dùng thêm worker trên máy remote: chuẩn bị máy, firewall, SSH, `cluster-lan.yaml`, ghim và rải task qua nhiều máy, Tailscale/`tailnet:`.
 
 ## Config
 

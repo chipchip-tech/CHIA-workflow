@@ -4,7 +4,7 @@
 #
 #   bash scripts/check-remote-worker.sh user@192.168.1.20 [HEAD_IP]
 #
-# See docs/remote-worker.md.
+# See docs/usage-remote.md.
 
 if [ $# -lt 1 ]; then
     echo "usage: $0 user@remote-host [head-ip]" >&2
@@ -68,7 +68,7 @@ else
         if remote "timeout 5 bash -c '</dev/tcp/$HEAD/6379'"; then
             ok "remote reaches Ray head at $HEAD:6379"
         else
-            bad "remote cannot reach $HEAD:6379 (firewall on the head? see docs/remote-worker.md step 2)"
+            bad "remote cannot reach $HEAD:6379 (firewall on the head? see docs/usage-remote.md section 3)"
         fi
     else
         warn "Ray head not running on $HEAD:6379; start a cluster and rerun to test head<-remote reachability"

@@ -250,8 +250,8 @@ giới hạn 600 giây mỗi lượt. Lượt sau thấy message đã có sẵn 
 là hành vi đúng theo prompt của tutorial.
 
 Bước tiếp theo:
-- Viết loop của riêng bạn: [chia-usage.md](chia-usage.md).
-- Thêm máy khác làm worker: [remote-worker.md](remote-worker.md).
+- Dùng CHIA trên một máy (viết loop, agent, tool...): [usage-local.md](usage-local.md).
+- Thêm máy khác làm worker: [usage-remote.md](usage-remote.md).
 
 ---
 

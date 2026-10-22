@@ -5,7 +5,7 @@
 #   bash prepare-remote-worker.sh <HEAD_IP>          # e.g. 192.168.1.3
 #
 # Supports Ubuntu/Debian, Fedora Workstation, and Fedora Atomic (Bazzite/Bluefin/...).
-# Prints each step and asks before changing anything. See docs/remote-worker.md.
+# Prints each step and asks before changing anything. See docs/usage-remote.md.
 
 set -euo pipefail
 
