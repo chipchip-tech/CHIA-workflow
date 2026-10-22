@@ -4,7 +4,7 @@ Dùng khi mở một session Claude Code mới để làm một project bằng C
 (máy, cách cài, các lỗi đã gặp) đã có trong `CLAUDE.md`, nên prompt chỉ cần tập trung
 vào **project**: mục tiêu, phạm vi, tài nguyên, thế nào là "xong", và cách làm việc.
 
-Nhớ mở session trên nhánh `claude/temp`, hoặc bảo session checkout nhánh
+Nhớ mở session trên nhánh `temp`, hoặc bảo session checkout nhánh
 đó trước.
 
 ## Bước 0: Phỏng vấn để dựng prompt
