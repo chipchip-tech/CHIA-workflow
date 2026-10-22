@@ -1,2 +1,5 @@
 __pycache__/
 *.pyc
+# ascon-secureboot: per-run results stay local; only out/final/ is committed (M4)
+projects/ascon-secureboot/out/*
+!projects/ascon-secureboot/out/final/

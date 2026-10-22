@@ -1,0 +1,39 @@
+# Cache + bypass config for ascon_loop.py. Both key off _chia_tag:
+#   <run_id>/iterN/agent         OpenCode turn          (<run_id>/iterN/agent-fake with --fake-llm)
+#   <run_id>/iterN/collect       tree snapshot after the turn
+#   <run_id>/iterN/build/<cfg>   ChiselBuildNode artifact
+#   compile/<test>/<sha12>       test ELF (sha of boot.c + image.h + cflags)
+#
+# cache  = write path: real results are stored on the head (--cache-dir).
+# bypass = read path: the loop registers replay_from_cache as provider, gated by
+#          conditions in ascon_loop.py (cache hit, and for collect/build: the
+#          tree is the one that was cached). --fake-llm swaps the agent provider
+#          for a canned reply. --no-replay turns every replay off.
+
+cache:
+  OpenCodeLLM.prompt:
+    cache: true
+    tags: [".*/agent"]            # the fake reply (agent-fake) is never cached
+  collect_tree:
+    cache: true
+    tags: [".*/collect"]
+  ChiselBuildNode.build:
+    cache: true
+    tags: [".*/build/.*"]
+  compile_program:
+    cache: true
+    tags: ["compile/.*"]
+
+bypass:
+  OpenCodeLLM.prompt:
+    bypass: true
+    tags: [".*/agent", ".*/agent-fake"]
+  collect_tree:
+    bypass: true
+    tags: [".*/collect"]
+  ChiselBuildNode.build:
+    bypass: true
+    tags: [".*/build/.*"]
+  compile_program:
+    bypass: true
+    tags: ["compile/.*"]

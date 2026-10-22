@@ -43,6 +43,18 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 - Phần linger trong `check-bazzite-env.sh` (thêm sau lần chạy script).
 - Tailscale/`tailnet:`, worker Claude Code, phương án Podman rootless.
 
+## Project đang làm: `projects/ascon-secureboot/` (RoCC Ascon-Hash256, secure boot)
+
+Chi tiết, lệnh chạy và trạng thái kiểm chứng xem `projects/ascon-secureboot/README.md`.
+- Mốc hiện tại: **M1** (đã viết code, đang chờ log chạy trên máy người dùng).
+- Người dùng yêu cầu: **không chạy gì trên session cloud**, chỉ tạo file và hướng dẫn.
+  `selftest.sh` đã chạy trong sandbox (trước khi có yêu cầu này) và pass. Loop và smoke
+  test chưa chạy.
+- Giao diện RoCC (custom0, `funct3={xd,xs1,xs2}`): INIT f7=0/000, ABSORB f7=1/011
+  (`rs2=nbytes|last<<8`), SQUEEZE f7=2/110. Wrapper `AsconCoreV4` chỉ ép kiểu cổng enum.
+- Mốc tiếp theo: M2 (agent thật, `AsconRocketConfig` build pass), M3 (2 test RoCC đạt),
+  M4 (`out/final/`).
+
 ## Các lỗi đã gặp trên Bazzite và cách sửa
 
 1. **Ray head chết ngay sau `chia up`**, dù CHIA vẫn in `Head node ready`. Worker báo
@@ -85,8 +97,9 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 
 ## Việc tiếp theo (gợi ý)
 
-1. Chạy thử `examples/rtl_agent_loop.py` trên cluster 1 máy và sửa theo log.
-2. Xác nhận `PYTHONNOUSERSITE=1` cho `chia_env`.
-3. Khi có máy thứ hai: làm theo `docs/usage-remote.md`, kiểm chứng `cluster-lan.yaml`.
-4. Tuỳ chọn: worker Claude Code (`chia-claude-code`, mount `~/.claude`); thử các case
+1. Ascon secure boot: đọc log M1 người dùng gửi, sửa, rồi làm M2.
+2. Chạy thử `examples/rtl_agent_loop.py` trên cluster 1 máy và sửa theo log.
+3. Xác nhận `PYTHONNOUSERSITE=1` cho `chia_env`.
+4. Khi có máy thứ hai: làm theo `docs/usage-remote.md`, kiểm chứng `cluster-lan.yaml`.
+5. Tuỳ chọn: worker Claude Code (`chia-claude-code`, mount `~/.claude`); thử các case
    study trong `~/work/chia/examples/` (`timing_opt`, `riscv_extensions`, `gem5_align`,...).
