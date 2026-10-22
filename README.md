@@ -2,6 +2,8 @@
 
 Ghi chú, config và script để chạy [CHIA](https://github.com/ucb-bar/chia) (framework co-design phần cứng/phần mềm dùng agent AI, UC Berkeley) cùng Chipyard trên Bazzite.
 
+Bối cảnh cho session Claude Code mới: [CLAUDE.md](CLAUDE.md).
+
 ## Tài liệu
 
 - [docs/setup-bazzite.md](docs/setup-bazzite.md): cài đặt trên Bazzite (Docker qua bazzite-dx, SSH, conda/`chia_env`, image CHIA, Hello World, agent AI, Chipyard native trong distrobox).
