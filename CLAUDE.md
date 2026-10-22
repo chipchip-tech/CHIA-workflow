@@ -74,8 +74,8 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 ## Quy ước làm việc
 
 - Trả lời người dùng bằng **tiếng Việt**.
-- Phát triển trên nhánh `claude/stoic-cerf-lbnq0h`, push bằng
-  `git push -u origin claude/stoic-cerf-lbnq0h`. **Không tạo PR** trừ khi người dùng yêu cầu.
+- Phát triển trên nhánh `temp`, push bằng
+  `git push -u origin temp`. **Không tạo PR** trừ khi người dùng yêu cầu.
 - Trước khi tạo, xoá hoặc tách file tài liệu, **liệt kê file hiện có và file dự định
   thay đổi để người dùng duyệt**.
 - Claude không chạy được lệnh trên máy người dùng: đưa lệnh cho người dùng chạy, rồi đọc
