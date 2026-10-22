@@ -248,6 +248,23 @@ Ray dashboard: <http://127.0.0.1:8265>.
 
 Bước 3–4 của quickstart dùng OpenCode (model `opencode/big-pickle` miễn phí):
 
+> **Lưu ý:** file `cluster-opencode.yaml` trong ví dụ có lỗi YAML: `compatible_ips: [${THIS_MACHINE}]`
+> thiếu dấu nháy. File này cũng chưa có bản vá `systemd-run`. Nên thêm worker OpenCode thẳng vào
+> `cluster.yaml`, ở cuối `available_node_types`:
+>
+> ```yaml
+>     hello_opencode:
+>         resources: {"opencode_creds": 1}
+>         worker_setup_commands: ["source ~/.bashrc"]
+>         num_workers: 1
+>         compatible_ips: ["${THIS_MACHINE}"]
+>         docker:
+>             image: "ghcr.io/ucb-bar/chia-opencode:latest"
+>             container_name: "chia-opencode-${USER}"
+> ```
+>
+> Sau đó dùng `chia up --add cluster.yaml` thay cho lệnh bên dưới.
+
 ```bash
 chia up --add cluster-opencode.yaml
 chia job submit --submission-id RUNSTEP3 --working-dir . -- python hello-world-s3.py
