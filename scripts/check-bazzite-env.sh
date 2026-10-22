@@ -42,6 +42,11 @@ elif ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 "$USER
 else
     bad "passwordless ssh to $USER@$HOST failed (authorized_keys / ssh-agent)"
 fi
+if loginctl show-user "$USER" -p Linger 2>/dev/null | grep -q 'Linger=yes'; then
+    ok "linger enabled (Ray head survives the SSH session that started it)"
+else
+    bad "linger off: run  loginctl enable-linger $USER  (see docs/setup-bazzite.md section 5)"
+fi
 
 echo "== Conda / CHIA"
 if grep -q 'case \$- in' ~/.bashrc 2>/dev/null; then

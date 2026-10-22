@@ -210,72 +210,48 @@ docker pull ghcr.io/ucb-bar/chia-opencode:latest       # agent OpenCode (có mod
 
 ## 5. Chạy thử Hello World (theo Quickstart)
 
-> **Bắt buộc trên Bazzite:** systemd-logind tắt mọi tiến trình của một phiên SSH
-> khi phiên đó đóng. Vì vậy Ray head mà `chia up` bật qua SSH sẽ chết ngay, dù CHIA
-> vẫn in `Head node ready`. Sau đó worker báo `Failed to connect to GCS at ...:6379`.
-> Để sửa, bật linger một lần, rồi chạy Ray head trong một scope systemd của user:
->
-> ```bash
-> loginctl enable-linger $USER
-> ```
->
-> Sửa `head_start_ray_commands` trong `cluster.yaml`:
->
-> ```yaml
-> head_start_ray_commands:
->     - "source ~/.bashrc && conda activate chia_env && ray stop"
->     - "source ~/.bashrc && conda activate chia_env && \
->         systemd-run --user --scope --quiet \
->         ray start --head --port=6379 --node-ip-address=${THIS_MACHINE} \
->         --include-dashboard=True --dashboard-agent-listen-port=0 --disable-usage-stats"
-> ```
->
-> Cách khác: tạo file `/etc/systemd/logind.conf.d/99-chia.conf` chứa
-> `[Login]` và `KillUserProcesses=no`, rồi reboot.
+Dùng `configs/cluster-local.yaml` trong repo này thay cho `cluster.yaml` và
+`cluster-opencode.yaml` của ví dụ gốc. File này đã có đủ 3 worker (chipyard,
+verilator, opencode) và hai bản sửa riêng cho Bazzite:
+
+- **Ray head chạy trong `systemd-run --user --scope`.** systemd-logind tắt mọi tiến
+  trình của một phiên SSH khi phiên đó đóng. Vì vậy, nếu không có bản sửa này, Ray head
+  do `chia up` bật qua SSH chết ngay. CHIA vẫn in `Head node ready`, nhưng worker báo
+  `Failed to connect to GCS at ...:6379`. Bản sửa cần chạy `loginctl enable-linger`
+  **một lần**. Cách khác là tạo file `/etc/systemd/logind.conf.d/99-chia.conf` chứa
+  `[Login]` và `KillUserProcesses=no`, rồi reboot.
+- **`compatible_ips: ["${THIS_MACHINE}"]` có dấu nháy.** Ví dụ gốc
+  `cluster-opencode.yaml` thiếu dấu nháy nên YAML báo lỗi
+  `expected ',' or ']', but got '{'`.
 
 ```bash
-conda activate chia_env
-cp -r ~/work/chia/examples/hello-world ~/chia-hello-world   # hoặc tự tạo file như trong docs
+loginctl enable-linger $USER                                  # một lần
+git clone -b claude/zen-pasteur-gygy0m https://github.com/chipchip-tech/CHIA-workflow.git ~/CHIA-workflow
+cp -r ~/work/chia/examples/hello-world ~/chia-hello-world
 cd ~/chia-hello-world
-export THIS_MACHINE=$(hostname -I | awk '{print $1}')
+conda activate chia_env
+export THIS_MACHINE=$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')
 
-chia up cluster.yaml                                         # bật head + worker chipyard + verilator
-chia job submit --working-dir . -- python hello-world-s1.py  # in "Hello World (#1)..."
-chia job submit --working-dir . -- python hello-world-s2.py  # build RocketConfig + chạy Verilator
+chia up ~/CHIA-workflow/configs/cluster-local.yaml -y
+ray status                                                    # 4 node: head + 3 worker
+chia job submit --working-dir . -- python hello-world-s1.py   # Hello World (#1)
+chia job submit --working-dir . -- python hello-world-s2.py   # build RocketConfig + Verilator: (#2)
+chia job submit --working-dir . -- python hello-world-s3.py   # OpenCode trả lời: (#3)
+chia job submit --working-dir . -- python hello-world-s4.py   # LLM sửa RTL qua BashTool: (#4)
+
+chia down ~/CHIA-workflow/configs/cluster-local.yaml -y       # tắt cluster
 ```
 
-Ray dashboard: <http://127.0.0.1:8265>.
+Ray dashboard: <http://127.0.0.1:8265>. OpenCode dùng model miễn phí
+`opencode/big-pickle`, không cần API key.
 
-Bước 3–4 của quickstart dùng OpenCode (model `opencode/big-pickle` miễn phí):
+Ở step 4, log có thể hiện `Timeout on attempt 1/3`. Lý do là agent tự build thử và vượt
+giới hạn 600 giây mỗi lượt. Lượt sau thấy message đã có sẵn nên thêm chữ "again". Đây
+là hành vi đúng theo prompt của tutorial.
 
-> **Lưu ý:** file `cluster-opencode.yaml` trong ví dụ có lỗi YAML: `compatible_ips: [${THIS_MACHINE}]`
-> thiếu dấu nháy. File này cũng chưa có bản vá `systemd-run`. Nên thêm worker OpenCode thẳng vào
-> `cluster.yaml`, ở cuối `available_node_types`:
->
-> ```yaml
->     hello_opencode:
->         resources: {"opencode_creds": 1}
->         worker_setup_commands: ["source ~/.bashrc"]
->         num_workers: 1
->         compatible_ips: ["${THIS_MACHINE}"]
->         docker:
->             image: "ghcr.io/ucb-bar/chia-opencode:latest"
->             container_name: "chia-opencode-${USER}"
-> ```
->
-> Sau đó dùng `chia up --add cluster.yaml` thay cho lệnh bên dưới.
-
-```bash
-chia up --add cluster-opencode.yaml
-chia job submit --submission-id RUNSTEP3 --working-dir . -- python hello-world-s3.py
-chia job stop RUNSTEP3     # dừng job sớm nếu muốn
-chia job submit --working-dir . -- python hello-world-s4.py  # LLM sửa RTL Rocket qua BashTool (MCP)
-
-chia down cluster-opencode.yaml   # tắt cluster
-```
-
-Nếu job thành công, output sẽ có các dòng `Hello World (#2) from Verilator!` và
-`Hello World (#4) from instruction 1000!`.
+Bước tiếp theo:
+- Viết loop của riêng bạn: [chia-usage.md](chia-usage.md).
+- Thêm máy khác làm worker: [remote-worker.md](remote-worker.md).
 
 ---
 
@@ -372,7 +348,7 @@ Lỗi thường gặp khi chạy `build-setup.sh`. Image `ChipyardDockerfile` c�
 
 ## 8. Checklist nhanh
 
-Chạy `scripts/check-bazzite-env.sh` trong repo này. Script kiểm tra docker,
+Chạy `scripts/check-bazzite-env.sh` trong repo này. Script kiểm tra docker, linger,
 sshd, SSH không mật khẩu, conda, `chia_env`, phiên bản Python/Ray, `rsync` và dung lượng `/var`.
 
 ## Sự cố thường gặp
@@ -381,7 +357,7 @@ sshd, SSH không mật khẩu, conda, `chia_env`, phiên bản Python/Ray, `rsyn
 |---|---|
 | `'docker' not found in login-shell PATH` | Chưa dùng bazzite-dx, hoặc shim `~/.local/bin/docker` chưa có trong PATH của `bash --login` |
 | `permission denied ... docker.sock` | Chưa chạy `ujust dx-group`, hoặc chưa đăng nhập lại |
-| `Head node ready` nhưng worker báo `Failed to connect to GCS` | logind tắt Ray head khi phiên SSH đóng. Xem ghi chú đầu mục 5 (`enable-linger` + `systemd-run --user --scope`) |
+| `Head node ready` nhưng worker báo `Failed to connect to GCS` | logind tắt Ray head khi phiên SSH đóng. Xem mục 5 (`enable-linger` + `systemd-run --user --scope`, đã có trong `configs/cluster-local.yaml`) |
 | Worker không join cluster | Python/Ray trên head lệch với container (cần 3.10.x / 2.54.0) |
 | `chia up` hỏi mật khẩu hoặc treo ở SSH | Chưa thêm key vào `authorized_keys`, `ssh-agent` chưa có key, hoặc `sshd` chưa bật |
 | `Permission denied` trong file mount (`-v`) | SELinux: thêm `:z`. Podman: dùng `--userns=keep-id` |
