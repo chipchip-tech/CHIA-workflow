@@ -109,11 +109,11 @@ GitHub web. Cả 18 file trong repo khớp `SHA256SUMS`.
 `ac6c73b1…5b2c`. SW khớp `ascon.py` 39/39, RTL khớp 152/152.
 
 **Chưa chạy:**
-- `tests/smoke_local.sh`: lần chạy đầu (container `python:3.10`, Ray 2.54.0) pass các
-  kịch bản A, B, D, C, kể cả `boot_partial`. Kịch bản E hỏng do lỗi của chính script:
-  nó sửa submodule **trước** khi loop chạy, nên thay đổi đó thuộc baseline của
-  `install_rtl` và bị bỏ qua đúng như thiết kế. Đã sửa E để seed một lượt agent sửa
-  submodule (`smoke_seed.py ... violation`), nhưng **chưa chạy lại**.
+**`tests/smoke_local.sh` pass cả 5 kịch bản trên máy người dùng** (23/10/2026, container
+`python:3.10`, `chialoops` 2.0.1, Ray 2.54.0). Lần đầu E hỏng do lỗi của chính script:
+nó sửa submodule **trước** khi loop chạy, nên thay đổi thuộc baseline của `install_rtl`
+và bị bỏ qua đúng như thiết kế. E giờ seed một lượt agent sửa submodule
+(`smoke_seed.py ... violation`).
 - Các lệnh áp patch bằng tay trong `out/final/README.md`.
 
 ## Chạy trên máy local (Bazzite)
@@ -141,16 +141,21 @@ docker run --rm --security-opt label=disable -e PYTHONDONTWRITEBYTECODE=1 \
 Nếu host có `gcc`, `git`, `python3`, chạy thẳng `scripts/selftest.sh`. Bước Verilator tự
 bỏ qua nếu không có `verilator`.
 
-### 2. (Tuỳ chọn) Smoke test orchestration, khi cluster đang **tắt**
+### 2. (Tuỳ chọn) Smoke test orchestration
 
-Script tự bật một Ray head riêng, và cuối cùng chạy `ray stop --force`. Vì vậy phải
-`chia down` trước; nếu Ray đang chạy, script sẽ từ chối chạy. Cần `gcc` và `git` trên host.
+Chạy trong container dùng một lần (đã chạy được, khoảng 5 phút sau khi có image). Ray
+trong container nằm trong network riêng, nên không cần tắt cluster CHIA.
 
 ```bash
-conda activate chia_env
-chia down ~/CHIA-workflow/configs/cluster-local.yaml -y
-PY=python tests/smoke_local.sh        # in "smoke: all scenarios passed" nếu ổn
+docker run --rm --security-opt label=disable --shm-size=2g -e PYTHONDONTWRITEBYTECODE=1 \
+  -v "$PWD":/w -w /w python:3.10 bash -c '
+    pip install -q --default-timeout=300 --retries 10 chialoops==2.0.1 &&
+    tests/smoke_local.sh' 2>&1 | tee ~/ascon-smoke.log   # cuối: "smoke: all scenarios passed"
 ```
+
+Chạy trên host bằng `chia_env` cũng được, nhưng script tự bật Ray head riêng và cuối cùng
+chạy `ray stop --force`. Vì vậy phải `chia down` trước (nếu Ray đang chạy, script từ chối
+chạy), và host cần có `gcc`, `make`, `git`.
 
 Script kiểm 5 kịch bản: (A) M1 pass; (B) chạy lại cùng `--run-id` thì không build lại;
 (D) lỗi build được đưa vào prompt vòng sau; (C) phát lại một lượt agent từ cache và khôi

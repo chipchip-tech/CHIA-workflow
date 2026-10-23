@@ -68,8 +68,8 @@ Chi tiết, lệnh chạy và trạng thái kiểm chứng xem `projects/ascon-s
   file pass `sha256sum -c`. `out/final/` trong repo đủ 18 file, khớp `SHA256SUMS` (7 file
   session dựng từ nội dung dán, 11 file người dùng tải lên qua GitHub web).
 - `selftest.sh` **pass trên máy người dùng** (container `ubuntu:24.04`, cả `boot_partial`).
-- `tests/smoke_local.sh` (container `python:3.10`): A, B, D, C pass. E hỏng vì script
-  sửa submodule trước baseline; đã sửa E (seed lượt agent vi phạm), chưa chạy lại.
+- `tests/smoke_local.sh` **pass cả 5 kịch bản** (container `python:3.10`), sau khi sửa E
+  (lần đầu E sửa submodule trước baseline, nên bị bỏ qua đúng thiết kế).
 - Còn chưa chạy: các lệnh áp patch bằng tay trong `out/final/README.md`.
 - Người dùng yêu cầu: **không chạy gì trên session cloud**, chỉ tạo file và hướng dẫn.
   Muốn chạy test trên host Bazzite thì dùng container dùng một lần
