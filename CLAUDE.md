@@ -60,14 +60,15 @@ Chi tiết, lệnh chạy và trạng thái kiểm chứng xem `projects/ascon-s
   trong 389 s, build 108 s. Đường RoCC: BOOT OK và BOOT FAIL đúng, DIGEST_HW = DIGEST_SW =
   `ascon.py`. CYCLES_ROCC khoảng 7020, CYCLES_SW khoảng 503700, nhanh hơn khoảng 71.7 lần.
 - Đã review mã agent (`AsconRoCC.scala`): đúng đặc tả (chi tiết ở README project).
-- Mốc hiện tại: **M4**. Người dùng duyệt thêm test `boot_partial` (`-DPARTIAL`: 4093 byte,
+- **M4 đạt** (23/10/2026). Người dùng duyệt thêm test `boot_partial` (`-DPARTIAL`: 4093 byte,
   INIT giữa chừng, SQUEEZE 3..0). **Job `ascon-m3` đạt** (phát lại agent `m2` từ cache,
   build lại 82 s): cả 3 test pass, `boot_partial` CYCLES_ROCC 7027. `sw/image.h` và
   `expected.json` trong repo đã thêm digest `ac6c73b1…` (dựng tay theo output
   `gen_image.py` của người dùng, sha256 đã khớp). `make_final.sh out/m3` đã chạy, 18/18
-  file pass `sha256sum -c`. Repo có 7 file `out/final/` khớp checksum (dựng từ nội dung
-  dán). Còn thiếu 11 file log/json/tar: người dùng tải lên qua GitHub web, hoặc dùng
-  `gh auth login` rồi clone/push. Khi có đủ thì M4 xong.
+  file pass `sha256sum -c`. `out/final/` trong repo đủ 18 file, khớp `SHA256SUMS` (7 file
+  session dựng từ nội dung dán, 11 file người dùng tải lên qua GitHub web).
+- Còn chưa chạy: `selftest.sh` phần `boot_partial`, `tests/smoke_local.sh`, các lệnh áp
+  patch bằng tay trong `out/final/README.md`.
 - Người dùng yêu cầu: **không chạy gì trên session cloud**, chỉ tạo file và hướng dẫn.
   `selftest.sh` đã chạy trong sandbox (trước khi có yêu cầu này) và pass. Smoke test
   chưa chạy.
@@ -116,7 +117,7 @@ Chi tiết, lệnh chạy và trạng thái kiểm chứng xem `projects/ascon-s
 
 ## Việc tiếp theo (gợi ý)
 
-1. Ascon secure boot: nhận `out/final/` từ `make_final.sh out/m3`, kiểm `SHA256SUMS`, đóng M4.
+1. Ascon secure boot đã xong M1–M4. Tuỳ chọn: chạy các phần chưa chạy ở trên.
 2. Chạy thử `examples/rtl_agent_loop.py` trên cluster 1 máy và sửa theo log.
 3. Xác nhận `PYTHONNOUSERSITE=1` cho `chia_env`.
 4. Khi có máy thứ hai: làm theo `docs/usage-remote.md`, kiểm chứng `cluster-lan.yaml`.

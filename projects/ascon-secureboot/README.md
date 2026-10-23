@@ -7,8 +7,8 @@ v4: bus 64 bit, UROL=1) vào Rocket trong Chipyard. Một bootloader bare-metal 
 `BOOT FAIL`.
 
 Trạng thái: **M1, M2, M3 đạt** trên máy người dùng (23/10/2026; M2 và M3 cùng đạt ở vòng 0
-của job `ascon-m2a`). Đang làm **M4**: thêm test `boot_partial`, rồi dựng `out/final/`
-(mục 5). Ba test RoCC đã đạt; còn dựng `out/final/`. Các mốc ở cuối file.
+của job `ascon-m2a`). **M4 đạt**: 3 test RoCC (thêm `boot_partial`) và `out/final/` đầy đủ (mục 5). Các mốc ở
+cuối file.
 
 ## File
 
@@ -104,8 +104,8 @@ FSM, nên không có vòng tổ hợp. SQUEEZE đọc bộ đệm 4 word theo ch
 **`make_final.sh out/m3` đã chạy** trên máy người dùng, và `sha256sum -c` pass cả 18 file.
 `sw/image.h` và `sw/expected.json` trong repo khớp byte với bản người dùng sinh ra. Người
 dùng không push được (tài khoản GitHub đăng nhập bằng Google, thư mục không phải git
-clone), nên session dựng lại 7 file của `out/final/` từ nội dung dán. Cả 7 file khớp
-`SHA256SUMS`.
+clone). Session dựng lại 7 file từ nội dung dán, người dùng tải 11 file còn lại lên qua
+GitHub web. Cả 18 file trong repo khớp `SHA256SUMS`.
 - `tests/smoke_local.sh`.
 - Các lệnh áp patch bằng tay trong `out/final/README.md`.
 
@@ -322,4 +322,4 @@ dựng lại được `image.h`, vì định dạng file sinh ra là cố địn
 - **M3** (đạt cùng job): bản RoCC: 2 test đạt, `DIGEST_HW == DIGEST_SW ==` `ascon.py`,
   CYCLES_ROCC khoảng 7020 so với CYCLES_SW khoảng 503700.
 - **M4**: test `boot_partial` (thêm theo yêu cầu), `out/final/` (patch cuối, mọi file,
-  `results.csv`, README áp patch và chạy lại). ← đang ở đây
+  `results.csv`, README áp patch và chạy lại). **Đạt 23/10/2026.**
