@@ -1,0 +1,57 @@
+{
+  "replayed": true,
+  "build_ok": true,
+  "rows": [
+    {
+      "test": "boot_good",
+      "boot_result": "OK",
+      "digest_match": 1,
+      "cycles_sw": "503710",
+      "cycles_rocc": "7021",
+      "passed": 1,
+      "sim_rc": 0,
+      "digest_sw": "13da31e2ee4daccc2cee29390afbe31a9bd191dfbae06bf165f18a82df681534",
+      "digest_hw": "13da31e2ee4daccc2cee29390afbe31a9bd191dfbae06bf165f18a82df681534",
+      "digest_expected": "13da31e2ee4daccc2cee29390afbe31a9bd191dfbae06bf165f18a82df681534",
+      "iter": 0,
+      "build_ok": 1,
+      "config": "AsconRocketConfig",
+      "run_id": "m2"
+    },
+    {
+      "test": "boot_tamper",
+      "boot_result": "FAIL",
+      "digest_match": 1,
+      "cycles_sw": "503709",
+      "cycles_rocc": "7018",
+      "passed": 1,
+      "sim_rc": 0,
+      "digest_sw": "b28ba17ceca8eeee73d61c79982cf8e00d187b54487b1a1f2509806b9feae8e3",
+      "digest_hw": "b28ba17ceca8eeee73d61c79982cf8e00d187b54487b1a1f2509806b9feae8e3",
+      "digest_expected": "b28ba17ceca8eeee73d61c79982cf8e00d187b54487b1a1f2509806b9feae8e3",
+      "iter": 0,
+      "build_ok": 1,
+      "config": "AsconRocketConfig",
+      "run_id": "m2"
+    },
+    {
+      "test": "boot_partial",
+      "boot_result": "OK",
+      "digest_match": 1,
+      "cycles_sw": "497135",
+      "cycles_rocc": "7027",
+      "passed": 1,
+      "sim_rc": 0,
+      "digest_sw": "ac6c73b1567c2250db69e0c2123b6ef7e962f0db0dd76b93416fbf4169b65b2c",
+      "digest_hw": "ac6c73b1567c2250db69e0c2123b6ef7e962f0db0dd76b93416fbf4169b65b2c",
+      "digest_expected": "ac6c73b1567c2250db69e0c2123b6ef7e962f0db0dd76b93416fbf4169b65b2c",
+      "iter": 0,
+      "build_ok": 1,
+      "config": "AsconRocketConfig",
+      "run_id": "m2"
+    }
+  ],
+  "violations": [],
+  "build_seconds": 82,
+  "seconds": 593
+}

@@ -1,0 +1,3 @@
+generators/chipyard/src/main/resources/vsrc/AsconCoreV4.sv
+generators/chipyard/src/main/scala/config/AsconConfigs.scala
+generators/chipyard/src/main/scala/example/AsconRoCC.scala

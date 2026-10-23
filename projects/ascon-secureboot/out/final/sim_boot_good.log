@@ -1,0 +1,8 @@
+TEST=boot_good MODE=ROCC
+DIGEST_SW=13da31e2ee4daccc2cee29390afbe31a9bd191dfbae06bf165f18a82df681534
+DIGEST_HW=13da31e2ee4daccc2cee29390afbe31a9bd191dfbae06bf165f18a82df681534
+CYCLES_SW=503710
+CYCLES_ROCC=7021
+BOOT OK
+[UART] UART0 is here (stdin/stdout).
+- /home/ray/chipyard/sims/verilator/generated-src/chipyard.harness.TestHarness.AsconRocketConfig/gen-collateral/TestDriver.v:179: Verilog $finish

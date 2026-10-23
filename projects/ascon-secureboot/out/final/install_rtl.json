@@ -1,0 +1,11 @@
+{
+  "path": "/home/ray/chipyard/generators/chipyard/src/main/resources/vsrc/AsconCoreV4.sv",
+  "sha_ok": true,
+  "verilator_version": "Verilator 5.022 2024-02-24 rev conda-forge build 1",
+  "lint_rc": 0,
+  "lint_ok": true,
+  "lint_log": "",
+  "git_head": "40c7ddb60834157b148ff7cab468faa89018fe16",
+  "git_branch": "chia_artifact",
+  "git_status": "M generators/chipyard/src/main/scala/config/fragments/RoCCFragments.scala\n M scripts/build-setup.sh\n?? generators/chipyard/src/main/resources/vsrc/AsconCoreV4.sv\n?? generators/chipyard/src/main/scala/config/AsconConfigs.scala\n?? generators/chipyard/src/main/scala/example/AsconRoCC.scala\nsims/firesim:  M platforms/f2/aws-fpga-firesim-f2"
+}

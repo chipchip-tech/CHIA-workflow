@@ -1,0 +1,8 @@
+TEST=boot_tamper MODE=ROCC
+DIGEST_SW=b28ba17ceca8eeee73d61c79982cf8e00d187b54487b1a1f2509806b9feae8e3
+DIGEST_HW=b28ba17ceca8eeee73d61c79982cf8e00d187b54487b1a1f2509806b9feae8e3
+CYCLES_SW=503709
+CYCLES_ROCC=7018
+BOOT FAIL
+[UART] UART0 is here (stdin/stdout).
+- /home/ray/chipyard/sims/verilator/generated-src/chipyard.harness.TestHarness.AsconRocketConfig/gen-collateral/TestDriver.v:179: Verilog $finish

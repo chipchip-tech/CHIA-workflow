@@ -1,0 +1,20 @@
+{
+  "project_dir": "/home/dingus/CHIA-workflow/projects/ascon-secureboot",
+  "out_dir": "/home/dingus/CHIA-workflow/projects/ascon-secureboot/out/m3",
+  "run_id": "m2",
+  "config": "AsconRocketConfig",
+  "iters": 8,
+  "stop_after_build": false,
+  "sw_only": false,
+  "fake_llm": false,
+  "no_replay": false,
+  "no_build_replay": true,
+  "model": "opencode/big-pickle",
+  "llm_timeout": 1800,
+  "make_jobs": 32,
+  "build_timeout": 3600,
+  "timeout_cycles": 20000000,
+  "sim_timeout": 3600,
+  "cache_dir": "/home/dingus/chia_cache/ascon-secureboot",
+  "cache_gb": 20
+}

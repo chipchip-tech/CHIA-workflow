@@ -1,0 +1,48 @@
+diff --git a/generators/chipyard/src/main/scala/config/fragments/RoCCFragments.scala b/generators/chipyard/src/main/scala/config/fragments/RoCCFragments.scala
+index 01064fcd..ef485d67 100644
+--- a/generators/chipyard/src/main/scala/config/fragments/RoCCFragments.scala
++++ b/generators/chipyard/src/main/scala/config/fragments/RoCCFragments.scala
+@@ -8,6 +8,7 @@ import freechips.rocketchip.diplomacy._
+ 
+ 
+ import chipyard.{TestSuitesKey, TestSuiteHelper}
++import chipyard.example.AsconRoCC
+ 
+ /**
+  * Map from a tileId to a particular RoCC accelerator
+@@ -45,3 +46,10 @@ class WithCharacterCountRoCC(op: OpcodeSet = OpcodeSet.custom2) extends Config((
+     counter
+   })
+ })
++
++class WithAsconRoCC(op: OpcodeSet = OpcodeSet.custom0) extends Config((site, here, up) => {
++  case BuildRoCC => up(BuildRoCC) ++ Seq((p: Parameters) => {
++    val ascon = LazyModule(new AsconRoCC(op)(p))
++    ascon
++  })
++})
+diff --git a/scripts/build-setup.sh b/scripts/build-setup.sh
+index 709fc4db..f331cb35 100755
+--- a/scripts/build-setup.sh
++++ b/scripts/build-setup.sh
+@@ -175,7 +175,7 @@ conda environment or \`source env.sh\` and skip this step with \`-s 1\`." >&2
+     fi
+     
+     rm -rf $CONDA_LOCK_ENV_PATH &&
+-    conda create -y -p $CONDA_LOCK_ENV_PATH -c conda-forge $(grep "conda-lock" $CONDA_REQS/chipyard-base.yaml | sed 's/^ \+-//') &&
++    conda create -y -p $CONDA_LOCK_ENV_PATH -c conda-forge $(grep "conda-lock" $CONDA_REQS/chipyard-base.yaml | sed 's/^ \+-//') "python<3.13" &&
+     source $(conda info --base)/etc/profile.d/conda.sh &&
+     conda activate $CONDA_LOCK_ENV_PATH
+     exit_if_last_command_failed
+@@ -186,7 +186,10 @@ conda environment or \`source env.sh\` and skip this step with \`-s 1\`." >&2
+         exit_if_last_command_failed
+     fi
+     SYS_GLIBC=$(ldd --version | awk '/ldd/{print $NF}')
+-    DEFAULT_GLIBC=$(grep -i "sysroot_linux-64=" conda-reqs/chipyard-base.yaml | awk -F= '{print $2}')
++    if [ "$SYS_GLIBC" = "2.35" ]; then
++        SYS_GLIBC=2.34
++    fi
++    DEFAULT_GLIBC=$(grep -i "sysroot_linux-64=" conda-reqs/chipyard-base.yaml | awk -F= '{print $2}' | awk '{print $1}')
+     if [ "$SYS_GLIBC" != "$DEFAULT_GLIBC" ]; then
+         # replace the glibc version
+         sed -i.bak "s/^\([[:space:]]*-\s*sysroot_linux-64=\).*/\1$SYS_GLIBC/" conda-reqs/chipyard-base.yaml
