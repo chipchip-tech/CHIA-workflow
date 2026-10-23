@@ -56,14 +56,19 @@ Chi tiết, lệnh chạy và trạng thái kiểm chứng xem `projects/ascon-s
 - **M2 và M3 đạt** cùng lúc ở vòng 0 của job `ascon-m2a` (`--run-id m2`). Agent thật xong
   trong 389 s, build 108 s. Đường RoCC: BOOT OK và BOOT FAIL đúng, DIGEST_HW = DIGEST_SW =
   `ascon.py`. CYCLES_ROCC khoảng 7020, CYCLES_SW khoảng 503700, nhanh hơn khoảng 71.7 lần.
-- Mốc hiện tại: **M4**. Đang chờ người dùng gửi nội dung `out/m2/iter0` (patch, file Scala,
-  log sim) để review mã của agent và dựng `out/final/`.
+- Đã review mã agent (`AsconRoCC.scala`): đúng đặc tả (chi tiết ở README project).
+- Mốc hiện tại: **M4**. Người dùng duyệt thêm test `boot_partial` (`-DPARTIAL`: 4093 byte,
+  INIT giữa chừng, SQUEEZE 3..0). Đã viết `boot.c`, `gen_image.py`, loop
+  (`--no-build-replay`), `scripts/make_final.sh`, `out/final/README.md`, nhưng **chưa
+  chạy**. `sw/image.h` và `sw/expected.json` trong repo **chưa có digest `boot_partial`**:
+  người dùng chạy `gen_image.py`, rồi job `ascon-m3` (`--run-id m2`, phát lại agent), rồi
+  `make_final.sh out/m3`. Chờ log đó, sau đó điền dòng `boot_partial` vào
+  `out/final/README.md`.
 - Người dùng yêu cầu: **không chạy gì trên session cloud**, chỉ tạo file và hướng dẫn.
   `selftest.sh` đã chạy trong sandbox (trước khi có yêu cầu này) và pass. Smoke test
   chưa chạy.
 - Giao diện RoCC (custom0, `funct3={xd,xs1,xs2}`): INIT f7=0/000, ABSORB f7=1/011
   (`rs2=nbytes|last<<8`), SQUEEZE f7=2/110. Wrapper `AsconCoreV4` chỉ ép kiểu cổng enum.
-- Mốc tiếp theo: M4 (`out/final/`).
 
 ## Các lỗi đã gặp trên Bazzite và cách sửa
 
@@ -107,7 +112,7 @@ Chi tiết, lệnh chạy và trạng thái kiểm chứng xem `projects/ascon-s
 
 ## Việc tiếp theo (gợi ý)
 
-1. Ascon secure boot: review mã agent trong `out/m2/iter0`, rồi dựng M4 (`out/final/`).
+1. Ascon secure boot: đọc log job `ascon-m3`, cập nhật `out/final/` và `sw/image.h`, đóng M4.
 2. Chạy thử `examples/rtl_agent_loop.py` trên cluster 1 máy và sửa theo log.
 3. Xác nhận `PYTHONNOUSERSITE=1` cho `chia_env`.
 4. Khi có máy thứ hai: làm theo `docs/usage-remote.md`, kiểm chứng `cluster-lan.yaml`.

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Self-test outside CHIA (no cluster needed):
 #   1. sw/boot.c built natively with -DSW_ONLY: boot_good -> BOOT OK,
-#      boot_tamper -> BOOT FAIL, digests equal sw/expected.json
+#      boot_tamper -> BOOT FAIL, boot_partial -> BOOT OK, digests equal
+#      sw/expected.json
 #   2. ascon_hash256_sw() vs ascon.py for lengths 0..33, 64, 1023, 1024, 4096
 #   3. rtl/AsconCoreV4.sv in Verilator, driven per the RoCC interface spec,
 #      vs ascon.py (skipped when verilator is not installed)
@@ -23,12 +24,13 @@ fi
 
 echo "== 1. boot.c (native, -DSW_ONLY)"
 want() { python3 -c "import json; print(json.load(open('$ROOT/sw/expected.json'))['digest']['$1'])"; }
-for t in boot_good boot_tamper; do
+for t in boot_good boot_tamper boot_partial; do
   flags=(-DSW_ONLY); [[ $t == boot_tamper ]] && flags+=(-DTAMPER)
+  [[ $t == boot_partial ]] && flags+=(-DPARTIAL)
   $CC -O2 -Wall -Wextra -Werror "${flags[@]}" -I"$ROOT/sw" "$ROOT/sw/boot.c" -o "$WORK/$t"
   out=$("$WORK/$t")
   echo "$out" | sed 's/^/   /'
-  expect=$([[ $t == boot_good ]] && echo "BOOT OK" || echo "BOOT FAIL")
+  expect=$([[ $t == boot_tamper ]] && echo "BOOT FAIL" || echo "BOOT OK")
   grep -qx "$expect" <<<"$out" || { echo "FAIL: $t did not print $expect"; exit 1; }
   grep -qx "DIGEST_SW=$(want $t)" <<<"$out" || { echo "FAIL: $t digest != expected.json"; exit 1; }
 done

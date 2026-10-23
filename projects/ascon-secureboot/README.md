@@ -7,7 +7,8 @@ v4: bus 64 bit, UROL=1) vào Rocket trong Chipyard. Một bootloader bare-metal 
 `BOOT FAIL`.
 
 Trạng thái: **M1, M2, M3 đạt** trên máy người dùng (23/10/2026; M2 và M3 cùng đạt ở vòng 0
-của job `ascon-m2a`). Đang làm **M4**. Các mốc ở cuối file.
+của job `ascon-m2a`). Đang làm **M4**: thêm test `boot_partial`, rồi dựng `out/final/`
+(mục 5). Các mốc ở cuối file.
 
 ## File
 
@@ -15,13 +16,15 @@ của job `ascon-m2a`). Đang làm **M4**. Các mốc ở cuối file.
 |---|---|---|
 | `rtl/AsconCoreV4.sv` | 5 file RTL upstream gộp thành một (`define V4`, bỏ `include`) và wrapper `AsconCoreV4` có cổng `logic` thường | sinh bằng `scripts/prepare_rtl.py` |
 | `sw/boot.c` | Ascon-Hash256 bằng C (mốc SW), đường RoCC qua `.insn`, đo `rdcycle`, verdict | session |
-| `sw/image.h`, `sw/expected.json` | Image 4 KiB (seed `0x5EC0B007`) và digest tính bằng `ascon.py` | sinh bằng `scripts/gen_image.py` |
-| `loop/ascon_loop.py` | Driver CHIA: cài RTL, compile, agent, thu cây, build, 2 test, `results.csv` | session |
+| `sw/image.h`, `sw/expected.json` | Image 4 KiB (seed `0x5EC0B007`) và digest tính bằng `ascon.py` (cả digest của 4093 byte đầu cho `boot_partial`) | sinh bằng `scripts/gen_image.py` |
+| `loop/ascon_loop.py` | Driver CHIA: cài RTL, compile, agent, thu cây, build, 3 test, `results.csv` | session |
 | `loop/agent_prompt.md` | Prompt cho agent: đặc tả RoCC, cổng của BlackBox, quy tắc | session |
 | `loop/exp.yaml` | Cấu hình cache và bypass (theo `_chia_tag`) | session |
 | `scripts/selftest.sh`, `tb/*` | Tự kiểm ngoài CHIA: SW so với `ascon.py`, RTL trong Verilator | session |
 | `tests/smoke_local.sh`, `tests/smoke_seed.py` | Kiểm orchestration bằng Ray thật với Chipyard giả | session |
+| `scripts/make_final.sh` | Dựng `out/final/` từ một lần chạy (vòng đã pass), kèm `SHA256SUMS` | session |
 | `out/` | Kết quả mỗi lần chạy (git bỏ qua, trừ `out/final/`) | loop |
+| `out/final/README.md` | Kết quả cuối, cách áp patch và chạy lại | session |
 
 Sinh lại file (không bắt buộc, vì file sinh ra đã được commit):
 
@@ -81,10 +84,17 @@ riscv64-unknown-elf-gcc 13.2 với picolibc):
   **71.7 lần**. CYCLES_ROCC gồm cả 512 lệnh ABSORB và 4 SQUEEZE. Lõi riêng mất 6722 chu
   kỳ, nên phần chi phí RoCC chỉ khoảng 300 chu kỳ.
 
-**Chưa kiểm chứng:**
-- Chưa đọc mã Scala agent viết (đang chờ người dùng gửi file).
-- RoCC mới chỉ chạy đúng chuỗi lệnh của bootloader: INIT, 512 ABSORB đủ 8 byte, rồi
-  SQUEEZE 0..3. Chưa thử word lẻ byte, SQUEEZE sai thứ tự, hay INIT giữa chừng.
+**Review mã của agent** (đọc mã, đối chiếu `rtl/AsconCoreV4.sv`, không mô phỏng thêm):
+đúng đặc tả. INIT gồm 1 chu kỳ `rst` rồi 1 chu kỳ `mode=3` với `bdi_eoi=0`. ABSORB chỉ
+được nhận khi `bdi_ready=1`; ở chế độ hash, `bdi_ready` của lõi chỉ phụ thuộc trạng thái
+FSM, nên không có vòng tổ hợp. SQUEEZE đọc bộ đệm 4 word theo chỉ số. Giới hạn ghi ở
+`out/final/README.md`.
+
+**Chưa chạy** (viết sau M3, cần người dùng chạy mục 5):
+- Test `boot_partial` (`-DPARTIAL`): word cuối 5 byte, INIT giữa chừng, SQUEEZE 3..0.
+- Phần `-DPARTIAL` của `boot.c`, `gen_image.py` có `partial_digest`, `--no-build-replay`,
+  `scripts/make_final.sh`. **`sw/image.h` và `sw/expected.json` trong repo chưa có
+  digest `boot_partial`**: phải chạy `gen_image.py` trên máy người dùng (mục 5).
 - `tests/smoke_local.sh`.
 
 ## Chạy trên máy local (Bazzite)
@@ -201,6 +211,80 @@ tail -60 $L/build.log; tail -30 $L/sim_boot_*.log
 
 Kèm `~/ascon-m2.log`. Nếu vòng cuối vẫn build lỗi, gửi thêm `cat $L/feedback.md`.
 
+### 5. Mốc M4: test `boot_partial` rồi dựng `out/final/`
+
+Lấy code mới và kiểm tra đã có bản mới:
+
+```bash
+cd ~/CHIA-workflow && git pull origin temp
+cd ~/CHIA-workflow/projects/ascon-secureboot
+grep -c "boot_partial" loop/ascon_loop.py        # phải ra 2
+```
+
+Sinh lại `sw/image.h` và `sw/expected.json` để có digest của 4093 byte đầu. Script clone
+ascon-verilog@e1069549 vào thư mục tạm, nên cần mạng.
+
+```bash
+python3 scripts/gen_image.py
+grep -c partial_digest sw/image.h                # phải ra 1
+```
+
+Hai digest `boot_good` (`13da31e2…1534`) và `boot_tamper` (`b28ba17c…e8e3`) phải giữ
+nguyên. Nếu host có `gcc`, chạy thêm `scripts/selftest.sh` để kiểm phần SW của
+`boot_partial` (không cần cluster).
+
+Chạy loop với `--run-id m2`. Lượt agent và cây của nó được phát lại từ cache, nên không
+gọi LLM. `--no-build-replay` buộc build lại (khoảng 2 phút), vì simulator cũ mất nếu
+container đã bị tạo lại. Kết quả ghi vào `out/m3`.
+
+```bash
+conda activate chia_env
+export THIS_MACHINE=$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')
+chia status || chia up ~/CHIA-workflow/configs/cluster-local.yaml -y
+chia job submit --no-wait --submission-id ascon-m3 --working-dir loop -- \
+  python ascon_loop.py --project-dir $PWD --out-dir $PWD/out/m3 --run-id m2 \
+  --config AsconRocketConfig --iters 8 --no-build-replay
+chia job logs -f ascon-m3
+```
+
+Kỳ vọng:
+1. `agent (replayed, ...)`, rồi các dòng `git checkout`, `git apply`, `restored 3 untracked files`.
+2. `build AsconRocketConfig: success=True`.
+3. Ba dòng `boot_good ... passed=1`, `boot_tamper ... passed=1`, `boot_partial ... passed=1`.
+4. `SUCCESS after 1 iteration(s)`.
+
+Nếu `boot_partial` hỏng, loop đưa lỗi cho agent thật ở vòng 1. Đó là hành vi đúng của
+loop, có thể để chạy tiếp.
+
+Dựng `out/final/` từ vòng đã pass, rồi kiểm checksum:
+
+```bash
+scripts/make_final.sh out/m3
+(cd out/final && sha256sum -c SHA256SUMS)
+```
+
+Đưa kết quả vào repo, nếu `~/CHIA-workflow` là bản git clone có quyền push:
+
+```bash
+cd ~/CHIA-workflow && git pull origin temp
+git add projects/ascon-secureboot/sw/image.h projects/ascon-secureboot/sw/expected.json \
+        projects/ascon-secureboot/out/final
+git commit -m "ascon-secureboot: out/final from run m3, image.h with partial digest"
+git push origin temp
+```
+
+Gửi lại cho session (thay `ascon-m3` nếu đã dùng `--submission-id` khác):
+
+```bash
+chia job logs ascon-m3 | grep -v ToolServerActor > ~/ascon-m3.log; tail -40 ~/ascon-m3.log
+cd ~/CHIA-workflow/projects/ascon-secureboot
+cat sw/expected.json out/final/results.csv out/final/SOURCE.txt
+cat out/final/sim_boot_partial.log
+```
+
+Nếu không push được, gửi thêm `cat out/final/SHA256SUMS`. Từ `expected.json` session
+dựng lại được `image.h`, vì định dạng file sinh ra là cố định.
+
 ### Các tham số hay dùng
 
 | Tham số | Mặc định | Ghi chú |
@@ -209,6 +293,7 @@ Kèm `~/ascon-m2.log`. Nếu vòng cuối vẫn build lỗi, gửi thêm `cat $L
 | `--iters` | 8 | Dừng sớm khi cả 2 test đạt |
 | `--stop-after-build` | tắt | M2: dừng ở vòng đầu tiên build pass |
 | `--sw-only` | tắt | Biên dịch test với `-DSW_ONLY` |
+| `--no-build-replay` | tắt | Luôn build lại, kể cả khi phát lại lượt agent từ cache |
 | `--fake-llm` | tắt | Agent trả câu mẫu (M1) |
 | `--run-id` | bắt buộc | Không gian tên của cache. Dùng lại cùng id để tiếp tục hoặc phát lại; đổi id để chạy mới. `--no-replay` bỏ qua cache |
 | `--make-jobs` | 32 | Giảm xuống 8 nếu bị OOM |
@@ -224,4 +309,5 @@ Kèm `~/ascon-m2.log`. Nếu vòng cuối vẫn build lỗi, gửi thêm `cat $L
   vòng 0.
 - **M3** (đạt cùng job): bản RoCC: 2 test đạt, `DIGEST_HW == DIGEST_SW ==` `ascon.py`,
   CYCLES_ROCC khoảng 7020 so với CYCLES_SW khoảng 503700.
-- **M4**: `out/final/` (patch cuối, mọi file, `results.csv`, README áp patch và chạy lại). ← đang ở đây
+- **M4**: test `boot_partial` (thêm theo yêu cầu), `out/final/` (patch cuối, mọi file,
+  `results.csv`, README áp patch và chạy lại). ← đang ở đây

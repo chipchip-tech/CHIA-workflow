@@ -11,9 +11,12 @@
 //   -DSW_ONLY  no RoCC instruction at all (runs on the stock RocketConfig);
 //              the verdict then comes from the SW digest.
 //   -DTAMPER   flip one bit of the image before hashing (boot_tamper test).
+//   -DPARTIAL  boot_partial test: hash only the first PARTIAL_SIZE bytes (the
+//              last RoCC word is partial) against partial_digest, abandon a
+//              hash half-way with a second INIT first, and SQUEEZE 3, 2, 1, 0.
 //
 // Output lines parsed by the loop:
-//   TEST=<boot_good|boot_tamper> MODE=<SW_ONLY|ROCC>
+//   TEST=<boot_good|boot_tamper|boot_partial> MODE=<SW_ONLY|ROCC>
 //   DIGEST_SW=<64 hex>   DIGEST_HW=<64 hex|NA>
 //   CYCLES_SW=<n>        CYCLES_ROCC=<n|NA>
 //   BOOT OK | BOOT FAIL
@@ -29,10 +32,23 @@
 
 #include "image.h"
 
-#ifdef TAMPER
+#if defined(TAMPER)
 #define TEST_NAME "boot_tamper"
+#elif defined(PARTIAL)
+#define TEST_NAME "boot_partial"
 #else
 #define TEST_NAME "boot_good"
+#endif
+
+#ifdef PARTIAL
+#ifndef PARTIAL_SIZE
+#error "image.h has no PARTIAL_SIZE: regenerate it with scripts/gen_image.py"
+#endif
+#define HASH_LEN PARTIAL_SIZE
+#define STORED_DIGEST partial_digest
+#else
+#define HASH_LEN IMAGE_SIZE
+#define STORED_DIGEST image_digest
 #endif
 
 // ---------------------------------------------------------------------------
@@ -153,7 +169,8 @@ static inline uint64_t rocc_squeeze(uint64_t idx) {
 }
 
 // Requires len >= 1 (the interface cannot express an empty message).
-static void ascon_hash256_rocc(const uint8_t *msg, size_t len, uint8_t out[32]) {
+// reverse != 0 reads the digest words in the order 3, 2, 1, 0.
+static void ascon_hash256_rocc(const uint8_t *msg, size_t len, uint8_t out[32], int reverse) {
   rocc_init();
   while (len > 8) {
     uint64_t w;
@@ -163,7 +180,10 @@ static void ascon_hash256_rocc(const uint8_t *msg, size_t len, uint8_t out[32]) 
     len -= 8;
   }
   rocc_absorb(load64_le(msg, len), len | (1u << 8));
-  for (uint64_t k = 0; k < 4; k++) store64_le(out + 8 * k, rocc_squeeze(k));
+  for (uint64_t j = 0; j < 4; j++) {
+    uint64_t k = reverse ? 3 - j : j;
+    store64_le(out + 8 * k, rocc_squeeze(k));
+  }
 }
 #endif
 
@@ -193,7 +213,7 @@ int main(void) {
 #endif
 
   uint64_t t0 = rdcycle64();
-  ascon_hash256_sw(image, IMAGE_SIZE, d_sw);
+  ascon_hash256_sw(image, HASH_LEN, d_sw);
   uint64_t t1 = rdcycle64();
   print_digest("DIGEST_SW", d_sw);
 
@@ -204,8 +224,18 @@ int main(void) {
   const uint8_t *verdict = d_sw;
 #else
   uint8_t d_hw[32];
+#ifdef PARTIAL
+  // Start a hash and abandon it mid-message: the INIT at the start of
+  // ascon_hash256_rocc must restart the core from scratch.
+  rocc_init();
+  rocc_absorb(0x0123456789abcdefULL, 8);
+  rocc_absorb(0xfedcba9876543210ULL, 8);
+  const int reverse = 1;
+#else
+  const int reverse = 0;
+#endif
   uint64_t t2 = rdcycle64();
-  ascon_hash256_rocc(image, IMAGE_SIZE, d_hw);
+  ascon_hash256_rocc(image, HASH_LEN, d_hw, reverse);
   uint64_t t3 = rdcycle64();
   print_digest("DIGEST_HW", d_hw);
   printf("CYCLES_SW=%lu\n", (unsigned long)(t1 - t0));
@@ -217,6 +247,6 @@ int main(void) {
   const uint8_t *verdict = d_hw;
 #endif
 
-  printf(digest_eq(verdict, image_digest) ? "BOOT OK\n" : "BOOT FAIL\n");
+  printf(digest_eq(verdict, STORED_DIGEST) ? "BOOT OK\n" : "BOOT FAIL\n");
   return rc;
 }

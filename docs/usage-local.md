@@ -383,6 +383,11 @@ mã nguồn CHIA 2.0.1 nhưng **chưa được chạy thử**. Nếu gặp lỗi
 Để viết loop của riêng bạn, thay `TASK`, `EXPECT`, `TESTS` và config Chipyard
 (`"RocketConfig"`).
 
+**Ví dụ đã chạy thật:** `projects/ascon-secureboot/` là một loop đầy đủ trên máy này.
+Agent thêm RoCC Ascon-Hash256 vào Rocket, loop build và chạy test bootloader, có cache và
+phát lại theo `_chia_tag`. Agent đạt ngay vòng đầu, nhanh hơn phần mềm khoảng 72 lần.
+Kết quả cuối ở `projects/ascon-secureboot/out/final/`.
+
 Một số mẫu khác dễ làm từ đây:
 - **Agent làm orchestrator:** đưa cho agent một `SimTool` (mục 6), để agent tự quyết
   chạy test nào.

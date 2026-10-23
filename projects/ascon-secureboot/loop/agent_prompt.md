@@ -94,7 +94,10 @@ Implementation requirements:
 * The core's rst = module reset OR the one-cycle INIT reset.
 
 The boot loader does, per hash: INIT; ABSORB x 512 (the last one with
-nbytes = 8, last = 1); SQUEEZE 0, 1, 2, 3. In C:
+nbytes = 8, last = 1); SQUEEZE 0, 1, 2, 3. A second test hashes 4093 bytes
+(511 full words, then a last word with nbytes = 5), but first starts a hash
+and abandons it after 2 ABSORBs by issuing INIT again, and reads the digest
+with SQUEEZE 3, 2, 1, 0. In C:
 
     asm volatile(".insn r 0x0B, 0, 0, x0, x0, x0");                 // INIT
     asm volatile(".insn r 0x0B, 3, 1, x0, %0, %1" :: "r"(w), "r"(n | (last << 8)));

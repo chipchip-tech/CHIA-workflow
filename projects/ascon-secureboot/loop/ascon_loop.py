@@ -7,12 +7,13 @@ Per iteration N (tags "<run_id>/iterN/..."):
   2. collect: git diff + untracked files of generators/chipyard, packed into
               bytes and written to <out-dir>/iterN/ on the host.
   3. build  : ChiselBuildNode(<config>). A failure goes into the next prompt.
-  4. tests  : boot_good and boot_tamper, one after the other on the single
-              verilator_run slot. Their verdict/log goes into the next prompt.
-Stops as soon as both tests pass.
+  4. tests  : boot_good, boot_tamper and boot_partial, one after the other on
+              the single verilator_run slot. Their verdict/log goes into the
+              next prompt.
+Stops as soon as all tests pass.
 
 Before the loop: AsconCoreV4.sv is written into the chipyard container and
-linted, and the two test ELFs are compiled (htif_nano.specs).
+linted, and the test ELFs are compiled (htif_nano.specs).
 
 Cache/replay (loop/exp.yaml): agent turns, tree snapshots, builds and
 compiles are cached by _chia_tag on the head. Re-running with the same
@@ -63,7 +64,8 @@ AGENT_DIR = "generators/chipyard"                       # the only tree the agen
 VSRC_REL = f"{AGENT_DIR}/src/main/resources/vsrc/AsconCoreV4.sv"
 CFLAGS = ["-O2", "-mcmodel=medany", "-static", "-specs=htif_nano.specs"]
 # test name -> (expected verdict, extra cflags)
-TESTS = {"boot_good": ("OK", []), "boot_tamper": ("FAIL", ["-DTAMPER"])}
+TESTS = {"boot_good": ("OK", []), "boot_tamper": ("FAIL", ["-DTAMPER"]),
+         "boot_partial": ("OK", ["-DPARTIAL"])}
 MAX_UNTRACKED_BYTES = 2 * 1024 * 1024                   # skip larger untracked files
 CSV_FIELDS = ["iter", "build_ok", "test", "boot_result", "digest_match",
               "cycles_sw", "cycles_rocc", "passed", "sim_rc", "config", "run_id"]
@@ -213,7 +215,7 @@ def restore_tree(snap: dict) -> str:
 # Bypass providers / conditions (conditions run in the driver)
 # ---------------------------------------------------------------------------
 
-REPLAY = {"enabled": True, "fake_llm": False, "iters": set()}
+REPLAY = {"enabled": True, "build": True, "fake_llm": False, "iters": set()}
 
 
 def _cache_has(tag) -> bool:
@@ -255,7 +257,7 @@ def build_cond(tag, data_path, *args, **kwargs):
     # A cached build is valid only if the tree it was built from is the same:
     # the agent turn of this iteration was replayed, or no agent edits at all.
     same_tree = REPLAY["fake_llm"] or _iter_of(tag) in REPLAY["iters"]
-    return REPLAY["enabled"] and same_tree and _cache_has(tag)
+    return REPLAY["enabled"] and REPLAY["build"] and same_tree and _cache_has(tag)
 
 
 # ---------------------------------------------------------------------------
@@ -373,6 +375,9 @@ def main():
     ap.add_argument("--sw-only", action="store_true", help="compile tests with -DSW_ONLY")
     ap.add_argument("--fake-llm", action="store_true", help="canned agent reply (M1)")
     ap.add_argument("--no-replay", action="store_true", help="ignore cached results")
+    ap.add_argument("--no-build-replay", action="store_true",
+                    help="always rebuild (a replayed build needs the simulator still in the "
+                         "container, which chia down/up deletes)")
     ap.add_argument("--model", default="opencode/big-pickle")
     ap.add_argument("--llm-timeout", type=int, default=1800)
     ap.add_argument("--make-jobs", type=int, default=32)
@@ -390,6 +395,10 @@ def main():
     sv_sha = hashlib.sha256(sv_text.encode()).hexdigest()
     sw_files = {"boot.c": read("sw/boot.c"), "image.h": read("sw/image.h")}
     expected = json.loads(read("sw/expected.json"))
+    missing = [t for t in TESTS if t not in expected["digest"]]
+    if missing:
+        raise SystemExit(f"sw/expected.json has no digest for {missing}: "
+                         "run python3 scripts/gen_image.py")
     template = read("loop/agent_prompt.md")
     write(f"{out}/run_args.json", json.dumps(vars(args), indent=2) + "\n")
     write(f"{out}/expected.json", json.dumps(expected, indent=2) + "\n")
@@ -400,6 +409,7 @@ def main():
     stop_cache()  # a detached cache actor from another experiment would keep its own dir/config
     start_cache(size=args.cache_gb, units="GB", cache_dir_path=args.cache_dir, yaml_path=yaml_path)
     REPLAY["enabled"], REPLAY["fake_llm"] = not args.no_replay, args.fake_llm
+    REPLAY["build"] = not args.no_build_replay
     bypass = Bypass(yaml_path=yaml_path)
     if args.fake_llm:
         bypass.set_provider("OpenCodeLLM.prompt", fake_llm)
@@ -422,7 +432,7 @@ def main():
         raise SystemExit("AsconCoreV4.sv was not written correctly")
     baseline = set(info["git_status"].splitlines())
 
-    # -- 1. compile the two tests -------------------------------------------
+    # -- 1. compile the tests -----------------------------------------------
     elfs = {}
     for name, (_, flags) in TESTS.items():
         cflags = CFLAGS + flags + (["-DSW_ONLY"] if args.sw_only else [])
