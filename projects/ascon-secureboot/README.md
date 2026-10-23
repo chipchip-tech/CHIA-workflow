@@ -99,7 +99,13 @@ FSM, nên không có vòng tổ hợp. SQUEEZE đọc bộ đệm 4 word theo ch
   giữa chừng, SQUEEZE 3..0), CYCLES_SW 497135, CYCLES_ROCC 7027.
 
 **Chưa chạy:**
-- `scripts/make_final.sh` (đang chờ), `scripts/selftest.sh` với phần `boot_partial`.
+- `scripts/selftest.sh` với phần `boot_partial`.
+
+**`make_final.sh out/m3` đã chạy** trên máy người dùng, và `sha256sum -c` pass cả 18 file.
+`sw/image.h` và `sw/expected.json` trong repo khớp byte với bản người dùng sinh ra. Người
+dùng không push được (tài khoản GitHub đăng nhập bằng Google, thư mục không phải git
+clone), nên session dựng lại 7 file của `out/final/` từ nội dung dán. Cả 7 file khớp
+`SHA256SUMS`.
 - `tests/smoke_local.sh`.
 - Các lệnh áp patch bằng tay trong `out/final/README.md`.
 

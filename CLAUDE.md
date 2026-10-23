@@ -32,6 +32,9 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   **Lưu ý (23/10/2026):** `git pull` trong `~/CHIA-workflow` báo `not a git repository`,
   tức thư mục này không phải bản git clone (có thể chép tay). Khi đưa code mới, phải kiểm
   người dùng đã thật sự lấy được bản mới chưa (ví dụ `grep` một dòng mới trong file).
+  Người dùng **không `git push` được**: tài khoản GitHub đăng nhập bằng Google, không có
+  mật khẩu. Muốn đưa file từ máy họ lên repo thì dùng GitHub web (Upload files), `gh auth
+  login`, hoặc họ dán nội dung để session dựng lại và so `sha256sum`.
 - Chưa có máy remote nào.
 
 ## Đã kiểm chứng và chưa kiểm chứng
@@ -61,8 +64,10 @@ Chi tiết, lệnh chạy và trạng thái kiểm chứng xem `projects/ascon-s
   INIT giữa chừng, SQUEEZE 3..0). **Job `ascon-m3` đạt** (phát lại agent `m2` từ cache,
   build lại 82 s): cả 3 test pass, `boot_partial` CYCLES_ROCC 7027. `sw/image.h` và
   `expected.json` trong repo đã thêm digest `ac6c73b1…` (dựng tay theo output
-  `gen_image.py` của người dùng). Còn lại: người dùng chạy `make_final.sh out/m3` và đưa
-  `out/final/` lên repo (push hoặc dán).
+  `gen_image.py` của người dùng, sha256 đã khớp). `make_final.sh out/m3` đã chạy, 18/18
+  file pass `sha256sum -c`. Repo có 7 file `out/final/` khớp checksum (dựng từ nội dung
+  dán). Còn thiếu 11 file log/json/tar: người dùng tải lên qua GitHub web, hoặc dùng
+  `gh auth login` rồi clone/push. Khi có đủ thì M4 xong.
 - Người dùng yêu cầu: **không chạy gì trên session cloud**, chỉ tạo file và hướng dẫn.
   `selftest.sh` đã chạy trong sandbox (trước khi có yêu cầu này) và pass. Smoke test
   chưa chạy.

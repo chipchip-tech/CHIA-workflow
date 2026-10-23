@@ -49,6 +49,12 @@ trong `results.csv`.
 
 Kiểm tra file nguyên vẹn: `cd out/final && sha256sum -c SHA256SUMS`.
 
+`SHA256SUMS` sinh trên máy chạy loop. Repo hiện có 7 file khớp checksum: `chipyard.patch`,
+3 file trong `files/`, `expected.json`, `results.csv`, `SOURCE.txt`. 11 file còn lại (log
+sim, `summary.json`, `prompt.md`, `agent_reply.md`, `full.diff`, `untracked.*`,
+`run_args.json`, `install_rtl.json`) chỉ có ở `out/final/` trên máy đó, cho tới khi được
+tải lên. Vì vậy `sha256sum -c` báo thiếu các file này.
+
 ## Giao diện RoCC (custom0, opcode `0x0B`, `funct3 = {xd,xs1,xs2}`)
 
 | funct7 | lệnh | funct3 | toán hạng | ý nghĩa |

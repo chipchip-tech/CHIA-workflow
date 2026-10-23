@@ -1,0 +1,23 @@
+diff --git a/generators/chipyard/src/main/scala/config/fragments/RoCCFragments.scala b/generators/chipyard/src/main/scala/config/fragments/RoCCFragments.scala
+index 01064fcd..ef485d67 100644
+--- a/generators/chipyard/src/main/scala/config/fragments/RoCCFragments.scala
++++ b/generators/chipyard/src/main/scala/config/fragments/RoCCFragments.scala
+@@ -8,6 +8,7 @@ import freechips.rocketchip.diplomacy._
+ 
+ 
+ import chipyard.{TestSuitesKey, TestSuiteHelper}
++import chipyard.example.AsconRoCC
+ 
+ /**
+  * Map from a tileId to a particular RoCC accelerator
+@@ -45,3 +46,10 @@ class WithCharacterCountRoCC(op: OpcodeSet = OpcodeSet.custom2) extends Config((
+     counter
+   })
+ })
++
++class WithAsconRoCC(op: OpcodeSet = OpcodeSet.custom0) extends Config((site, here, up) => {
++  case BuildRoCC => up(BuildRoCC) ++ Seq((p: Parameters) => {
++    val ascon = LazyModule(new AsconRoCC(op)(p))
++    ascon
++  })
++})

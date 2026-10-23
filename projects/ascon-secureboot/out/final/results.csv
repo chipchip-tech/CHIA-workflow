@@ -1,0 +1,4 @@
+iter,build_ok,test,boot_result,digest_match,cycles_sw,cycles_rocc,passed,sim_rc,config,run_id
+0,1,boot_good,OK,1,503710,7021,1,0,AsconRocketConfig,m2
+0,1,boot_tamper,FAIL,1,503709,7018,1,0,AsconRocketConfig,m2
+0,1,boot_partial,OK,1,497135,7027,1,0,AsconRocketConfig,m2

@@ -1,0 +1,5 @@
+run: /home/dingus/CHIA-workflow/projects/ascon-secureboot/out/m3
+iteration: iter0
+made: 2026-10-23T09:04:46+07:00
+chipyard: chia_artifact 40c7ddb60834157b148ff7cab468faa89018fe16
+verilator: Verilator 5.022 2024-02-24 rev conda-forge build 1
