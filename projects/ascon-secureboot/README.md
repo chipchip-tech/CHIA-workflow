@@ -109,8 +109,11 @@ GitHub web. Cả 18 file trong repo khớp `SHA256SUMS`.
 `ac6c73b1…5b2c`. SW khớp `ascon.py` 39/39, RTL khớp 152/152.
 
 **Chưa chạy:**
-- `tests/smoke_local.sh`. Lần đầu, `pip install chialoops` trong container hết thời gian
-  chờ khi tải từ PyPI, nên chưa tới bước smoke.
+- `tests/smoke_local.sh`: lần chạy đầu (container `python:3.10`, Ray 2.54.0) pass các
+  kịch bản A, B, D, C, kể cả `boot_partial`. Kịch bản E hỏng do lỗi của chính script:
+  nó sửa submodule **trước** khi loop chạy, nên thay đổi đó thuộc baseline của
+  `install_rtl` và bị bỏ qua đúng như thiết kế. Đã sửa E để seed một lượt agent sửa
+  submodule (`smoke_seed.py ... violation`), nhưng **chưa chạy lại**.
 - Các lệnh áp patch bằng tay trong `out/final/README.md`.
 
 ## Chạy trên máy local (Bazzite)

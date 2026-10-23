@@ -8,7 +8,8 @@
 #   * fake riscv gcc: host gcc (drops -specs/-mcmodel), so tests run natively
 # Scenarios: A M1 (fake LLM, RocketConfig, SW_ONLY) passes; B same run-id
 # again replays build+compile; D build failure path; C replay of a seeded
-# agent turn restores the tree, then the real (fake) build passes.
+# agent turn restores the tree, then the real (fake) build passes; E a seeded
+# agent turn that edited the rocket-chip submodule is reported as a violation.
 #
 # It starts its OWN local Ray head and stops it with `ray stop --force` at the
 # end, which would also kill a CHIA cluster: run it only after `chia down`.
@@ -101,7 +102,10 @@ grep -q "agent (replayed" "$W/last.log" || fail "C not replayed"
 grep -q "SUCCESS after 1" "$W/last.log" || fail "C no success"
 
 echo "== E: rule violation (edit inside the rocket-chip submodule) is reported"
-echo hack >> "$CY/generators/rocket-chip/f.scala"
-loop --out-dir "$W/out/E" --run-id smokeE --config RocketConfig --fake-llm --iters 1 && fail "E should exit 1"
+# The edit has to come from the agent turn: anything already dirty when the
+# loop starts is part of install_rtl's baseline and is ignored on purpose.
+$PY "$ROOT/tests/smoke_seed.py" "$W/cache" smokeE violation > "$W/seed.log" 2>&1 || { cat "$W/seed.log"; fail "seed E"; }
+loop --out-dir "$W/out/E" --run-id smokeE --config RocketConfig --iters 1 && fail "E should exit 1"
+grep -q "VIOLATIONS" "$W/last.log" || fail "E no VIOLATIONS line"
 grep -q "generators/rocket-chip:  M f.scala" "$W/out/E/iter0/feedback.md" || fail "E feedback"
 echo "smoke: all scenarios passed"
