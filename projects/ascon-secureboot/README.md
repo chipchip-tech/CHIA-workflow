@@ -108,13 +108,15 @@ GitHub web. Cả 18 file trong repo khớp `SHA256SUMS`.
 `ubuntu:24.04`, Verilator 5.020). `boot_partial` (`-DSW_ONLY`) in `BOOT OK`, digest
 `ac6c73b1…5b2c`. SW khớp `ascon.py` 39/39, RTL khớp 152/152.
 
-**Chưa chạy:**
 **`tests/smoke_local.sh` pass cả 5 kịch bản trên máy người dùng** (23/10/2026, container
 `python:3.10`, `chialoops` 2.0.1, Ray 2.54.0). Lần đầu E hỏng do lỗi của chính script:
 nó sửa submodule **trước** khi loop chạy, nên thay đổi thuộc baseline của `install_rtl`
 và bị bỏ qua đúng như thiết kế. E giờ seed một lượt agent sửa submodule
 (`smoke_seed.py ... violation`).
-- Các lệnh áp patch bằng tay trong `out/final/README.md`.
+
+**Áp patch bằng tay đã chạy** (23/10/2026): đưa Chipyard về gốc, `git apply`, build
+`AsconRocketConfig` từ đầu, 3 test cho kết quả trùng từng chu kỳ với job `ascon-m3`.
+Lệnh simulator cần `+permissive +max-cycles=... +permissive-off`.
 
 ## Chạy trên máy local (Bazzite)
 

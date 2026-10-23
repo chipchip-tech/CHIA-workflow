@@ -71,40 +71,68 @@ Giới hạn (đúng theo đặc tả, nhưng người dùng cần biết):
 
 ## Áp patch và chạy lại bằng tay
 
-**Chưa chạy thử.** Các lệnh dưới viết theo cách loop làm (`ascon_loop.py`). Chạy trong
-container Chipyard của CHIA, khi cluster đang bật. Đặt `C` theo tên container
-(`docker ps`).
+**Đã chạy trên máy người dùng** (23/10/2026). Kết quả trùng từng chu kỳ với job
+`ascon-m3`. Quy trình: đưa Chipyard trong container của CHIA về trạng thái gốc, áp
+patch, build `AsconRocketConfig` từ đầu (khoảng 2–3 phút), biên dịch 3 test, chạy
+simulator. Cluster phải đang bật, và không có job nào giữ slot `chipyard`.
 
 ```bash
 # trên host
+conda activate chia_env
+chia status | grep chipyard          # 0.0/1.0 chipyard
+C=$(docker ps --format '{{.Names}}' | grep -i chipyard | head -1); echo "$C"
 cd ~/CHIA-workflow/projects/ascon-secureboot
-C=chia-chipyard-$USER-0
+(cd out/final && sha256sum -c --quiet SHA256SUMS) && echo "out/final OK"
+docker exec "$C" rm -rf /tmp/ascon-final /tmp/ascon-sw
 docker cp out/final "$C":/tmp/ascon-final
 docker cp sw "$C":/tmp/ascon-sw
 docker exec -it "$C" bash -l
 ```
 
 ```bash
-# trong container
+# trong container: đưa về trạng thái gốc (loop tự khôi phục cây từ cache khi chạy lại)
 cd /home/ray/chipyard
-source env.sh
-# Bỏ qua 2 lệnh sau nếu cây đã có thay đổi của agent (container vừa chạy loop):
-git apply /tmp/ascon-final/chipyard.patch
-cp -r /tmp/ascon-final/files/generators/. generators/
+git checkout HEAD -- generators/chipyard
+git clean -fdq -- generators/chipyard
+git rev-parse --short HEAD           # 40c7ddb6
 
+# áp patch và chép file mới
+git apply --check /tmp/ascon-final/chipyard.patch && git apply /tmp/ascon-final/chipyard.patch
+cp -r /tmp/ascon-final/files/generators/. generators/
+git status --short generators/chipyard   # 1 dòng " M RoCCFragments.scala", 3 dòng "??"
+
+# build
+source env.sh
 cd sims/verilator
+make clean
 make -j 16 CONFIG=AsconRocketConfig CONFIG_PACKAGE=chipyard
+
+# biên dịch 3 test (cờ giống loop)
+GCC=/home/ray/chipyard/.conda-env/riscv-tools/bin/riscv64-unknown-elf-gcc
 CF="-O2 -mcmodel=medany -static -specs=htif_nano.specs -I /tmp/ascon-sw"
-riscv64-unknown-elf-gcc $CF /tmp/ascon-sw/boot.c -o /tmp/boot_good.riscv
-riscv64-unknown-elf-gcc $CF -DTAMPER /tmp/ascon-sw/boot.c -o /tmp/boot_tamper.riscv
-riscv64-unknown-elf-gcc $CF -DPARTIAL /tmp/ascon-sw/boot.c -o /tmp/boot_partial.riscv
+$GCC $CF            /tmp/ascon-sw/boot.c -o /tmp/boot_good.riscv
+$GCC $CF -DTAMPER   /tmp/ascon-sw/boot.c -o /tmp/boot_tamper.riscv
+$GCC $CF -DPARTIAL  /tmp/ascon-sw/boot.c -o /tmp/boot_partial.riscv
+
+# chạy: +max-cycles phải nằm giữa +permissive ... +permissive-off, nếu không
+# fesvr coi nó là tên chương trình ("could not open +max-cycles=...")
 for t in good tamper partial; do
-  ./simulator-chipyard.harness-AsconRocketConfig +max-cycles=20000000 /tmp/boot_$t.riscv
+  echo "=== boot_$t"
+  ./simulator-chipyard.harness-AsconRocketConfig +permissive +max-cycles=20000000 +permissive-off /tmp/boot_$t.riscv
+  echo "rc=$?"
 done
 ```
 
-Kỳ vọng: lần lượt `BOOT OK`, `BOOT FAIL`, `BOOT OK`, mỗi lần có `DIGEST_HW` bằng
-`DIGEST_SW`. Bản `-DSW_ONLY` chạy được cả trên `RocketConfig` gốc.
+Kết quả đã chạy:
+
+| test | DIGEST_HW = DIGEST_SW | boot | CYCLES_SW | CYCLES_ROCC | rc |
+|---|---|---|---|---|---|
+| boot_good | `13da31e2…1534` | OK | 503710 | 7021 | 0 |
+| boot_tamper | `b28ba17c…e8e3` | FAIL | 503709 | 7018 | 0 |
+| boot_partial | `ac6c73b1…5b2c` | OK | 497135 | 7027 | 0 |
+
+Linker có cảnh báo `LOAD segment with RWX permissions`; với `htif_nano.specs` đó là bình
+thường. Bản `-DSW_ONLY` chạy được cả trên `RocketConfig` gốc.
 
 ## Chạy lại bằng loop (phát lại từ cache)
 

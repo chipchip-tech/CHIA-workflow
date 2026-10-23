@@ -70,7 +70,10 @@ Chi tiết, lệnh chạy và trạng thái kiểm chứng xem `projects/ascon-s
 - `selftest.sh` **pass trên máy người dùng** (container `ubuntu:24.04`, cả `boot_partial`).
 - `tests/smoke_local.sh` **pass cả 5 kịch bản** (container `python:3.10`), sau khi sửa E
   (lần đầu E sửa submodule trước baseline, nên bị bỏ qua đúng thiết kế).
-- Còn chưa chạy: các lệnh áp patch bằng tay trong `out/final/README.md`.
+- Áp patch bằng tay (`out/final/README.md`) **đã chạy**: build lại từ cây gốc, 3 test trùng
+  từng chu kỳ với loop. Gọi simulator trực tiếp phải bọc `+max-cycles` trong
+  `+permissive ... +permissive-off`.
+- Project không còn phần nào chưa chạy.
 - Người dùng yêu cầu: **không chạy gì trên session cloud**, chỉ tạo file và hướng dẫn.
   Muốn chạy test trên host Bazzite thì dùng container dùng một lần
   (`--security-opt label=disable`, mount thư mục project).
@@ -119,7 +122,7 @@ Chi tiết, lệnh chạy và trạng thái kiểm chứng xem `projects/ascon-s
 
 ## Việc tiếp theo (gợi ý)
 
-1. Ascon secure boot đã xong M1–M4. Tuỳ chọn: chạy các phần chưa chạy ở trên.
+1. Ascon secure boot đã xong M1–M4, mọi phần đều đã chạy trên máy người dùng.
 2. Chạy thử `examples/rtl_agent_loop.py` trên cluster 1 máy và sửa theo log.
 3. Xác nhận `PYTHONNOUSERSITE=1` cho `chia_env`.
 4. Khi có máy thứ hai: làm theo `docs/usage-remote.md`, kiểm chứng `cluster-lan.yaml`.
