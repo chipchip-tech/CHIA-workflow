@@ -98,15 +98,19 @@ FSM, nên không có vòng tổ hợp. SQUEEZE đọc bộ đệm 4 word theo ch
 - Cả 3 test đạt: `boot_partial` in `BOOT OK`, `digest_match=1` (word cuối 5 byte, INIT
   giữa chừng, SQUEEZE 3..0), CYCLES_SW 497135, CYCLES_ROCC 7027.
 
-**Chưa chạy:**
-- `scripts/selftest.sh` với phần `boot_partial`.
-
 **`make_final.sh out/m3` đã chạy** trên máy người dùng, và `sha256sum -c` pass cả 18 file.
 `sw/image.h` và `sw/expected.json` trong repo khớp byte với bản người dùng sinh ra. Người
 dùng không push được (tài khoản GitHub đăng nhập bằng Google, thư mục không phải git
 clone). Session dựng lại 7 file từ nội dung dán, người dùng tải 11 file còn lại lên qua
 GitHub web. Cả 18 file trong repo khớp `SHA256SUMS`.
-- `tests/smoke_local.sh`.
+
+**`scripts/selftest.sh` pass trên máy người dùng** (23/10/2026, trong container
+`ubuntu:24.04`, Verilator 5.020). `boot_partial` (`-DSW_ONLY`) in `BOOT OK`, digest
+`ac6c73b1…5b2c`. SW khớp `ascon.py` 39/39, RTL khớp 152/152.
+
+**Chưa chạy:**
+- `tests/smoke_local.sh`. Lần đầu, `pip install chialoops` trong container hết thời gian
+  chờ khi tải từ PyPI, nên chưa tới bước smoke.
 - Các lệnh áp patch bằng tay trong `out/final/README.md`.
 
 ## Chạy trên máy local (Bazzite)
@@ -120,11 +124,19 @@ cd ~/CHIA-workflow/projects/ascon-secureboot
 
 ### 1. (Tuỳ chọn) Tự kiểm không cần cluster
 
-Cần `gcc`, `git`, `python3` trên host. Bước Verilator tự bỏ qua nếu không có `verilator`.
+Bazzite có thể không có `gcc`/`verilator` trên host, nên chạy trong container dùng một
+lần (đã chạy được). `label=disable` để SELinux không chặn thư mục mount.
 
 ```bash
-scripts/selftest.sh
+docker run --rm --security-opt label=disable -e PYTHONDONTWRITEBYTECODE=1 \
+  -v "$PWD":/w -w /w ubuntu:24.04 bash -c '
+    apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+      gcc g++ make git python3 verilator ca-certificates > /dev/null &&
+    scripts/selftest.sh' 2>&1 | tee ~/ascon-selftest.log
 ```
+
+Nếu host có `gcc`, `git`, `python3`, chạy thẳng `scripts/selftest.sh`. Bước Verilator tự
+bỏ qua nếu không có `verilator`.
 
 ### 2. (Tuỳ chọn) Smoke test orchestration, khi cluster đang **tắt**
 

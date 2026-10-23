@@ -67,11 +67,13 @@ Chi tiết, lệnh chạy và trạng thái kiểm chứng xem `projects/ascon-s
   `gen_image.py` của người dùng, sha256 đã khớp). `make_final.sh out/m3` đã chạy, 18/18
   file pass `sha256sum -c`. `out/final/` trong repo đủ 18 file, khớp `SHA256SUMS` (7 file
   session dựng từ nội dung dán, 11 file người dùng tải lên qua GitHub web).
-- Còn chưa chạy: `selftest.sh` phần `boot_partial`, `tests/smoke_local.sh`, các lệnh áp
-  patch bằng tay trong `out/final/README.md`.
+- `selftest.sh` **pass trên máy người dùng** (container `ubuntu:24.04`, cả `boot_partial`).
+- Còn chưa chạy: `tests/smoke_local.sh` (lần đầu `pip install` trong container
+  `python:3.10` bị timeout khi tải từ PyPI), các lệnh áp patch bằng tay trong
+  `out/final/README.md`.
 - Người dùng yêu cầu: **không chạy gì trên session cloud**, chỉ tạo file và hướng dẫn.
-  `selftest.sh` đã chạy trong sandbox (trước khi có yêu cầu này) và pass. Smoke test
-  chưa chạy.
+  Muốn chạy test trên host Bazzite thì dùng container dùng một lần
+  (`--security-opt label=disable`, mount thư mục project).
 - Giao diện RoCC (custom0, `funct3={xd,xs1,xs2}`): INIT f7=0/000, ABSORB f7=1/011
   (`rs2=nbytes|last<<8`), SQUEEZE f7=2/110. Wrapper `AsconCoreV4` chỉ ép kiểu cổng enum.
 
