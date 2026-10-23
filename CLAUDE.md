@@ -29,6 +29,9 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 - Đã clone: `~/work/chia` (repo CHIA), `~/chia-hello-world` (copy của
   `examples/hello-world`, trong đó `cluster.yaml` đã được sửa giống
   `configs/cluster-local.yaml`), `~/CHIA-workflow` (repo này).
+  **Lưu ý (23/10/2026):** `git pull` trong `~/CHIA-workflow` báo `not a git repository`,
+  tức thư mục này không phải bản git clone (có thể chép tay). Khi đưa code mới, phải kiểm
+  người dùng đã thật sự lấy được bản mới chưa (ví dụ `grep` một dòng mới trong file).
 - Chưa có máy remote nào.
 
 ## Đã kiểm chứng và chưa kiểm chứng
