@@ -6,7 +6,7 @@ v4: bus 64 bit, UROL=1) vào Rocket trong Chipyard. Một bootloader bare-metal 
 4 KiB bằng Ascon-Hash256 (NIST SP 800-232), so với digest lưu sẵn, rồi in `BOOT OK` hoặc
 `BOOT FAIL`.
 
-Trạng thái: **mốc M1** (khung loop, LLM được bypass). Các mốc ở cuối file.
+Trạng thái: **M1 đạt** trên máy người dùng (23/10/2026). Đang làm **M2**. Các mốc ở cuối file.
 
 ## File
 
@@ -58,10 +58,19 @@ riscv64-unknown-elf-gcc 13.2 với picolibc):
 - `boot.c` biên dịch được cho RV64. Ba lệnh `.insn` mã hoá đúng: `0x0000000b`; `funct7=1`
   `funct3=3`; `funct7=2` `funct3=6`.
 
+**Đã chạy trên máy người dùng (M1, job `ascon-m1`):**
+- `install_rtl` ghi `AsconCoreV4.sv` vào container với `sha_ok=True`. Verilator của image
+  là **5.022** (conda-forge), lint `rc=0`. Chipyard nhánh `chia_artifact` @ `40c7ddb6`.
+- Compile với `htif_nano.specs` chạy được (ELF 41752 byte). Cache và bypass chạy đúng:
+  compile và build `RocketConfig` được phát lại từ cache của một lần chạy trước (build 0 s).
+- Agent giả: `BashTool` bật rồi `stop()`. `collect_tree` thu được `AsconCoreV4.sv`.
+- `RocketConfig` với `-DSW_ONLY`: `boot_good` in `BOOT OK`, `boot_tamper` in `BOOT FAIL`.
+  Digest khớp `ascon.py`. **CYCLES_SW = 498030 / 498075** cho 4 KiB (khoảng 122
+  chu kỳ/byte).
+
 **Chưa chạy:**
-- `loop/ascon_loop.py` trên cluster. Chưa chạy dù chỉ `py_compile`.
+- Agent thật, `AsconRocketConfig`, đường RoCC (M2, M3).
 - `tests/smoke_local.sh`.
-- Biên dịch với `htif_nano.specs` của Chipyard, và chạy trên Rocket.
 
 ## Chạy trên máy local (Bazzite)
 
@@ -139,12 +148,51 @@ ls -R iter0 | head -40
 
 Kèm `~/ascon-m1.log`. Nếu build lỗi, gửi thêm `tail -100 iter0/build.log`.
 
+### 4. Mốc M2: agent thật, chạy tới khi `AsconRocketConfig` build pass
+
+Không còn `--fake-llm` và `--sw-only`, nên test được biên dịch với đường RoCC. Cờ
+`--stop-after-build` dừng loop ở vòng đầu tiên build pass. Test của vòng đó vẫn chạy và
+được ghi lại, nên có số liệu M3 sớm. Mỗi vòng gồm: agent (tối đa 30 phút), build đầy đủ
+(make clean), rồi 2 test. Tối đa 8 vòng, nên có thể chạy qua đêm.
+
+```bash
+conda activate chia_env
+export THIS_MACHINE=$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')
+chia status || chia up ~/CHIA-workflow/configs/cluster-local.yaml -y
+cd ~/CHIA-workflow/projects/ascon-secureboot
+chia job submit --no-wait --submission-id ascon-m2 --working-dir loop -- \
+  python ascon_loop.py --project-dir $PWD --out-dir $PWD/out/m2 --run-id m2 \
+  --config AsconRocketConfig --iters 8 --stop-after-build
+chia job logs -f ascon-m2
+```
+
+- Nếu job chết giữa chừng (mất điện, OOM, `chia down`), chạy lại **đúng lệnh trên** với
+  `--submission-id` mới và giữ `--run-id m2`. Các vòng đã xong được phát lại từ cache:
+  `agent (replayed ...)`, cây được khôi phục vào container, build không chạy lại.
+- Nếu build bị OOM, thêm `--make-jobs 8`.
+- Có thể xem agent đang sửa gì:
+  `docker exec chia-chipyard-$USER-0 git -C /home/ray/chipyard status --short generators/chipyard`.
+
+Gửi lại cho session:
+
+```bash
+chia job logs ascon-m2 > ~/ascon-m2.log
+cd ~/CHIA-workflow/projects/ascon-secureboot/out/m2
+cat results.csv; for d in iter*/; do echo "== $d"; cat $d/summary.json; done
+cat iter*/agent_reply.md
+L=$(ls -d iter* | sort -V | tail -1); cat $L/chipyard.patch; ls -R $L/files
+tail -60 $L/build.log; tail -30 $L/sim_boot_*.log
+```
+
+Kèm `~/ascon-m2.log`. Nếu vòng cuối vẫn build lỗi, gửi thêm `cat $L/feedback.md`.
+
 ### Các tham số hay dùng
 
 | Tham số | Mặc định | Ghi chú |
 |---|---|---|
 | `--config` | `AsconRocketConfig` | M1 dùng `RocketConfig` |
 | `--iters` | 8 | Dừng sớm khi cả 2 test đạt |
+| `--stop-after-build` | tắt | M2: dừng ở vòng đầu tiên build pass |
 | `--sw-only` | tắt | Biên dịch test với `-DSW_ONLY` |
 | `--fake-llm` | tắt | Agent trả câu mẫu (M1) |
 | `--run-id` | bắt buộc | Không gian tên của cache. Dùng lại cùng id để tiếp tục hoặc phát lại; đổi id để chạy mới. `--no-replay` bỏ qua cache |
@@ -155,8 +203,8 @@ Kèm `~/ascon-m1.log`. Nếu build lỗi, gửi thêm `tail -100 iter0/build.log
 
 ## Mốc
 
-- **M1**: khung loop với LLM bypass, chạy trên `RocketConfig` với `-DSW_ONLY`, và thu được
-  file về host. ← đang ở đây
-- **M2**: bật agent thật, chạy tới khi `AsconRocketConfig` build pass.
+- **M1** (đạt 23/10/2026): khung loop với LLM bypass, chạy trên `RocketConfig` với
+  `-DSW_ONLY`, và thu được file về host.
+- **M2**: bật agent thật, chạy tới khi `AsconRocketConfig` build pass. ← đang ở đây
 - **M3**: bản RoCC: 2 test đạt, `DIGEST_HW == DIGEST_SW ==` `ascon.py`, có cycles.
 - **M4**: `out/final/` (patch cuối, mọi file, `results.csv`, README áp patch và chạy lại).

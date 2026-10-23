@@ -15,7 +15,8 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 
 - OS: `ghcr.io/ublue-os/bazzite-dx-nvidia:stable`. Đã chạy `ujust dx-group`; `docker`
   dùng được không cần sudo.
-- User `dingus`, home `/var/home/dingus`, IP LAN `192.168.1.3`.
+- User `dingus`, home `/var/home/dingus`. IP LAN từng là `192.168.1.3`, lần chạy M1 là
+  `10.232.8.80`. `THIS_MACHINE` tự dò nên không phải sửa config.
 - 20 CPU, 23 GB RAM (dưới mức 32 GB khuyến nghị nhưng vẫn build được RocketConfig với
   `make -j 32`), 1 GPU NVIDIA, khoảng 259 GB trống ở `/var`.
 - sshd đã bật. SSH không mật khẩu vào chính máy đã chạy được. Đã chạy
@@ -46,10 +47,13 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 ## Project đang làm: `projects/ascon-secureboot/` (RoCC Ascon-Hash256, secure boot)
 
 Chi tiết, lệnh chạy và trạng thái kiểm chứng xem `projects/ascon-secureboot/README.md`.
-- Mốc hiện tại: **M1** (đã viết code, đang chờ log chạy trên máy người dùng).
+- **M1 đạt** trên máy người dùng (job `ascon-m1`). RocketConfig với `-DSW_ONLY`: BOOT OK
+  và BOOT FAIL đúng, digest khớp `ascon.py`, CYCLES_SW khoảng 498K cho 4 KiB. Verilator
+  của image chipyard là 5.022. Cache và bypass (compile, build) phát lại đúng.
+- Mốc hiện tại: **M2** (đã đưa lệnh `--stop-after-build`, đang chờ log).
 - Người dùng yêu cầu: **không chạy gì trên session cloud**, chỉ tạo file và hướng dẫn.
-  `selftest.sh` đã chạy trong sandbox (trước khi có yêu cầu này) và pass. Loop và smoke
-  test chưa chạy.
+  `selftest.sh` đã chạy trong sandbox (trước khi có yêu cầu này) và pass. Smoke test
+  chưa chạy.
 - Giao diện RoCC (custom0, `funct3={xd,xs1,xs2}`): INIT f7=0/000, ABSORB f7=1/011
   (`rs2=nbytes|last<<8`), SQUEEZE f7=2/110. Wrapper `AsconCoreV4` chỉ ép kiểu cổng enum.
 - Mốc tiếp theo: M2 (agent thật, `AsconRocketConfig` build pass), M3 (2 test RoCC đạt),
@@ -97,7 +101,7 @@ Chi tiết, lệnh chạy và trạng thái kiểm chứng xem `projects/ascon-s
 
 ## Việc tiếp theo (gợi ý)
 
-1. Ascon secure boot: đọc log M1 người dùng gửi, sửa, rồi làm M2.
+1. Ascon secure boot: đọc log M2 người dùng gửi, sửa theo log, rồi làm M3.
 2. Chạy thử `examples/rtl_agent_loop.py` trên cluster 1 máy và sửa theo log.
 3. Xác nhận `PYTHONNOUSERSITE=1` cho `chia_env`.
 4. Khi có máy thứ hai: làm theo `docs/usage-remote.md`, kiểm chứng `cluster-lan.yaml`.

@@ -367,6 +367,9 @@ def main():
     ap.add_argument("--run-id", required=True, help="cache namespace; reuse it to resume/replay")
     ap.add_argument("--config", default="AsconRocketConfig")
     ap.add_argument("--iters", type=int, default=8)
+    ap.add_argument("--stop-after-build", action="store_true",
+                    help="M2 gate: stop after the first iteration whose build passes "
+                         "(its tests still run and are reported)")
     ap.add_argument("--sw-only", action="store_true", help="compile tests with -DSW_ONLY")
     ap.add_argument("--fake-llm", action="store_true", help="canned agent reply (M1)")
     ap.add_argument("--no-replay", action="store_true", help="ignore cached results")
@@ -468,6 +471,7 @@ def main():
         t1 = time.time()
         artifact = get(cb.build.chia_remote(cb, _chia_tag=f"{tag}/build/{args.config}"))
         build_ok = bool(artifact.success)
+        build_seconds = round(time.time() - t1)
         write(f"{it_dir}/build.log", f"[stdout]\n{artifact.stdout}\n[stderr]\n{artifact.stderr}\n")
         print(f"build {args.config}: success={build_ok} rc={artifact.returncode} "
               f"({time.time() - t1:.0f}s)", flush=True)
@@ -495,11 +499,16 @@ def main():
         write_csv(f"{out}/results.csv", rows)
         write(f"{it_dir}/summary.json", json.dumps(
             {"replayed": replayed, "build_ok": build_ok, "rows": iter_rows,
-             "violations": violations, "seconds": round(time.time() - t0)}, indent=2) + "\n")
+             "violations": violations, "build_seconds": build_seconds,
+             "seconds": round(time.time() - t0)}, indent=2) + "\n")
 
         if build_ok and all(r["passed"] for r in iter_rows) and not violations:
             success = True
             print(f"\nSUCCESS after {i + 1} iteration(s)")
+            break
+        if args.stop_after_build and build_ok:
+            success = True
+            print(f"\nBUILD PASSED after {i + 1} iteration(s), stopping (--stop-after-build)")
             break
         feedback = build_feedback(build_ok, artifact, sims, violations)
         write(f"{it_dir}/feedback.md", feedback)
