@@ -6,9 +6,123 @@ v4: bus 64 bit, UROL=1) vào Rocket trong Chipyard. Một bootloader bare-metal 
 4 KiB bằng Ascon-Hash256 (NIST SP 800-232), so với digest lưu sẵn, rồi in `BOOT OK` hoặc
 `BOOT FAIL`.
 
-Trạng thái: **M1, M2, M3 đạt** trên máy người dùng (23/10/2026; M2 và M3 cùng đạt ở vòng 0
-của job `ascon-m2a`). **M4 đạt**: 3 test RoCC (thêm `boot_partial`) và `out/final/` đầy đủ (mục 5). Các mốc ở
-cuối file.
+Trạng thái: **M1–M4 đạt** trên máy người dùng (23/10/2026). Mọi phần đã chạy thật: loop với
+agent thật, 3 test RoCC, selftest, smoke test, và áp patch bằng tay.
+
+## Tóm tắt
+
+### Kết quả cuối
+
+Agent (OpenCode `opencode/big-pickle`) viết đúng ngay lượt đầu (389 s). Cả 3 test đạt trên
+đường RoCC, với `DIGEST_HW == DIGEST_SW ==` digest của `ascon.py`.
+
+| test | kiểm điều gì | boot | CYCLES_SW | CYCLES_ROCC | nhanh hơn |
+|---|---|---|---|---|---|
+| boot_good | firmware 4 KiB nguyên vẹn | OK | 503710 | 7021 | 71.7× |
+| boot_tamper | lật 1 bit ở byte 1234 | FAIL | 503709 | 7018 | 71.8× |
+| boot_partial | 4093 byte (word cuối 5 byte), INIT giữa chừng, SQUEEZE 3→0 | OK | 497135 | 7027 | 70.7× |
+
+Phần mềm tốn khoảng 122 chu kỳ/byte, RoCC khoảng 1.7 chu kỳ/byte. Riêng lõi mất 6722 chu
+kỳ cho 4 KiB, nên phần tốn thêm của RoCC chỉ khoảng 300 chu kỳ. Kết quả cuối, patch và cách
+áp patch nằm ở `out/final/`.
+
+### Ai tạo file nào
+
+**Claude (session) viết**:
+- **Mã nguồn:** `scripts/prepare_rtl.py`, `scripts/gen_image.py`, `sw/boot.c`.
+- **Loop:** `loop/ascon_loop.py`, `loop/agent_prompt.md`, `loop/exp.yaml`.
+- **Tự kiểm:** `scripts/selftest.sh`, `tb/*`.
+- **Smoke test:** `tests/smoke_local.sh`, `tests/smoke_seed.py`.
+- **Dựng kết quả cuối:** `scripts/make_final.sh`.
+- **Tài liệu:** README này và `out/final/README.md`.
+
+Các file sinh ra bằng script:
+- `rtl/AsconCoreV4.sv` (`prepare_rtl.py`).
+- `sw/image.h` và `sw/expected.json` (`gen_image.py`). Digest `boot_partial` được thêm theo
+  output của `gen_image.py` chạy trên máy người dùng, sha256 khớp.
+
+**Agent viết** (trong container, ở `generators/chipyard/`):
+- `src/main/scala/example/AsconRoCC.scala` (mới): BlackBox `AsconCoreV4`, `AsconRoCC`,
+  `AsconRoCCModuleImp`.
+- `src/main/scala/config/AsconConfigs.scala` (mới): `AsconRocketConfig`.
+- `src/main/scala/config/fragments/RoCCFragments.scala` (sửa): thêm `WithAsconRoCC`.
+
+**Loop tạo** trong `out/<run>/` trên host:
+- **Cấp lần chạy:**
+  - `run_args.json`, `expected.json`;
+  - `install_rtl.json`: sha256 của lõi, phiên bản Verilator, lint, commit Chipyard,
+    baseline `git status`;
+  - `results.csv`, `profile/`.
+- **Mỗi vòng `iterN/`:**
+  - `prompt.md`, `agent_reply.md`, `agent_transcript.txt`;
+  - `chipyard.patch`, `full.diff`, `git_status.txt`;
+  - `untracked.tar.gz`, `untracked.txt`, `files/`;
+  - `build.log`, `sim_<test>.log` và `.out`, `summary.json`;
+  - `feedback.md`, chỉ khi vòng đó chưa đạt.
+
+Ngoài `out/<run>/`:
+- Cache trên host ở `~/chia_cache/ascon-secureboot` giữ lượt agent, ảnh chụp cây, build và
+  ELF.
+- Trong container:
+  - `AsconCoreV4.sv` được ghi vào `vsrc/`;
+  - kết quả build nằm ở `sims/verilator/`;
+  - mỗi lần chạy sim có thư mục `/home/ray/ascon-sim/<8 hex>`.
+
+`out/final/` (18 file) do `make_final.sh out/m3` sinh ra. Trong repo, 7 file do session
+dựng lại từ nội dung người dùng dán, 11 file do người dùng tải lên. Cả 18 file khớp
+`SHA256SUMS`.
+
+### Flow của loop
+
+Driver `ascon_loop.py` chạy như một job Ray trên host. Mỗi bước được gửi tới worker có
+resource ghi trong ngoặc vuông.
+
+```
+Chuẩn bị (1 lần mỗi job)
+ 0. Đọc rtl/, sw/, prompt, exp.yaml; kiểm expected.json có đủ digest cho mọi test
+ 1. Bật cache (ChiaCacheStore) và Bypass, đăng ký provider/cond cho từng hàm
+ 2. install_rtl            [chipyard]  ghi AsconCoreV4.sv, kiểm sha256, lint bằng Verilator,
+                                        chụp git status làm baseline
+ 3. compile_program x3     [chipyard]  riscv64-gcc -specs=htif_nano.specs (+-DTAMPER/-DPARTIAL)
+                                        tag compile/<test>/<sha của nguồn+cờ>; trùng tag thì phát lại
+
+Vòng N (tối đa 8)
+ 4. Agent                  [opencode_creds + BashTool giữ chipyard]
+      tag <run>/iterN/agent; nếu cache có cả agent lẫn collect thì phát lại, không gọi LLM;
+      xong thì BashTool.stop() để nhả slot chipyard
+ 5. collect_tree           [chipyard]  git diff, các file untracked trong generators/chipyard, git status
+      khi phát lại: restore_tree đưa cây đã lưu vào container
+      ghi iterN/*; find_violations so status với baseline
+ 6. ChiselBuildNode.build  [chipyard]  make clean; make -j32 CONFIG=AsconRocketConfig
+      chỉ phát lại khi cây là cây của lượt agent đã phát lại (tắt bằng --no-build-replay)
+ 7. VerilatorRunNode x3    [verilator_run]  chạy lần lượt boot_good, boot_tamper, boot_partial
+      parse_run: BOOT OK/FAIL đúng kỳ vọng, DIGEST_SW == DIGEST_HW == expected, rc=0
+ 8. Ghi results.csv và summary.json
+      cả 3 test đạt và không vi phạm -> SUCCESS, dừng
+      ngược lại -> build_feedback (lỗi build, log test, vi phạm) -> feedback.md -> prompt vòng N+1
+```
+
+### Các lần chạy thật
+
+| Job | Tham số | Diễn biến |
+|---|---|---|
+| `ascon-m1` | `RocketConfig`, `--sw-only`, `--fake-llm`, `--iters 1` | Agent giả không sửa gì. Build và compile được phát lại từ cache. 2 test phần mềm đạt (CYCLES_SW khoảng 498K) |
+| `ascon-m2` | | Thất bại trước khi chạy: máy người dùng vẫn là `ascon_loop.py` cũ, chưa có `--stop-after-build` |
+| `ascon-m2a` | `AsconRocketConfig`, `--run-id m2`, `--stop-after-build` | Vòng 0: agent thật 389 s, tạo 2 file và sửa 1 file, không có vi phạm. Build 108 s. 2 test RoCC đạt. SUCCESS sau 1 vòng (834 s) |
+| `ascon-m3` | `--run-id m2`, `--no-build-replay`, thêm `boot_partial` | Compile lại vì `boot.c` đã đổi. Agent phát lại từ cache (2 s). `restore_tree` khôi phục cây (3 file). Build lại 82 s. 3 test đạt. SUCCESS |
+
+Các lần chạy ngoài loop, trên máy người dùng:
+- `make_final.sh out/m3`: dựng `out/final/`.
+- `selftest.sh` trong `ubuntu:24.04`: pass.
+- `smoke_local.sh` trong `python:3.10`: lần 1 pass 4/5; lần 2 pass 5/5 sau khi sửa kịch bản E.
+- Áp patch và build bằng tay: 3 test trùng từng chu kỳ với loop.
+
+### Giới hạn
+
+- Giao diện không băm được thông điệp rỗng.
+- Các lỗi lập trình làm CPU treo: ABSORB khi chưa INIT; SQUEEZE trước word cuối; `nbytes`
+  ngoài 1..8.
+- Agent mới chạy 1 lần với 1 model, nên chưa đủ để kết luận về độ ổn định của agent.
 
 ## File
 
