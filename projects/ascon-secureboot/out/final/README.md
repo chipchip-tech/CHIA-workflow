@@ -19,9 +19,11 @@ Firmware 4 KiB (seed `0x5EC0B007`). Digest kỳ vọng tính bằng `ascon.py` �
 |---|---|---|---|---|---|
 | boot_good | OK | 1 | 503710 | 7021 | 71.7× |
 | boot_tamper | FAIL | 1 | 503709 | 7018 | 71.8× |
-| boot_partial | _chờ lần chạy M4_ | | | | |
+| boot_partial | OK | 1 | 497135 | 7027 | 70.7× |
 
-Số liệu hai dòng đầu lấy từ job `ascon-m2a`. Bảng đầy đủ nằm trong `results.csv`.
+Số liệu lấy từ job `ascon-m3`: lượt agent của `--run-id m2` được phát lại từ cache, rồi
+build lại. Hai dòng đầu trùng với lần chạy đầu tiên (job `ascon-m2a`). Bảng đầy đủ nằm
+trong `results.csv`.
 
 - `boot_tamper` lật bit 3 của byte 1234 trước khi băm, nên digest khác và bootloader
   in `BOOT FAIL`.

@@ -8,7 +8,7 @@ v4: bus 64 bit, UROL=1) vào Rocket trong Chipyard. Một bootloader bare-metal 
 
 Trạng thái: **M1, M2, M3 đạt** trên máy người dùng (23/10/2026; M2 và M3 cùng đạt ở vòng 0
 của job `ascon-m2a`). Đang làm **M4**: thêm test `boot_partial`, rồi dựng `out/final/`
-(mục 5). Các mốc ở cuối file.
+(mục 5). Ba test RoCC đã đạt; còn dựng `out/final/`. Các mốc ở cuối file.
 
 ## File
 
@@ -90,12 +90,18 @@ riscv64-unknown-elf-gcc 13.2 với picolibc):
 FSM, nên không có vòng tổ hợp. SQUEEZE đọc bộ đệm 4 word theo chỉ số. Giới hạn ghi ở
 `out/final/README.md`.
 
-**Chưa chạy** (viết sau M3, cần người dùng chạy mục 5):
-- Test `boot_partial` (`-DPARTIAL`): word cuối 5 byte, INIT giữa chừng, SQUEEZE 3..0.
-- Phần `-DPARTIAL` của `boot.c`, `gen_image.py` có `partial_digest`, `--no-build-replay`,
-  `scripts/make_final.sh`. **`sw/image.h` và `sw/expected.json` trong repo chưa có
-  digest `boot_partial`**: phải chạy `gen_image.py` trên máy người dùng (mục 5).
+**Đã chạy trên máy người dùng (M4, job `ascon-m3`, `--run-id m2`, `--no-build-replay`):**
+- `gen_image.py` cho digest `boot_partial` = `ac6c73b1…5b2c`, hai digest cũ giữ nguyên.
+  `sw/image.h` và `sw/expected.json` trong repo được sửa theo đúng output đó.
+- Lượt agent và cây được phát lại từ cache (2 s, `restored 3 untracked files`), build lại
+  pass (82 s).
+- Cả 3 test đạt: `boot_partial` in `BOOT OK`, `digest_match=1` (word cuối 5 byte, INIT
+  giữa chừng, SQUEEZE 3..0), CYCLES_SW 497135, CYCLES_ROCC 7027.
+
+**Chưa chạy:**
+- `scripts/make_final.sh` (đang chờ), `scripts/selftest.sh` với phần `boot_partial`.
 - `tests/smoke_local.sh`.
+- Các lệnh áp patch bằng tay trong `out/final/README.md`.
 
 ## Chạy trên máy local (Bazzite)
 

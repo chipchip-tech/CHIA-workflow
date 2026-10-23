@@ -3,10 +3,12 @@
   "seed": 1589686279,
   "tamper_offset": 1234,
   "tamper_mask": 8,
+  "partial_size": 4093,
   "ascon_verilog_commit": "e1069549a1895f376391530a1842694ea8bb044b",
   "digest": {
     "boot_good": "13da31e2ee4daccc2cee29390afbe31a9bd191dfbae06bf165f18a82df681534",
-    "boot_tamper": "b28ba17ceca8eeee73d61c79982cf8e00d187b54487b1a1f2509806b9feae8e3"
+    "boot_tamper": "b28ba17ceca8eeee73d61c79982cf8e00d187b54487b1a1f2509806b9feae8e3",
+    "boot_partial": "ac6c73b1567c2250db69e0c2123b6ef7e962f0db0dd76b93416fbf4169b65b2c"
   },
   "empty_digest": "0b3be5850f2f6b98caf29f8fdea89b64a1fa70aa249b8f839bd53baa304d92b2"
 }

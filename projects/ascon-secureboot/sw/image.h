@@ -9,6 +9,7 @@
 #define IMAGE_SIZE 4096
 #define TAMPER_OFFSET 1234
 #define TAMPER_MASK 0x08
+#define PARTIAL_SIZE 4093
 
 // Digest "stored" next to the image, as a boot ROM would hold it.
 static const uint8_t image_digest[32] = {
@@ -18,6 +19,12 @@ static const uint8_t image_digest[32] = {
 
 // For reference only (the loop checks it): digest after the tamper bit flip.
 // b28ba17ceca8eeee73d61c79982cf8e00d187b54487b1a1f2509806b9feae8e3
+
+// boot_partial (-DPARTIAL) hashes only the first PARTIAL_SIZE bytes.
+static const uint8_t partial_digest[32] __attribute__((unused)) = {
+    0xac, 0x6c, 0x73, 0xb1, 0x56, 0x7c, 0x22, 0x50, 0xdb, 0x69, 0xe0, 0xc2, 0x12, 0x3b, 0x6e, 0xf7,
+    0xe9, 0x62, 0xf0, 0xdb, 0x0d, 0xd7, 0x6b, 0x93, 0x41, 0x6f, 0xbf, 0x41, 0x69, 0xb6, 0x5b, 0x2c
+};
 
 // Writable so that -DTAMPER can flip a bit before hashing.
 static uint8_t image[IMAGE_SIZE] __attribute__((aligned(8))) = {

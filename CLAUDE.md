@@ -58,12 +58,11 @@ Chi tiết, lệnh chạy và trạng thái kiểm chứng xem `projects/ascon-s
   `ascon.py`. CYCLES_ROCC khoảng 7020, CYCLES_SW khoảng 503700, nhanh hơn khoảng 71.7 lần.
 - Đã review mã agent (`AsconRoCC.scala`): đúng đặc tả (chi tiết ở README project).
 - Mốc hiện tại: **M4**. Người dùng duyệt thêm test `boot_partial` (`-DPARTIAL`: 4093 byte,
-  INIT giữa chừng, SQUEEZE 3..0). Đã viết `boot.c`, `gen_image.py`, loop
-  (`--no-build-replay`), `scripts/make_final.sh`, `out/final/README.md`, nhưng **chưa
-  chạy**. `sw/image.h` và `sw/expected.json` trong repo **chưa có digest `boot_partial`**:
-  người dùng chạy `gen_image.py`, rồi job `ascon-m3` (`--run-id m2`, phát lại agent), rồi
-  `make_final.sh out/m3`. Chờ log đó, sau đó điền dòng `boot_partial` vào
-  `out/final/README.md`.
+  INIT giữa chừng, SQUEEZE 3..0). **Job `ascon-m3` đạt** (phát lại agent `m2` từ cache,
+  build lại 82 s): cả 3 test pass, `boot_partial` CYCLES_ROCC 7027. `sw/image.h` và
+  `expected.json` trong repo đã thêm digest `ac6c73b1…` (dựng tay theo output
+  `gen_image.py` của người dùng). Còn lại: người dùng chạy `make_final.sh out/m3` và đưa
+  `out/final/` lên repo (push hoặc dán).
 - Người dùng yêu cầu: **không chạy gì trên session cloud**, chỉ tạo file và hướng dẫn.
   `selftest.sh` đã chạy trong sandbox (trước khi có yêu cầu này) và pass. Smoke test
   chưa chạy.
@@ -112,7 +111,7 @@ Chi tiết, lệnh chạy và trạng thái kiểm chứng xem `projects/ascon-s
 
 ## Việc tiếp theo (gợi ý)
 
-1. Ascon secure boot: đọc log job `ascon-m3`, cập nhật `out/final/` và `sw/image.h`, đóng M4.
+1. Ascon secure boot: nhận `out/final/` từ `make_final.sh out/m3`, kiểm `SHA256SUMS`, đóng M4.
 2. Chạy thử `examples/rtl_agent_loop.py` trên cluster 1 máy và sửa theo log.
 3. Xác nhận `PYTHONNOUSERSITE=1` cho `chia_env`.
 4. Khi có máy thứ hai: làm theo `docs/usage-remote.md`, kiểm chứng `cluster-lan.yaml`.
