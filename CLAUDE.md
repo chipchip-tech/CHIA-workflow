@@ -53,14 +53,17 @@ Chi tiết, lệnh chạy và trạng thái kiểm chứng xem `projects/ascon-s
 - **M1 đạt** trên máy người dùng (job `ascon-m1`). RocketConfig với `-DSW_ONLY`: BOOT OK
   và BOOT FAIL đúng, digest khớp `ascon.py`, CYCLES_SW khoảng 498K cho 4 KiB. Verilator
   của image chipyard là 5.022. Cache và bypass (compile, build) phát lại đúng.
-- Mốc hiện tại: **M2** (đã đưa lệnh `--stop-after-build`, đang chờ log).
+- **M2 và M3 đạt** cùng lúc ở vòng 0 của job `ascon-m2a` (`--run-id m2`). Agent thật xong
+  trong 389 s, build 108 s. Đường RoCC: BOOT OK và BOOT FAIL đúng, DIGEST_HW = DIGEST_SW =
+  `ascon.py`. CYCLES_ROCC khoảng 7020, CYCLES_SW khoảng 503700, nhanh hơn khoảng 71.7 lần.
+- Mốc hiện tại: **M4**. Đang chờ người dùng gửi nội dung `out/m2/iter0` (patch, file Scala,
+  log sim) để review mã của agent và dựng `out/final/`.
 - Người dùng yêu cầu: **không chạy gì trên session cloud**, chỉ tạo file và hướng dẫn.
   `selftest.sh` đã chạy trong sandbox (trước khi có yêu cầu này) và pass. Smoke test
   chưa chạy.
 - Giao diện RoCC (custom0, `funct3={xd,xs1,xs2}`): INIT f7=0/000, ABSORB f7=1/011
   (`rs2=nbytes|last<<8`), SQUEEZE f7=2/110. Wrapper `AsconCoreV4` chỉ ép kiểu cổng enum.
-- Mốc tiếp theo: M2 (agent thật, `AsconRocketConfig` build pass), M3 (2 test RoCC đạt),
-  M4 (`out/final/`).
+- Mốc tiếp theo: M4 (`out/final/`).
 
 ## Các lỗi đã gặp trên Bazzite và cách sửa
 
@@ -104,7 +107,7 @@ Chi tiết, lệnh chạy và trạng thái kiểm chứng xem `projects/ascon-s
 
 ## Việc tiếp theo (gợi ý)
 
-1. Ascon secure boot: đọc log M2 người dùng gửi, sửa theo log, rồi làm M3.
+1. Ascon secure boot: review mã agent trong `out/m2/iter0`, rồi dựng M4 (`out/final/`).
 2. Chạy thử `examples/rtl_agent_loop.py` trên cluster 1 máy và sửa theo log.
 3. Xác nhận `PYTHONNOUSERSITE=1` cho `chia_env`.
 4. Khi có máy thứ hai: làm theo `docs/usage-remote.md`, kiểm chứng `cluster-lan.yaml`.

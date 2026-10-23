@@ -6,7 +6,8 @@ v4: bus 64 bit, UROL=1) vào Rocket trong Chipyard. Một bootloader bare-metal 
 4 KiB bằng Ascon-Hash256 (NIST SP 800-232), so với digest lưu sẵn, rồi in `BOOT OK` hoặc
 `BOOT FAIL`.
 
-Trạng thái: **M1 đạt** trên máy người dùng (23/10/2026). Đang làm **M2**. Các mốc ở cuối file.
+Trạng thái: **M1, M2, M3 đạt** trên máy người dùng (23/10/2026; M2 và M3 cùng đạt ở vòng 0
+của job `ascon-m2a`). Đang làm **M4**. Các mốc ở cuối file.
 
 ## File
 
@@ -68,8 +69,22 @@ riscv64-unknown-elf-gcc 13.2 với picolibc):
   Digest khớp `ascon.py`. **CYCLES_SW = 498030 / 498075** cho 4 KiB (khoảng 122
   chu kỳ/byte).
 
-**Chưa chạy:**
-- Agent thật, `AsconRocketConfig`, đường RoCC (M2, M3).
+**Đã chạy trên máy người dùng (M2 + M3, job `ascon-m2a`, `--run-id m2`):**
+- Agent thật (`opencode/big-pickle`) xong trong 1 lượt (389 s), không vi phạm luật. Agent
+  tạo `example/AsconRoCC.scala` và `config/AsconConfigs.scala`, sửa
+  `config/fragments/RoCCFragments.scala` (thêm `WithAsconRoCC`).
+- `AsconRocketConfig` build pass ngay vòng 0 (108 s, `rc=0`).
+- Đường RoCC: `boot_good` in `BOOT OK`, `boot_tamper` in `BOOT FAIL`. `digest_match=1`
+  nghĩa là cả `DIGEST_SW` và `DIGEST_HW` đều bằng digest của `ascon.py` trong
+  `expected.json` (`parse_run` trong `ascon_loop.py`).
+- **CYCLES_SW = 503710 / 503709, CYCLES_ROCC = 7021 / 7018**, tức nhanh hơn khoảng
+  **71.7 lần**. CYCLES_ROCC gồm cả 512 lệnh ABSORB và 4 SQUEEZE. Lõi riêng mất 6722 chu
+  kỳ, nên phần chi phí RoCC chỉ khoảng 300 chu kỳ.
+
+**Chưa kiểm chứng:**
+- Chưa đọc mã Scala agent viết (đang chờ người dùng gửi file).
+- RoCC mới chỉ chạy đúng chuỗi lệnh của bootloader: INIT, 512 ABSORB đủ 8 byte, rồi
+  SQUEEZE 0..3. Chưa thử word lẻ byte, SQUEEZE sai thứ tự, hay INIT giữa chừng.
 - `tests/smoke_local.sh`.
 
 ## Chạy trên máy local (Bazzite)
@@ -176,7 +191,7 @@ chia job logs -f ascon-m2
 Gửi lại cho session:
 
 ```bash
-chia job logs ascon-m2 > ~/ascon-m2.log
+chia job logs ascon-m2a > ~/ascon-m2.log   # đổi theo --submission-id đã dùng
 cd ~/CHIA-workflow/projects/ascon-secureboot/out/m2
 cat results.csv; for d in iter*/; do echo "== $d"; cat $d/summary.json; done
 cat iter*/agent_reply.md
@@ -205,6 +220,8 @@ Kèm `~/ascon-m2.log`. Nếu vòng cuối vẫn build lỗi, gửi thêm `cat $L
 
 - **M1** (đạt 23/10/2026): khung loop với LLM bypass, chạy trên `RocketConfig` với
   `-DSW_ONLY`, và thu được file về host.
-- **M2**: bật agent thật, chạy tới khi `AsconRocketConfig` build pass. ← đang ở đây
-- **M3**: bản RoCC: 2 test đạt, `DIGEST_HW == DIGEST_SW ==` `ascon.py`, có cycles.
-- **M4**: `out/final/` (patch cuối, mọi file, `results.csv`, README áp patch và chạy lại).
+- **M2** (đạt 23/10/2026, job `ascon-m2a`): agent thật, `AsconRocketConfig` build pass ở
+  vòng 0.
+- **M3** (đạt cùng job): bản RoCC: 2 test đạt, `DIGEST_HW == DIGEST_SW ==` `ascon.py`,
+  CYCLES_ROCC khoảng 7020 so với CYCLES_SW khoảng 503700.
+- **M4**: `out/final/` (patch cuối, mọi file, `results.csv`, README áp patch và chạy lại). ← đang ở đây
