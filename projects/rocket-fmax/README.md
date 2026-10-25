@@ -151,4 +151,11 @@ Cuối mỗi lần chạy, loop cũng để sẵn bản tốt nhất trong conta
 - **Chạy thật lần 4 (25/10/2026), luồng `v3`:** Yosys lỗi sau 0,4 phút, vì `+/choices/kogge-stone.v`
   không có trong Yosys 0.38 (file xuất hiện từ tag `yosys-0.40`). Default `$lcu` của 0.38 đã là
   Brent-Kung, nên chuỗi `maj3` trên đường găng không phải do bộ cộng ripple. Đã bỏ `v3`, chốt `v2`.
-- **Chưa chạy thật:** cả ba mốc trên cluster, image eda, OpenSTA thật (định dạng output của `report_*`), thời gian Yosys trên RocketTile.
+- **Chạy thật lần 5 (25/10/2026), baseline chính thức, Mốc 1 xong:** luồng `v2`, chu kỳ cố định
+  **21,2 ns** (dùng cho mọi vòng). Worst slack −1,00 ns, TNS −106,5 ns, đường găng 22,2 ns
+  (~45,0 MHz), area 1.069.069 um², Yosys 2,6 phút. Đường găng `core.div.divisor[1]_reg ->
+  core.div.remainder[63]_reg` có khoảng 40 cell `maj3` nối tiếp qua chân C (chuỗi carry ripple).
+  Ở 10 ns đường găng là 21,2 ns, ở 21,2 ns là 22,2 ns: `abc -D` map khác nhau theo chu kỳ, nên
+  chỉ so slack giữa các lần chạy cùng chu kỳ. Ở 21,2 ns chỉ còn họ `core.div.*` vi phạm;
+  `dfma` pipe_b có slack +0,21 ns.
+- **Chưa chạy thật:** Mốc 2 và Mốc 3.
