@@ -52,6 +52,8 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 
 ## Project đang làm: `projects/ascon-secureboot/` (RoCC Ascon-Hash256, secure boot)
 
+Nhánh: `project/ascon-secureboot` (trước đây là `temp`).
+
 Chi tiết, lệnh chạy và trạng thái kiểm chứng xem `projects/ascon-secureboot/README.md`.
 - **M1 đạt** trên máy người dùng (job `ascon-m1`). RocketConfig với `-DSW_ONLY`: BOOT OK
   và BOOT FAIL đúng, digest khớp `ascon.py`, CYCLES_SW khoảng 498K cho 4 KiB. Verilator
@@ -111,14 +113,34 @@ Chi tiết, lệnh chạy và trạng thái kiểm chứng xem `projects/ascon-s
 ## Quy ước làm việc
 
 - Trả lời người dùng bằng **tiếng Việt**.
-- Phát triển trên nhánh `temp`, push bằng
-  `git push -u origin temp`. **Không tạo PR** trừ khi người dùng yêu cầu.
+- Theo **Quy ước nhánh** ở dưới. **Không tạo PR** trừ khi người dùng yêu cầu.
 - Trước khi tạo, xoá hoặc tách file tài liệu, **liệt kê file hiện có và file dự định
   thay đổi để người dùng duyệt**.
 - Claude không chạy được lệnh trên máy người dùng: đưa lệnh cho người dùng chạy, rồi đọc
   log họ gửi lại.
 - Ghi rõ phần nào đã kiểm chứng và phần nào chưa. Khi một thứ chạy được hoặc gặp lỗi
   mới, cập nhật docs và file này.
+
+## Quy ước nhánh
+
+| Nhánh | Chứa gì | Ghi chú |
+|---|---|---|
+| `main` | Bản ổn định | **Hạn chế đụng.** Chỉ nhận merge từ `setup` qua PR, khi người dùng yêu cầu. |
+| `setup` | Tài liệu, config, script chung, `CLAUDE.md` | Sửa phần dùng chung cho mọi project ở đây. |
+| `project/<tên>` | Một project, code nằm trong `projects/<tên>/` | Tách từ `setup`. Tên viết thường, nối bằng `-`. |
+
+- Mở project mới: `git checkout -b project/<tên> origin/setup`, rồi tạo `projects/<tên>/`
+  kèm `README.md` (mục tiêu, lệnh chạy, trạng thái kiểm chứng).
+- Trong nhánh project, chỉ sửa `projects/<tên>/`, và thêm một mục ngắn về project vào
+  `CLAUDE.md`. Nếu phát hiện điều gì dùng chung (lỗi Bazzite mới, ghi chú CHIA), sửa trên
+  `setup` rồi `git merge origin/setup` vào nhánh project. Không sửa docs chung ngay trong
+  nhánh project.
+- Không rebase hay force-push các nhánh `setup` và `project/*`.
+- Session Claude Code được giao nhánh `claude/*` thì vẫn push lên nhánh đó, nhưng phải
+  checkout đúng nhánh `setup` hoặc `project/<tên>` làm gốc. Khi được người dùng cho phép,
+  push luôn lên nhánh đích.
+- Project hiện có: `project/ascon-secureboot` (RoCC Ascon-Hash256, secure boot; xong M1–M4).
+  Nhánh `temp` cũ đã đổi tên thành nhánh này.
 
 ## Việc tiếp theo (gợi ý)
 
