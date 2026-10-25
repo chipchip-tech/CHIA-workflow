@@ -1,0 +1,19 @@
+# Cache + bypass config for rocket_fmax.py (read by start_cache and Bypass).
+# The cache is keyed by _chia_tag only, so each baseline function gets its own tag:
+#   extract_tile_rtl -> baseline_rtl
+#   run_gate         -> baseline_gate
+#   synth_sta        -> baseline_synth_p<period>   (e.g. baseline_synth_p10, baseline_synth_p7p5)
+# Baseline results are written on the first run and replayed on later runs
+# (bypass gated on a real cache hit, see cache_hit_cond in fmax_nodes.py).
+cache:
+  extract_tile_rtl: {cache: true, tags: ["baseline_.*"]}
+  run_gate:         {cache: true, tags: ["baseline_.*"]}
+  synth_sta:        {cache: true, tags: ["baseline_.*"]}
+
+bypass:
+  extract_tile_rtl: {bypass: true, tags: ["baseline_.*"]}
+  run_gate:         {bypass: true, tags: ["baseline_.*"]}
+  synth_sta:        {bypass: true, tags: ["baseline_.*"]}
+  # Milestone 2 (--bypass-llm): the provider is only registered with that flag;
+  # real agent rounds use tags agent_<run>_iter<N>_llm, which never match.
+  OpenCodeLLM.prompt: {bypass: true, tags: ["m2_.*"]}

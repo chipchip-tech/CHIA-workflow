@@ -109,6 +109,14 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   push luôn lên nhánh đích.
 - Project hiện có: `project/ascon-secureboot` (RoCC Ascon-Hash256, secure boot; xong M1–M4).
   Nhánh `temp` cũ đã đổi tên thành nhánh này.
+- `project/rocket-fmax` (`projects/rocket-fmax/`): loop agent tối ưu Fmax của RocketTile, giữ
+  nguyên cycle (gate: riscv-tests + mcycle của benchmark phải khớp baseline; đo bằng Yosys +
+  OpenSTA sky130hd, worker `eda` tự build). Mốc 1 (baseline): code xong, kiểm bằng mock, **chưa
+  chạy trên máy người dùng**. Claude không tự viết patch Chisel: mọi chỉnh sửa Chisel do loop
+  (agent) làm. Đã kiểm (probe 25/10/2026): riscv-tests ở
+  `$RISCV/riscv64-unknown-elf/share/riscv-tests` (107 test ISA -p), module `RocketTile` có cổng
+  `clock`/`reset`, `chia-cacti` có `sta` (dùng `-group_count`, không phải `-group_path_count`),
+  `make verilog CONFIG=RocketConfig` chỉ mất ~1 phút.
 
 ## Việc tiếp theo (gợi ý)
 

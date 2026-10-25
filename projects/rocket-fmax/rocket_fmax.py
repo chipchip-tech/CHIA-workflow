@@ -1,0 +1,486 @@
+"""Rocket Fmax loop on CHIA: an agent shortens RocketTile's critical path
+without changing cycle behaviour.
+
+One round:
+  reset rocket-chip to the best patch -> agent edits Chisel (BashTool, stopped
+  before the build) -> scope check -> build RocketConfig (Verilator +
+  generated Verilog) -> in parallel: gate (riscv-tests ISA + benchmarks, mcycle
+  must equal baseline) and Yosys/OpenSTA on RocketTile -> accept if build ok,
+  gate ok and worst slack better than the best so far; else revert and feed the
+  reason into the next prompt.
+
+Milestones (run from this directory on the head):
+  M1  chia job submit --working-dir . -- python rocket_fmax.py --baseline-only --period-ns 10
+  M2  chia job submit --working-dir . -- python rocket_fmax.py --period-ns <P> --iters 1 --bypass-llm
+  M3  chia job submit --working-dir . -- python rocket_fmax.py --period-ns <P> --iters 5
+
+Outputs go to --out-dir/<run-name>/ on the head (results.csv, patches/, runs/,
+profile/). Needs workers advertising chipyard, verilator_run, eda, opencode_creds
+(see cluster.yaml).
+"""
+
+import argparse
+import csv
+import dataclasses
+import json
+import os
+import re
+import string
+import subprocess
+import time
+import traceback
+from datetime import datetime
+from pathlib import Path
+
+import ray
+
+import fmax_nodes as N
+from chia.base.ChiaFunction import chia_cancel, get
+from chia.base.bypass import Bypass
+from chia.base.cache import start_cache, stop_cache
+from chia.base.tools.BashTool import BashTool
+from chia.chipyard.chisel_build_node import BuildTarget, ChiselBuildNode
+from chia.models.opencode import OpenCodeLLM
+from chia.trace.profiler import start_collector, stop_collector
+
+HERE = Path(__file__).resolve().parent
+EXP_YAML = HERE / "exp.yaml"
+PROMPT = HERE / "prompts" / "improve_timing.md"
+CSV_FIELDS = ["iter", "accepted", "wns_ns", "tns_ns", "worst_slack_ns", "fmax_mhz", "critical_path",
+              "isa_pass", "bench_cycles_match", "reason", "area_um2", "elapsed_min"]
+SYSTEM_MESSAGE = ("You are a hardware timing engineer working on the Rocket core in Chipyard. "
+                  "You only edit Chisel sources through the chipyard_bash tool and never build, "
+                  "simulate or synthesize: the surrounding loop does that after you finish.")
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--period-ns", type=float, required=True, help="fixed clock period for abc -D and STA")
+    p.add_argument("--baseline-only", action="store_true", help="milestone 1: baseline only")
+    p.add_argument("--iters", type=int, default=5)
+    p.add_argument("--bypass-llm", action="store_true",
+                   help="milestone 2: bypass OpenCodeLLM.prompt; the loop applies --patch-file "
+                        "or a comment-only edit instead")
+    p.add_argument("--patch-file", default=None, help="patch (git diff in rocket-chip) for --bypass-llm")
+    p.add_argument("--marker-file", default="src/main/scala/rocket/ALU.scala",
+                   help="file that gets a comment when --bypass-llm has no --patch-file")
+    p.add_argument("--run-name", default=None)
+    p.add_argument("--out-dir", default="~/rocket-fmax-out")
+    p.add_argument("--cache-dir", default="~/chia_cache")
+    p.add_argument("--flush-cache", action="store_true")
+    p.add_argument("--make-jobs", type=int, default=16)
+    p.add_argument("--build-timeout", type=int, default=3600)
+    p.add_argument("--repeat-seed", type=int, default=7, help="baseline: rerun benchmarks with this seed")
+    p.add_argument("--model", default="opencode/big-pickle")
+    p.add_argument("--llm-timeout", type=int, default=1800)
+    p.add_argument("--min-gain-ns", type=float, default=0.0,
+                   help="accept only if worst slack improves by more than this")
+    a = p.parse_args()
+    if a.run_name is None:
+        mode = "baseline" if a.baseline_only else ("m2" if a.bypass_llm else "agent")
+        a.run_name = f"{mode}-{datetime.now().strftime('%Y%m%d-%H%M')}"
+    a.out_dir = os.path.expanduser(a.out_dir)
+    a.cache_dir = os.path.expanduser(a.cache_dir)
+    return a
+
+
+# ---------------------------------------------------------------------------
+# small helpers
+# ---------------------------------------------------------------------------
+
+def write(path: Path, text: str):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text if text is not None else "")
+
+
+def as_json(obj) -> str:
+    return json.dumps(dataclasses.asdict(obj) if dataclasses.is_dataclass(obj) else obj,
+                      indent=2, ensure_ascii=False, default=str)
+
+
+def fmt(x, nd=3):
+    return "" if x is None else f"{x:.{nd}f}"
+
+
+def append_row(csv_path: Path, row: dict):
+    new = not csv_path.exists()
+    with open(csv_path, "a", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=CSV_FIELDS)
+        if new:
+            w.writeheader()
+        w.writerow({k: row.get(k, "") for k in CSV_FIELDS})
+
+
+def synth_row(s) -> dict:
+    if s is None:
+        return {}
+    return {"wns_ns": fmt(s.wns_ns, 4), "tns_ns": fmt(s.tns_ns, 4), "worst_slack_ns": fmt(s.worst_slack_ns, 4),
+            "fmax_mhz": fmt(s.fmax_mhz, 2), "critical_path": f"{s.crit_start} -> {s.crit_end}",
+            "area_um2": fmt(s.area_um2, 0)}
+
+
+def cache_has(tag: str) -> bool:
+    from chia.base.cache import get_active_cache
+    return bool(get(get_active_cache().has.chia_remote(tag)))
+
+
+def build(a, name: str):
+    cb = ChiselBuildNode(N.CHIPYARD, N.CONFIG, target=BuildTarget.VERILATOR, make_jobs=a.make_jobs,
+                         timeout_seconds=a.build_timeout, collect_generated_src=True, name=name)
+    return cb.build.chia_remote(cb)
+
+
+def build_errors(art) -> str:
+    text = (art.stdout or "") + "\n" + (art.stderr or "")
+    lines = [l for l in text.splitlines()
+             if re.search(r"\[error\]|error:|%Error|Exception|FAILED", l)]
+    return "\n".join(lines[:80]) if lines else "\n".join(text.splitlines()[-60:])
+
+
+def save_build(d: Path, art):
+    write(d / "build.log", f"success={art.success} returncode={art.returncode}\n"
+                           f"[stdout tail]\n{(art.stdout or '')[-200000:]}\n[stderr tail]\n{(art.stderr or '')[-100000:]}")
+
+
+def save_synth(d: Path, s):
+    write(d / "timing_paths.rpt", s.paths)
+    write(d / "timing_endpoints.rpt", s.endpoints)
+    write(d / "sta.log", s.sta_log)
+    write(d / "yosys.log", s.yosys_log_tail)
+    write(d / "yosys_stat.txt", s.stat)
+    summary = {k: v for k, v in dataclasses.asdict(s).items()
+               if k not in ("paths", "endpoints", "sta_log", "yosys_log_tail", "stat")}
+    write(d / "synth_summary.json", json.dumps(summary, indent=2, default=str))
+
+
+def save_gate(d: Path, g):
+    write(d / "gate.json", as_json(g))
+    rows = ["bench,passed,mcycle,minstret,sim_cycles"]
+    rows += [f"{n},{b['passed']},{b['mcycle']},{b['minstret']},{b['sim_cycles']}" for n, b in g.bench.items()]
+    write(d / "cycles.csv", "\n".join(rows) + "\n")
+    if g.fail_logs:
+        write(d / "sim_fail.log", "\n\n".join(f"===== {n}\n{t}" for n, t in g.fail_logs.items()))
+
+
+def compare_gate(base, cur) -> tuple[bool, bool, list[str]]:
+    """(all ISA pass, every benchmark passes with baseline mcycle, reasons)."""
+    reasons = []
+    isa_fail = [n for n in base.isa if not cur.isa.get(n, False)]
+    if isa_fail:
+        reasons.append(f"ISA fail ({len(isa_fail)}): {', '.join(isa_fail[:15])}")
+    cyc_ok = True
+    for n, b in base.bench.items():
+        c = cur.bench.get(n)
+        if not c or not c["passed"]:
+            cyc_ok = False
+            reasons.append(f"{n}: không pass")
+        elif c["mcycle"] != b["mcycle"]:
+            cyc_ok = False
+            reasons.append(f"{n}: mcycle {b['mcycle']} -> {c['mcycle']} ({c['mcycle'] - b['mcycle']:+d})")
+        elif c["minstret"] != b["minstret"]:
+            reasons.append(f"{n}: minstret {b['minstret']} -> {c['minstret']} (cảnh báo)")
+    return not isa_fail, cyc_ok, reasons
+
+
+def print_synth(label: str, s):
+    print(f"\n===== {label}: period {s.period_ns} ns")
+    print(f"worst slack {fmt(s.worst_slack_ns, 4)} ns | WNS {fmt(s.wns_ns, 4)} | TNS {fmt(s.tns_ns, 4)} | "
+          f"Fmax ~ {fmt(s.fmax_mhz, 2)} MHz | area {fmt(s.area_um2, 0)} um2 | "
+          f"yosys {s.yosys_seconds / 60:.1f} min, sta {s.sta_seconds:.0f} s")
+    print(f"critical path: {s.crit_start} -> {s.crit_end}")
+    print("top-10 endpoints:\n" + s.endpoints, flush=True)
+
+
+# ---------------------------------------------------------------------------
+# baseline
+# ---------------------------------------------------------------------------
+
+def ensure_baseline(a, out: Path, elfs: dict, snap: dict) -> dict:
+    """Build + gate + synth of the unmodified tree, served from the cache when
+    available (tags baseline_rtl / baseline_gate / baseline_synth_p<period>)."""
+    tags = {"rtl": "baseline_rtl", "gate": "baseline_gate",
+            "synth": "baseline_synth_p" + f"{a.period_ns:g}".replace(".", "p")}
+    hits = {k: cache_has(t) for k, t in tags.items()}
+    print(f"baseline cache: " + ", ".join(f"{tags[k]}={'HIT' if v else 'miss'}" for k, v in hits.items()),
+          flush=True)
+    d = out / "runs" / "baseline"
+    t0 = time.time()
+    build_ref = None
+    if not (hits["rtl"] and hits["gate"]):
+        print(get(N.reset_rocket.chia_remote(snap["rocket_head"], "")) or "rocket-chip clean", flush=True)
+        build_ref = build(a, "baseline")
+        art = get(build_ref)
+        save_build(d, art)
+        if not art.success:
+            raise SystemExit(f"baseline build failed:\n{build_errors(art)}")
+        print(f"baseline build ok ({(time.time() - t0) / 60:.1f} min)", flush=True)
+    # build -> (gate || synth); synth is only dispatched once the build is done
+    rtl = get(N.extract_tile_rtl.chia_remote(build_ref, _chia_tag=tags["rtl"]))
+    gate_ref = N.run_gate.chia_remote(build_ref, elfs, repeat_seed=a.repeat_seed, _chia_tag=tags["gate"])
+    synth_ref = N.synth_sta.chia_remote(rtl, a.period_ns, _chia_tag=tags["synth"])
+    gate = get(gate_ref)
+    synth = get(synth_ref)
+
+    write(d / "rtl_info.json", json.dumps({"top": rtl.top, "files": len(rtl.files), "modules": rtl.modules,
+                                           "blackboxes": list(rtl.blackboxes), "replaced": rtl.replaced},
+                                          indent=2))
+    save_gate(d, gate)
+    save_synth(d, synth)
+    print_synth("baseline", synth)
+    print(f"gate: ISA {sum(gate.isa.values())}/{len(gate.isa)} pass, gate {gate.seconds / 60:.1f} min")
+    for n, b in gate.bench.items():
+        r = gate.bench_repeat.get(n, {})
+        print(f"  {n:10s} pass={b['passed']} mcycle={b['mcycle']} minstret={b['minstret']} "
+              f"sim_cycles={b['sim_cycles']} | seed {a.repeat_seed}: mcycle={r.get('mcycle')}")
+    first = next(iter(gate.bench.values()), {})
+    print(f"  seed line: {first.get('seed_line', '')!r} / repeat: "
+          f"{next(iter(gate.bench_repeat.values()), {}).get('seed_line', '')!r}")
+
+    problems = [f"ISA fail: {n}" for n, ok in gate.isa.items() if not ok]
+    problems += [f"benchmark fail: {n}" for n, b in gate.bench.items() if not b["passed"]]
+    problems += [f"{n}: mcycle khác khi đổi seed ({b['mcycle']} vs {gate.bench_repeat[n]['mcycle']})"
+                 for n, b in gate.bench.items()
+                 if n in gate.bench_repeat and gate.bench_repeat[n]["mcycle"] != b["mcycle"]]
+    if not synth.success:
+        problems.append(f"synth/STA lỗi: {synth.error}")
+    if problems:
+        write(d / "problems.txt", "\n".join(problems))
+        raise SystemExit("baseline chưa dùng được:\n  " + "\n  ".join(problems)
+                         + f"\nxem {d}/sim_fail.log, yosys.log, sta.log")
+    if synth.worst_slack_ns is not None:
+        delay = a.period_ns - synth.worst_slack_ns
+        print(f"\nđộ trễ đường găng baseline = {delay:.3f} ns (Fmax ~ {1000 / delay:.1f} MHz); "
+              f"chu kỳ cố định đề xuất ~ {round(delay, 1)} ns", flush=True)
+    append_row(out / "results.csv", {"iter": "baseline", "accepted": True, **synth_row(synth),
+                                     "isa_pass": True, "bench_cycles_match": True, "reason": "baseline",
+                                     "elapsed_min": f"{(time.time() - t0) / 60:.1f}"})
+    return {"rtl": rtl, "gate": gate, "synth": synth}
+
+
+# ---------------------------------------------------------------------------
+# agent rounds
+# ---------------------------------------------------------------------------
+
+def render_prompt(a, i: int, best: dict, history: list[str]) -> str:
+    s = best["synth"]
+    return string.Template(PROMPT.read_text()).safe_substitute(
+        ITER=i, MAX_ITERS=a.iters, PERIOD_NS=a.period_ns, BEST_NAME=best["name"],
+        BEST_SLACK=fmt(s.worst_slack_ns, 4), BEST_FMAX=fmt(s.fmax_mhz, 2),
+        CRIT=f"{s.crit_start} -> {s.crit_end}", ENDPOINTS=s.endpoints,
+        STAGE_DIR=N.STAGE_DIR, HISTORY="\n\n".join(history) or "(chưa có vòng nào trước)")
+
+
+def stage_files(best: dict, history: list[str]) -> dict:
+    s, rtl = best["synth"], best["rtl"]
+    files = {"timing_paths.rpt": s.paths, "timing_endpoints.rpt": s.endpoints,
+             "best.patch": best["patch"], "history.md": "\n\n".join(history)}
+    files.update({f"best_verilog/{n}": t for n, t in rtl.files.items()})
+    return files
+
+
+def run_round(a, i: int, out: Path, llm, elfs, snap, base, best, history) -> dict:
+    """One round. Returns {"accepted", "reason", "synth", "rtl", "patch", ...}."""
+    d = out / "runs" / f"iter{i}"
+    head, outside = snap["rocket_head"], snap["outside"]
+    r = {"accepted": False, "reason": "", "synth": None, "rtl": None, "patch": "",
+         "isa_pass": "", "bench_cycles_match": ""}
+
+    get(N.reset_rocket.chia_remote(head, best["patch"]))
+    get(N.stage_for_agent.chia_remote(stage_files(best, history)))
+    prompt = render_prompt(a, i, best, history)
+    write(d / "prompt.md", prompt)
+
+    tag = f"m2_iter{i}_llm" if a.bypass_llm else f"agent_{a.run_name}_iter{i}_llm"
+    t_agent = time.time()
+    if a.bypass_llm:
+        resp = get(llm.prompt.chia_remote(llm, prompt, tools=[], _chia_tag=tag))
+        patch_in = Path(a.patch_file).read_text() if a.patch_file else None
+        get(N.apply_edit.chia_remote(patch_in, a.marker_file, f"rocket-fmax milestone-2 bypass, iter{i}"))
+    else:
+        bash = BashTool("chipyard_bash", N.CHIPYARD, timeout_seconds=120,
+                        task_options={"resources": {"chipyard": 1}})
+        try:
+            resp = get(llm.prompt.chia_remote(llm, prompt, tools=[bash], _chia_tag=tag))
+        except Exception as e:                                       # noqa: BLE001
+            resp = None
+            write(d / "agent_error.txt", traceback.format_exc())
+            r["reason"] = f"LLM lỗi: {type(e).__name__}: {e}"[:500]
+        finally:
+            bash.stop()           # free the chipyard slot before the build
+    r["agent_min"] = (time.time() - t_agent) / 60
+    if resp is not None:
+        write(d / "agent_response.md", resp.result)
+        write(d / "agent_transcript.txt", resp.stream_result)
+        if not resp.success and not r["reason"]:
+            r["reason"] = f"LLM không thành công (returncode {resp.returncode})"
+
+    diff = get(N.collect_diff.chia_remote(head, outside))
+    r["patch"] = diff["patch"]
+    write(out / "patches" / f"iter{i}.patch", diff["patch"])
+    write(d / "diff_files.txt", "\n".join(diff["files"]))
+    if diff["outside_changed"]:
+        rest = get(N.restore_outside.chia_remote(outside))
+        write(d / "outside_restore.json", json.dumps(rest, indent=2))
+        if not rest["ok"]:
+            raise SystemExit(f"agent sửa ngoài rocket-chip và không khôi phục được: {rest['remaining']}\n"
+                             "tạo lại container chipyard (docker rm -f ... && chia up --add) rồi chạy lại")
+    violations = N.scope_violations(diff["files"], diff["outside_changed"])
+    if r["reason"]:
+        return r
+    if diff["patch"] == best["patch"]:
+        r["reason"] = f"agent không thay đổi gì so với {best['name']}"
+        return r
+    if violations:
+        r["reason"] = "vi phạm phạm vi: " + "; ".join(violations)
+        return r
+
+    t_build = time.time()
+    build_ref = build(a, f"iter{i}")
+    art = get(build_ref)
+    save_build(d, art)
+    r["build_min"] = (time.time() - t_build) / 60
+    if not art.success:
+        r["reason"] = "build lỗi:\n" + build_errors(art)
+        return r
+
+    try:
+        rtl = get(N.extract_tile_rtl.chia_remote(build_ref))
+    except Exception as e:                                           # noqa: BLE001
+        r["reason"] = f"không lấy được Verilog {N.TOP}: {e}"[:1000]
+        return r
+    r["rtl"] = rtl
+    gate_ref = N.run_gate.chia_remote(build_ref, elfs)
+    synth_ref = N.synth_sta.chia_remote(rtl, a.period_ns)
+    gate = get(gate_ref)
+    save_gate(d, gate)
+    isa_ok, cyc_ok, why = compare_gate(base["gate"], gate)
+    r["isa_pass"], r["bench_cycles_match"] = isa_ok, cyc_ok
+    write(d / "gate_compare.txt", "\n".join(why) or "khớp baseline")
+    if not (isa_ok and cyc_ok):
+        chia_cancel(synth_ref, force=True)
+        r["reason"] = "gate không đạt: " + "; ".join(why)
+        return r
+
+    synth = get(synth_ref)
+    save_synth(d, synth)
+    r["synth"] = synth
+    if not synth.success:
+        r["reason"] = f"synth/STA lỗi: {synth.error}"
+        return r
+    old = best["synth"].worst_slack_ns
+    if synth.worst_slack_ns <= old + a.min_gain_ns:
+        r["reason"] = (f"slack không tốt hơn: {synth.worst_slack_ns:.4f} ns so với {old:.4f} ns "
+                       f"của {best['name']} (đường găng {synth.crit_start} -> {synth.crit_end})")
+        return r
+    r["accepted"] = True
+    r["reason"] = f"slack {old:.4f} -> {synth.worst_slack_ns:.4f} ns"
+    return r
+
+
+def history_entry(i: int, r: dict, resp_summary: str) -> str:
+    s = r.get("synth")
+    lines = [f"### Vòng {i}: {'NHẬN' if r['accepted'] else 'LOẠI'}",
+             f"Lý do: {r['reason'][:3000]}"]
+    if s is not None and s.success:
+        lines.append(f"Kết quả: worst slack {s.worst_slack_ns:.4f} ns, đường găng {s.crit_start} -> {s.crit_end}")
+    if resp_summary:
+        lines.append(f"Tóm tắt của agent: {resp_summary[:800]}")
+    if not r["accepted"] and r["patch"]:
+        lines.append("Patch đã bị loại (đã revert, đừng lặp lại y nguyên):\n```diff\n" + r["patch"][:4000] + "\n```")
+    return "\n".join(lines)
+
+
+def run(a, out: Path):
+    csv_path = out / "results.csv"
+    elfs = get(N.load_test_elfs.chia_remote())
+    print(f"ELF: {len(elfs['isa'])} ISA tests, benchmarks {list(elfs['bench'])}", flush=True)
+    snap = get(N.tree_snapshot.chia_remote())
+    write(out / "runs" / "tree_snapshot.json", json.dumps(snap, indent=2))
+
+    base = ensure_baseline(a, out, elfs, snap)
+    if a.baseline_only:
+        return
+
+    llm = OpenCodeLLM(model=a.model, system_message=SYSTEM_MESSAGE, timeout_seconds=a.llm_timeout, retries=1)
+    best = {"name": "baseline", "patch": "", "synth": base["synth"], "rtl": base["rtl"]}
+    history: list[str] = []
+    for i in range(1, a.iters + 1):
+        t0 = time.time()
+        print(f"\n######## round {i}/{a.iters}", flush=True)
+        try:
+            r = run_round(a, i, out, llm, elfs, snap, base, best, history)
+        except SystemExit:
+            raise
+        except Exception as e:                                       # noqa: BLE001
+            write(out / "runs" / f"iter{i}" / "error.txt", traceback.format_exc())
+            r = {"accepted": False, "reason": f"lỗi hạ tầng: {type(e).__name__}: {e}"[:1000],
+                 "synth": None, "patch": "", "isa_pass": "", "bench_cycles_match": ""}
+        r["minutes"] = (time.time() - t0) / 60
+        resp_path = out / "runs" / f"iter{i}" / "agent_response.md"
+        resp_summary = resp_path.read_text()[-1500:] if resp_path.exists() else ""
+        write(out / "runs" / f"iter{i}" / "decision.json",
+              json.dumps({k: v for k, v in r.items() if k not in ("synth", "rtl", "patch")},
+                         indent=2, ensure_ascii=False, default=str))
+        append_row(csv_path, {"iter": i, "accepted": r["accepted"], **synth_row(r.get("synth")),
+                              "isa_pass": r["isa_pass"], "bench_cycles_match": r["bench_cycles_match"],
+                              "reason": r["reason"].replace("\n", " | ")[:1000],
+                              "elapsed_min": f"{r['minutes']:.1f}"})
+        print(f"round {i}: {'ACCEPT' if r['accepted'] else 'REJECT'} ({r['minutes']:.1f} min) - "
+              f"{r['reason'][:400]}", flush=True)
+        if r["accepted"]:
+            best = {"name": f"iter{i}", "patch": r["patch"], "synth": r["synth"], "rtl": r["rtl"]}
+            print_synth(f"new best iter{i}", r["synth"])
+        history.append(history_entry(i, r, resp_summary))
+
+    write(out / "patches" / "best.patch", best["patch"])
+    write(out / "best.json", json.dumps({"best": best["name"], **synth_row(best["synth"])}, indent=2))
+    get(N.reset_rocket.chia_remote(snap["rocket_head"], best["patch"]))
+    print(f"\nbest: {best['name']} | " + json.dumps(synth_row(best["synth"]), ensure_ascii=False))
+
+
+def export_profile(out: Path):
+    log = out / "profile" / "ChiaProfileCollector.log"
+    if not log.exists():
+        return
+    # One run spans hours with long quiet gaps (build, synth): keep it in one segment.
+    cmd = ["chia", "viz-profile", str(log), "--format", "html", "--output-dir", str(out / "profile"),
+           "--gap-threshold", "1000000"]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        print(f"profile: {' '.join(cmd)} -> rc={res.returncode}\n{res.stdout[-500:]}{res.stderr[-500:]}")
+    except Exception as e:                                           # noqa: BLE001
+        print(f"profile export failed ({e}); run by hand: {' '.join(cmd)}")
+
+
+def main():
+    a = parse_args()
+    out = Path(a.out_dir) / a.run_name
+    for sub in ("patches", "runs", "profile"):
+        (out / sub).mkdir(parents=True, exist_ok=True)
+    write(out / "args.json", json.dumps(vars(a), indent=2))
+    print(f"run {a.run_name}: output {out}", flush=True)
+
+    ray.init(address="auto", namespace="rocket_fmax", ignore_reinit_error=True)
+    start_collector(log_dir=str(out / "profile"))
+    cache = start_cache(size=4, units="GB", cache_dir_path=a.cache_dir, yaml_path=str(EXP_YAML))
+    if a.flush_cache:
+        get(cache.flush.chia_remote())
+    bypass = Bypass(yaml_path=str(EXP_YAML))
+    for fn in ("extract_tile_rtl", "run_gate", "synth_sta"):
+        bypass.set_provider(fn, N.cache_provider)
+        bypass.set_cond(fn, N.cache_hit_cond)
+    if a.bypass_llm:
+        bypass.set_provider("OpenCodeLLM.prompt", N.canned_llm_result)
+    try:
+        run(a, out)
+    finally:
+        try:
+            stop_collector()
+        finally:
+            stop_cache()
+            export_profile(out)
+    print(f"done: {out}")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,79 @@
+# CHIA cluster for projects/rocket-fmax: configs/cluster-local.yaml plus
+#   - verilator_run: 4 slots (4 simulators at once, only while the build is idle)
+#   - rocket_eda: Yosys + OpenSTA + sky130hd liberty (image built locally, docker/EdaDockerfile)
+# Node type names match cluster-local.yaml, so this is the same cluster ("default").
+#
+# Before `chia up`:
+#   loginctl enable-linger $USER          # once; see docs/setup-bazzite.md section 5
+#   export THIS_MACHINE=$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')
+#   chia up projects/rocket-fmax/cluster.yaml -y
+
+cluster_name: default
+
+provider:
+    head_ip: ${THIS_MACHINE}
+
+auth:
+    ssh_user: ${USER}
+    # ssh_private_key: ~/.ssh/id_ed25519   # only if the key is not in ssh-agent
+
+available_node_types:
+    hello_chipyard:
+        resources: {"chipyard": 1}
+        num_workers: 1
+        compatible_ips: ["${THIS_MACHINE}"]
+        worker_setup_commands: ["source /home/ray/chipyard/env.sh"]
+        docker:
+            image: "ghcr.io/ucb-bar/chia-chisel-build:latest"
+            container_name: "chia-chipyard-${USER}"
+            run_options:
+                - --shm-size=10.24gb
+            pull_timeout: 7200   # chia-chisel-build is large
+
+    hello_verilator:
+        resources: {"verilator_run": 4}
+        num_workers: 1
+        compatible_ips: ["${THIS_MACHINE}"]
+        docker:
+            image: "ghcr.io/ucb-bar/chia-verilator-run:latest"
+            container_name: "chia-verilator-${USER}"
+            run_options:
+                - --ulimit nofile=65536:65536
+                - --shm-size=10.24gb
+
+    hello_opencode:
+        resources: {"opencode_creds": 1}
+        worker_setup_commands: ["source ~/.bashrc"]
+        num_workers: 1
+        compatible_ips: ["${THIS_MACHINE}"]
+        docker:
+            image: "ghcr.io/ucb-bar/chia-opencode:latest"
+            container_name: "chia-opencode-${USER}"
+
+    rocket_eda:
+        resources: {"eda": 1}
+        num_workers: 1
+        compatible_ips: ["${THIS_MACHINE}"]
+        docker:
+            image: "chia-eda-sky130:latest"
+            container_name: "chia-eda-${USER}"
+            pull_before_run: false   # built locally: docker build -f docker/EdaDockerfile ...
+            run_options:
+                - --shm-size=4gb
+                - --memory=10g       # a runaway Yosys kills only this container
+
+head_env_commands: ["source ~/.bashrc && conda activate chia_env"]
+head_setup_commands: ["source ~/.bashrc && conda activate chia_env"]
+
+# Bazzite: systemd-logind kills everything an SSH session started when that session
+# closes, so the Ray head must run in its own user scope (needs `loginctl enable-linger`).
+head_start_ray_commands:
+    - "source ~/.bashrc && conda activate chia_env && ray stop"
+    - "source ~/.bashrc && conda activate chia_env && \
+        systemd-run --user --scope --quiet \
+        ray start --head --port=6379 --node-ip-address=${THIS_MACHINE} \
+        --include-dashboard=True --dashboard-agent-listen-port=0 --disable-usage-stats"
+
+worker_start_ray_commands:
+    - "ray stop"
+    - "ray start --address=$RAY_HEAD_IP:6379 --dashboard-agent-listen-port=0"
