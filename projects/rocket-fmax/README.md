@@ -158,4 +158,9 @@ Cuối mỗi lần chạy, loop cũng để sẵn bản tốt nhất trong conta
   Ở 10 ns đường găng là 21,2 ns, ở 21,2 ns là 22,2 ns: `abc -D` map khác nhau theo chu kỳ, nên
   chỉ so slack giữa các lần chạy cùng chu kỳ. Ở 21,2 ns chỉ còn họ `core.div.*` vi phạm;
   `dfma` pipe_b có slack +0,21 ns.
-- **Chưa chạy thật:** Mốc 2 và Mốc 3.
+- **Chạy thật lần 6–7 (25/10/2026), Mốc 2 xong:** `--iters 1 --bypass-llm`, chạy 2 lần (`m2a`, `m2b`).
+  Vòng 1 thêm comment vào `ALU.scala`, build 1,3 phút, gate pass (cycle khớp), slack −1,0012 ns
+  bằng baseline → bị loại với lý do "slack không tốt hơn", đúng như dự kiến. Một vòng mất 13,4–14,4
+  phút. Lần 2: `baseline_rtl`, `baseline_gate`, `baseline_synth_v2_p21p2` đều HIT. Có
+  `results.csv`, `patches/iter1.patch`, `best.patch`, `runs/iter1/*` và timeline html.
+- **Chưa chạy thật:** Mốc 3 (agent thật).

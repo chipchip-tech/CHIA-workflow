@@ -113,7 +113,9 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   nguyên cycle (gate: riscv-tests + mcycle của benchmark phải khớp baseline; đo bằng Yosys +
   OpenSTA sky130hd, worker `eda` tự build). **Mốc 1 xong (25/10/2026)**: chốt luồng `v2`,
   chu kỳ cố định **21,2 ns**; baseline worst slack −1,00 ns (đường găng 22,2 ns, ~45 MHz),
-  `~/rocket-fmax-out/m1-final`. Mốc 2: chưa chạy. Claude không tự viết patch Chisel: mọi chỉnh sửa Chisel do loop
+  `~/rocket-fmax-out/m1-final`. **Mốc 2 xong (25/10/2026)**: 1 vòng bypass LLM (`m2a`, `m2b`),
+  vòng bị loại đúng (slack bằng baseline), lần 2 cả 3 bước baseline HIT cache; một vòng
+  ~13–14 phút (build 1,3 + gate ~12, synth chạy song song). Mốc 3: chưa chạy. Claude không tự viết patch Chisel: mọi chỉnh sửa Chisel do loop
   (agent) làm. Đã kiểm (probe 25/10/2026): riscv-tests ở
   `$RISCV/riscv64-unknown-elf/share/riscv-tests` (107 test ISA -p), module `RocketTile` có cổng
   `clock`/`reset`, `chia-cacti` có `sta` (dùng `-group_count`, không phải `-group_path_count`),
