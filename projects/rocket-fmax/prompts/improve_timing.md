@@ -43,7 +43,8 @@ cycles, and do not change what any instruction does or when it retires.
   $BEST_NAME, with nets and fanout. The design is flattened, so a name like
   `core.ex_reg_rs_bypass_0_reg` means register `ex_reg_rs_bypass_0` in instance `core`
   (`RocketTile.core` = `Rocket` in `rocket/RocketCore.scala`). `_reg` marks a flip-flop.
-- `$STAGE_DIR/timing_endpoints.rpt`: one line per endpoint with its slack.
+- `$STAGE_DIR/timing_endpoints.rpt`: the worst 2000 endpoints, one line each with its slack.
+- `$STAGE_DIR/timing_families.txt`: the same endpoints grouped by register (bit index removed).
 - `$STAGE_DIR/best_verilog/`: Verilog of the `RocketTile` hierarchy of $BEST_NAME. Its
   `// @[...scala:line:col]` comments point back to the Chisel source.
 - `$STAGE_DIR/best.patch`: the changes already accepted (empty for the baseline).
@@ -61,7 +62,7 @@ Useful commands:
 
 Worst path: $CRIT
 
-Top endpoints:
+Worst endpoint families (register, number of failing bits):
 
 ```
 $ENDPOINTS

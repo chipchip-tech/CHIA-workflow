@@ -19,7 +19,10 @@ synthesis đang chạy bị huỷ.
 
 Đây là ước lượng chỉ ở mức synthesis, dùng để **so tương đối giữa các vòng**.
 
-- Yosys: `synth -flatten`, `dfflibmap`, `abc -D <period>`, liberty `sky130_fd_sc_hd__tt_025C_1v80`.
+- Yosys: `synth -flatten`, `dfflibmap`, `abc -D <period> -constr` (driving cell `buf_1`, load 5 như
+  ORFS; có `-constr` thì script mặc định của ABC thêm `buffer; upsize; dnsize`), liberty
+  `sky130_fd_sc_hd__tt_025C_1v80`. Đổi luồng synth thì tăng `SYNTH_FLOW` trong `fmax_nodes.py`
+  (đang là `v2`); giá trị này nằm trong tag cache của baseline.
   Các cell `lpflow_*`, `probe*` bị lọc khỏi liberty, giống danh sách dont_use của ORFS.
 - OpenSTA: `create_clock` trên cổng `clock`, I/O có delay 0, `report_worst_slack`, `report_wns`,
   `report_tns`, `report_checks -group_count 10`.
@@ -84,14 +87,17 @@ results.csv            iter, accepted, wns_ns, tns_ns, worst_slack_ns, fmax_mhz,
                        isa_pass, bench_cycles_match, reason, area_um2, elapsed_min
 patches/iter<N>.patch  git diff trong generators/rocket-chip so với commit gốc (gộp cả bản tốt nhất trước đó)
 patches/best.patch     bản tốt nhất (rỗng nếu không vòng nào được nhận)
-runs/baseline/         timing_paths.rpt, timing_endpoints.rpt, sta.log, yosys.log, gate.json, cycles.csv, build.log
+runs/baseline/         timing_paths.rpt, timing_endpoints.rpt, timing_families.txt, sta.log, yosys.log, gate.json, cycles.csv, build.log
 runs/iter<N>/          prompt.md, agent_response.md, agent_transcript.txt, diff_files.txt, build.log,
                        gate.json, gate_compare.txt, sim_fail.log, timing_*.rpt, decision.json
 profile/               ChiaProfileCollector.log + timeline html
 ```
 
 Cache baseline nằm ở `~/chia_cache`, mỗi hàm một tag: `baseline_rtl`, `baseline_gate`,
-`baseline_synth_p<period>` (cache chỉ phân biệt theo tag, không theo tên hàm).
+`baseline_synth_<flow>_p<period>` (cache chỉ phân biệt theo tag, không theo tên hàm).
+
+`rv64ui-p-ma_data` fail ngay trên baseline (load/store lệch địa chỉ). Nếu xác nhận đúng như vậy,
+chạy với `--exclude-isa rv64ui-p-ma_data`: test này bị loại khỏi gate, các test khác vẫn phải pass.
 
 ## Áp lại bản tốt nhất
 
@@ -123,4 +129,13 @@ Cuối mỗi lần chạy, loop cũng để sẵn bản tốt nhất trong conta
   - Lỗi: `'_ProfiledResult' object has no attribute 'generated_src_files'`. Khi profiler bật, ref
     của `chia_remote` truyền thẳng sang task khác sẽ đến nơi dưới dạng lớp bọc. Đã sửa bằng cách
     luôn `get()` giá trị rồi mới truyền.
+- **Chạy thật lần 2 (25/10/2026), baseline ở 10 ns với luồng `v1` (chưa có `-constr`):**
+  - Yosys mất 3,4 phút, STA 8 giây. Area 1.021.382 um².
+  - Worst slack −70,7 ns, tức đường găng khoảng 80,6 ns, trên đường
+    `frontend.fq.valid_0_reg -> core.ex_reg_rs_msb_0[34]_reg`.
+  - Con số quá lớn vì ABC không chèn buffer: mọi cell đều là `_1`. Đã đổi sang `v2`.
+  - Gate mất 15,5 phút: 106/107 test ISA pass, `rv64ui-p-ma_data` fail.
+  - Benchmark: dhrystone 225027, median 6117, multiply 27281, qsort 173402, towers 4075,
+    vvadd 2476 cycle. Đổi seed (`+verilator+seed+7`) số cycle vẫn y hệt. Tuy vậy không thấy dòng
+    "seed" trong output, nên chưa chắc plusarg này có tác dụng.
 - **Chưa chạy thật:** cả ba mốc trên cluster, image eda, OpenSTA thật (định dạng output của `report_*`), thời gian Yosys trên RocketTile.

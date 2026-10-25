@@ -295,6 +295,14 @@ def extract_tile_rtl(artifact) -> TileRTL:
 # eda: Yosys + OpenSTA
 # ---------------------------------------------------------------------------
 
+# Bump when the synthesis/STA flow changes: it is part of the baseline cache tag.
+#   v1: abc -D without -constr (no buffering/sizing: unbuffered high-fanout nets, ~80 ns)
+#   v2: abc -D -constr (ABC's default script then adds buffer; upsize; dnsize)
+SYNTH_FLOW = "v2"
+
+# Same driver/load as ORFS sky130hd (ABC_DRIVER_CELL, ABC_LOAD_IN_FF).
+ABC_CONSTR = "set_driving_cell sky130_fd_sc_hd__buf_1\nset_load 5\n"
+
 YOSYS_SCRIPT = """\
 read_liberty -lib {lib}
 {read_blackboxes}
@@ -303,7 +311,7 @@ hierarchy -check -top {top}
 synth -flatten -top {top}
 rename -wire -suffix _reg t:*DFF*
 dfflibmap -liberty {lib}
-abc -D {period_ps} -liberty {lib}
+abc -D {period_ps} -liberty {lib} -constr abc.constr
 opt_clean -purge
 setundef -zero
 hilomap -singleton -hicell sky130_fd_sc_hd__conb_1 HI -locell sky130_fd_sc_hd__conb_1 LO
@@ -327,7 +335,7 @@ report_wns -digits 4
 puts "@@TNS"
 report_tns -digits 4
 puts "@@ENDPOINTS"
-report_checks -path_delay max -group_count 10 -format end -digits 3
+report_checks -path_delay max -group_count 2000 -format end -digits 3
 puts "@@PATHS"
 report_checks -path_delay max -group_count 10 -fields {{slew cap input_pins nets fanout}} -digits 3
 puts "@@END"
@@ -344,7 +352,8 @@ class SynthResult:
     fmax_mhz: float | None = None         # 1000 / (period - worst_slack)
     crit_start: str = ""
     crit_end: str = ""
-    endpoints: str = ""                   # top-10 endpoints with slack
+    endpoints: str = ""                   # worst 2000 endpoints with slack (one line each)
+    families: str = ""                    # endpoints grouped by register (bit index removed)
     paths: str = ""                       # top-10 full path reports
     area_um2: float | None = None
     yosys_log_tail: str = ""
@@ -398,6 +407,26 @@ def parse_sta(log: str, period_ns: float) -> dict:
                 endpoints=_section(log, "ENDPOINTS"), paths=paths)
 
 
+def endpoint_families(endpoints: str, n: int = 15) -> str:
+    """Group `report_checks -format end` lines by register name without the
+    bit index: worst slack, number of failing bits, one example endpoint."""
+    fam: dict[str, list] = {}
+    for line in endpoints.splitlines():
+        m = re.match(r"\s*(\S+)\s.*?(-?\d+\.\d+)\s*(?:\(VIOLATED\)|\(MET\))?\s*$", line)
+        if not m:
+            continue
+        pin, slack = m.group(1), float(m.group(2))
+        key = re.sub(r"\[\d+\]", "[*]", pin.rsplit("/", 1)[0])
+        f = fam.setdefault(key, [slack, 0, pin])
+        f[1] += 1
+        if slack < f[0]:
+            f[0], f[2] = slack, pin
+    rows = sorted(fam.items(), key=lambda kv: kv[1][0])[:n]
+    out = [f"{'worst slack':>11}  {'bits':>4}  register (bit index -> [*])"]
+    out += [f"{v[0]:11.3f}  {v[1]:4d}  {k}" for k, v in rows]
+    return "\n".join(out)
+
+
 def parse_area(stat: str) -> float | None:
     vals = re.findall(r"Chip area for (?:top )?module '?\\?[\w$.]*'?:\s*([\d.]+)", stat)
     return float(vals[-1]) if vals else None
@@ -439,6 +468,8 @@ def synth_sta(rtl: TileRTL, period_ns: float, yosys_timeout: int = 4 * 3600) -> 
             stat=stat, netlist=netlist)
         with open(os.path.join(work, "synth.ys"), "w") as f:
             f.write(ys)
+        with open(os.path.join(work, "abc.constr"), "w") as f:
+            f.write(ABC_CONSTR)
         t0 = time.time()
         try:
             y = subprocess.run(["yosys", "-q", "-l", "yosys.log", "-s", "synth.ys"],
@@ -467,6 +498,7 @@ def synth_sta(rtl: TileRTL, period_ns: float, yosys_timeout: int = 4 * 3600) -> 
         res.sta_log = s.stdout + ("\nSTDERR:\n" + s.stderr if s.stderr else "")
         for k, v in parse_sta(s.stdout, period_ns).items():
             setattr(res, k, v)
+        res.families = endpoint_families(res.endpoints)
         if s.returncode != 0 or res.worst_slack_ns is None:
             res.error = f"sta returncode {s.returncode}, worst slack not found"
             return res
@@ -492,8 +524,8 @@ class GateResult:
 def _bench_info(r) -> dict:
     mc = re.search(r"mcycle\s*=\s*(\d+)", r.log)
     mi = re.search(r"minstret\s*=\s*(\d+)", r.log)
-    sc = re.search(r"after\s+(\d+)\s+simulation cycles", r.out)
-    seed = next((l for l in r.out.splitlines() if "random" in l and "seed" in l), "")
+    sc = re.search(r"after\s+(\d+)\s+simulation cycles", r.out + r.log)
+    seed = next((l for l in (r.out + "\n" + r.log).splitlines() if "random" in l and "seed" in l), "")
     return {"passed": r.returncode == 0 and mc is not None,
             "mcycle": int(mc.group(1)) if mc else None,
             "minstret": int(mi.group(1)) if mi else None,

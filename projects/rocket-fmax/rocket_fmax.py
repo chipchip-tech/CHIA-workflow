@@ -70,6 +70,9 @@ def parse_args():
     p.add_argument("--flush-cache", action="store_true")
     p.add_argument("--make-jobs", type=int, default=16)
     p.add_argument("--build-timeout", type=int, default=3600)
+    p.add_argument("--exclude-isa", nargs="*", default=[],
+                   help="ISA tests left out of the gate (they must be named explicitly, "
+                        "e.g. tests that already fail on the unmodified baseline)")
     p.add_argument("--repeat-seed", type=int, default=7, help="baseline: rerun benchmarks with this seed")
     p.add_argument("--model", default="opencode/big-pickle")
     p.add_argument("--llm-timeout", type=int, default=1800)
@@ -145,11 +148,12 @@ def save_build(d: Path, art):
 def save_synth(d: Path, s):
     write(d / "timing_paths.rpt", s.paths)
     write(d / "timing_endpoints.rpt", s.endpoints)
+    write(d / "timing_families.txt", s.families)
     write(d / "sta.log", s.sta_log)
     write(d / "yosys.log", s.yosys_log_tail)
     write(d / "yosys_stat.txt", s.stat)
     summary = {k: v for k, v in dataclasses.asdict(s).items()
-               if k not in ("paths", "endpoints", "sta_log", "yosys_log_tail", "stat")}
+               if k not in ("paths", "endpoints", "families", "sta_log", "yosys_log_tail", "stat")}
     write(d / "synth_summary.json", json.dumps(summary, indent=2, default=str))
 
 
@@ -162,10 +166,10 @@ def save_gate(d: Path, g):
         write(d / "sim_fail.log", "\n\n".join(f"===== {n}\n{t}" for n, t in g.fail_logs.items()))
 
 
-def compare_gate(base, cur) -> tuple[bool, bool, list[str]]:
-    """(all ISA pass, every benchmark passes with baseline mcycle, reasons)."""
+def compare_gate(base, cur, exclude=()) -> tuple[bool, bool, list[str]]:
+    """(all ISA pass except `exclude`, every benchmark passes with baseline mcycle, reasons)."""
     reasons = []
-    isa_fail = [n for n in base.isa if not cur.isa.get(n, False)]
+    isa_fail = [n for n in base.isa if n not in exclude and not cur.isa.get(n, False)]
     if isa_fail:
         reasons.append(f"ISA fail ({len(isa_fail)}): {', '.join(isa_fail[:15])}")
     cyc_ok = True
@@ -188,7 +192,8 @@ def print_synth(label: str, s):
           f"Fmax ~ {fmt(s.fmax_mhz, 2)} MHz | area {fmt(s.area_um2, 0)} um2 | "
           f"yosys {s.yosys_seconds / 60:.1f} min, sta {s.sta_seconds:.0f} s")
     print(f"critical path: {s.crit_start} -> {s.crit_end}")
-    print("top-10 endpoints:\n" + s.endpoints, flush=True)
+    print("worst endpoint families:\n" + s.families)
+    print("top-10 endpoints:\n" + "\n".join(s.endpoints.splitlines()[:15]), flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -197,9 +202,9 @@ def print_synth(label: str, s):
 
 def ensure_baseline(a, out: Path, elfs: dict, snap: dict) -> dict:
     """Build + gate + synth of the unmodified tree, served from the cache when
-    available (tags baseline_rtl / baseline_gate / baseline_synth_p<period>)."""
+    available (tags baseline_rtl / baseline_gate / baseline_synth_<flow>_p<period>)."""
     tags = {"rtl": "baseline_rtl", "gate": "baseline_gate",
-            "synth": "baseline_synth_p" + f"{a.period_ns:g}".replace(".", "p")}
+            "synth": f"baseline_synth_{N.SYNTH_FLOW}_p" + f"{a.period_ns:g}".replace(".", "p")}
     hits = {k: cache_has(t) for k, t in tags.items()}
     print(f"baseline cache: " + ", ".join(f"{tags[k]}={'HIT' if v else 'miss'}" for k, v in hits.items()),
           flush=True)
@@ -237,7 +242,13 @@ def ensure_baseline(a, out: Path, elfs: dict, snap: dict) -> dict:
     print(f"  seed line: {first.get('seed_line', '')!r} / repeat: "
           f"{next(iter(gate.bench_repeat.values()), {}).get('seed_line', '')!r}")
 
-    problems = [f"ISA fail: {n}" for n, ok in gate.isa.items() if not ok]
+    unknown = [n for n in a.exclude_isa if n not in gate.isa]
+    if unknown:
+        raise SystemExit(f"--exclude-isa: không có test {unknown}")
+    excluded_fail = [n for n in a.exclude_isa if not gate.isa[n]]
+    print(f"ISA loại khỏi gate (--exclude-isa): {a.exclude_isa or 'không'}; trong đó fail ở baseline: "
+          f"{excluded_fail or 'không'}")
+    problems = [f"ISA fail: {n}" for n, ok in gate.isa.items() if not ok and n not in a.exclude_isa]
     problems += [f"benchmark fail: {n}" for n, b in gate.bench.items() if not b["passed"]]
     problems += [f"{n}: mcycle khác khi đổi seed ({b['mcycle']} vs {gate.bench_repeat[n]['mcycle']})"
                  for n, b in gate.bench.items()
@@ -267,13 +278,14 @@ def render_prompt(a, i: int, best: dict, history: list[str]) -> str:
     return string.Template(PROMPT.read_text()).safe_substitute(
         ITER=i, MAX_ITERS=a.iters, PERIOD_NS=a.period_ns, BEST_NAME=best["name"],
         BEST_SLACK=fmt(s.worst_slack_ns, 4), BEST_FMAX=fmt(s.fmax_mhz, 2),
-        CRIT=f"{s.crit_start} -> {s.crit_end}", ENDPOINTS=s.endpoints,
+        CRIT=f"{s.crit_start} -> {s.crit_end}", ENDPOINTS=s.families,
         STAGE_DIR=N.STAGE_DIR, HISTORY="\n\n".join(history) or "(chưa có vòng nào trước)")
 
 
 def stage_files(best: dict, history: list[str]) -> dict:
     s, rtl = best["synth"], best["rtl"]
     files = {"timing_paths.rpt": s.paths, "timing_endpoints.rpt": s.endpoints,
+             "timing_families.txt": s.families,
              "best.patch": best["patch"], "history.md": "\n\n".join(history)}
     files.update({f"best_verilog/{n}": t for n, t in rtl.files.items()})
     return files
@@ -353,7 +365,7 @@ def run_round(a, i: int, out: Path, llm, elfs, snap, base, best, history) -> dic
     synth_ref = N.synth_sta.chia_remote(rtl, a.period_ns)
     gate = get(gate_ref)
     save_gate(d, gate)
-    isa_ok, cyc_ok, why = compare_gate(base["gate"], gate)
+    isa_ok, cyc_ok, why = compare_gate(base["gate"], gate, a.exclude_isa)
     r["isa_pass"], r["bench_cycles_match"] = isa_ok, cyc_ok
     write(d / "gate_compare.txt", "\n".join(why) or "khớp baseline")
     if not (isa_ok and cyc_ok):

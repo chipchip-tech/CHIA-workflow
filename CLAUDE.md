@@ -119,7 +119,10 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   `make verilog CONFIG=RocketConfig` chỉ mất ~1 phút.
   Ghi chú CHIA (nên chuyển lên `setup`): khi `start_collector` bật profiler, ObjectRef từ
   `chia_remote` truyền thẳng vào task khác sẽ đến nơi là `_ProfiledResult` (chỉ `get()` gỡ
-  lớp bọc) → phải `get()` rồi truyền giá trị. Build baseline RocketConfig thật: 1,7 phút.
+  lớp bọc) → phải `get()` rồi truyền giá trị. Build baseline RocketConfig thật: 1,3–1,7 phút;
+  gate 15,5 phút (4 slot); Yosys trên RocketTile 3,4 phút. `abc -D` không có `-constr` thì không
+  chèn buffer, cho đường găng ~80 ns ảo → dùng `-constr` (luồng `v2`). `rv64ui-p-ma_data` fail ở
+  baseline (Rocket không hỗ trợ truy cập lệch địa chỉ).
 
 ## Việc tiếp theo (gợi ý)
 
