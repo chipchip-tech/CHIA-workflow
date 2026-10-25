@@ -40,9 +40,12 @@ synthesis đang chạy bị huỷ.
 
 | File | Việc |
 |---|---|
-| `rocket_fmax.py` | Driver: baseline, các vòng, nhận/loại, ghi kết quả, profiler |
-| `fmax_nodes.py` | Các `@ChiaFunction`: chipyard (ELF, git, kiểm phạm vi), `extract_tile_rtl`, `run_gate`, `synth_sta` |
+| `rocket_fmax.py` | Driver: baseline, các vòng, nhận/loại, ghi kết quả, profiler; `--equiv`, `--equiv-only` |
+| `fmax_nodes.py` | Các `@ChiaFunction`: chipyard (ELF, git, kiểm phạm vi), `extract_tile_rtl`, `run_gate`, `synth_sta`, `equiv_formal`, `equiv_sim`, `extract_soc_rtl`, `synth_area` |
+| `equiv.py` | Tìm module đổi, đổi tên hai bản, sinh script Yosys `equiv_*` và testbench lockstep Verilator |
+| `config_audit.py` | Mốc phụ: agent tìm khối thừa trong `RocketConfig`, loop build và kiểm từng ứng viên |
 | `prompts/improve_timing.md` | Prompt của agent (IPC-neutral, không build) |
+| `prompts/audit_config.md` | Prompt của agent kiểm config (chỉ đọc, ghi `candidates.json`) |
 | `exp.yaml` | Cache và bypass |
 | `cluster.yaml` | `configs/cluster-local.yaml` + 4 slot `verilator_run` + worker `eda` |
 | `docker/EdaDockerfile` | Image `chia-eda-sky130`: chia-cacti + yosys + liberty sky130hd |
@@ -82,6 +85,54 @@ chia job logs -f fmax-m3          # dừng: chia job stop fmax-m3 --kill-tracked
 Các tuỳ chọn khác: `--make-jobs 16`, `--build-timeout 3600`, `--llm-timeout 1800`,
 `--min-gain-ns 0`, `--repeat-seed 7`, `--flush-cache`, `--out-dir ~/rocket-fmax-out`,
 `--cache-dir ~/chia_cache`.
+
+## Kiểm tương đương bản tốt nhất
+
+Gate chỉ chạy riscv-tests và 6 benchmark. Bước này kiểm thêm từng module đã đổi, so với baseline:
+
+```bash
+# kết quả của một lần chạy đã xong (build lại bản có patch, ~2 phút, rồi kiểm):
+chia job submit --no-wait --submission-id fmax-equiv --working-dir . -- \
+    python rocket_fmax.py --equiv-only --patch-file ~/rocket-fmax-out/m3/patches/best.patch --run-name m3-equiv
+# hoặc tự động ở cuối loop: thêm --equiv
+```
+
+- Đơn vị kiểm là các module đã đổi ở mức cao nhất (bỏ comment `// @[...]` trước khi so). Nếu cổng
+  của module khác baseline thì lùi lên module cha.
+- **Formal** (worker `eda`): Yosys `equiv_make`, `equiv_simple -seq 4`, `equiv_induct -seq 4`,
+  giới hạn `--equiv-timeout` (mặc định 900 s) mỗi đơn vị. `proven` là đã chứng minh; `unproven` và
+  `timeout` là chưa chứng minh được (thường gặp với bộ nhân), không có nghĩa là sai.
+- **Lockstep** (worker `chipyard`, Verilator): bản gốc và bản mới nhận cùng input ngẫu nhiên (thêm
+  các word toàn 0, toàn 1; reset ngẫu nhiên), so mọi output ở cả hai pha clock trong
+  `--equiv-cycles` cycle (mặc định 10⁷). Kiểm cả input mà CPU không bao giờ đưa vào, nên chặt hơn
+  thực tế. Kết luận PASS khi lockstep pass mọi đơn vị.
+- Kết quả: `runs/equiv/equiv_report.md`, `units.json`, `<đơn vị>/{gold,gate,tb}.sv`, `formal.json`, `sim.json`.
+
+## Mốc phụ: kiểm config tìm khối thừa
+
+```bash
+chia job submit --no-wait --submission-id fmax-audit --working-dir . -- \
+    python config_audit.py --run-name audit --exclude-isa rv64ui-p-ma_data
+```
+
+1. Build `RocketConfig` gốc (rocket-chip reset về HEAD, **bỏ** patch Fmax), Yosys area của `ChipTop`
+   theo từng khối, `RocketTile` và SRAM là blackbox (cache `audit_soc_rtl`, `audit_soc_area_p<P>`;
+   gate dùng lại `baseline_gate`).
+2. Agent chỉ đọc: nguồn config, cây module, bảng area. Ghi `/home/ray/config_audit/candidates.json`.
+   Loop kiểm agent không sửa gì trong cây chipyard (có thì revert).
+3. Với mỗi ứng viên (tối đa `--max-candidates`, mặc định 8): **loop** ghi
+   `generators/chipyard/src/main/scala/config/RocketFmaxAudit.scala` với
+   `class RocketFmaxAudit<k> extends Config(<fragment> ++ new chipyard.RocketConfig)`, build, chạy gate
+   ∥ area. Fragment chỉ được có dạng `new a.b.C` hoặc `new a.b.C(...)`. File này bị xoá sau mỗi build
+   và ở cuối lần chạy; `RocketConfig` không bị sửa.
+4. Gộp mọi ứng viên "bỏ được" vào `RocketFmaxAuditAll` và kiểm lần nữa (`--no-combine` để bỏ).
+
+Kết luận mỗi ứng viên: *bỏ được* (gate pass, mcycle giữ nguyên), *chạy được nhưng đổi cycle*,
+*cần cho harness/chức năng* (gate trượt) hoặc *không build được*. Area không tính SRAM macro; phần
+SRAM được báo bằng số bit (từ `.top.mems.conf`). Kết quả: `audit.md`, `audit.csv`,
+`runs/agent/` (prompt, câu trả lời, `candidates.json`), `runs/cand<k>_<id>/`.
+
+Sau mốc này rocket-chip ở trạng thái HEAD; muốn có lại bản Fmax tốt nhất thì áp `best.patch` như mục dưới.
 
 ## Đầu ra: `~/rocket-fmax-out/<run>/`
 
@@ -185,4 +236,13 @@ Cuối mỗi lần chạy, loop cũng để sẵn bản tốt nhất trong conta
     thanh ghi pipeline có sẵn, không thêm tầng.
   - **Mức kiểm chứng:** gate chỉ gồm riscv-tests `-p` và 6 benchmark. Các thay đổi FPU (vòng 2, 4)
     mới được kiểm bằng `rv64uf/ud` (ít vector). Chưa có kiểm equivalence hình thức.
-  - Họ endpoint đặt tên kiểu `mulAddResult_gHiR_36_reg` chưa được gom (bộ gom chỉ xử lý `[N]`).
+  - Họ endpoint đặt tên kiểu `mulAddResult_gHiR_36_reg` trước đây không được gom; nay gom cả `_<N>_reg`.
+- **Kiểm tương đương và mốc phụ (25/10/2026): code xong, chỉ mới kiểm bằng mock, chưa chạy thật.**
+  - `equiv.py` với Yosys 0.70 (yowasp) và Verilator 5.020: chứng minh được bộ cộng viết lại
+    (16/16 proven), bắt được lỗi cài vào (lockstep lệch), chứng minh cả trường hợp dời thanh ghi
+    qua bộ cộng; phép nhân đảo thứ tự thì formal `timeout`, lockstep pass.
+  - `--equiv-only` và `--equiv` chạy hết trên mock; patch mock đổi `*` thành `+` bị báo lệch.
+  - `config_audit.py` chạy hết trên mock: ứng viên bỏ được, ứng viên làm hỏng harness (gate trượt),
+    fragment sai dạng (bị bỏ qua), fragment không tồn tại (build lỗi); lần 2 baseline HIT cache.
+  - Probe 25/10/2026: image eda có Yosys 0.38 nhưng không có Verilator; trong `bash -lc` của
+    container chipyard không thấy `verilator` (nên `equiv_sim` source `env.sh` trước).

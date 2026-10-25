@@ -8,7 +8,9 @@ verilator, eda and opencode containers do not share a filesystem.
                                    stage_for_agent
   any node (no resource):          extract_tile_rtl, run_gate (fans out to
                                    VerilatorRunNode on "verilator_run")
-  eda (resource "eda"):            synth_sta (Yosys + OpenSTA, sky130hd tt)
+  eda (resource "eda"):            synth_sta (Yosys + OpenSTA, sky130hd tt),
+                                   synth_area (ChipTop, hierarchical), equiv_formal
+  chipyard, after the loop:        equiv_sim (Verilator lockstep), audit config file
 """
 
 from __future__ import annotations
@@ -25,13 +27,19 @@ from dataclasses import dataclass, field
 
 from chia.base.ChiaFunction import ChiaFunction, get
 
+import equiv as E
+
 CHIPYARD = "/home/ray/chipyard"
 ROCKET = f"{CHIPYARD}/generators/rocket-chip"
 ROCKET_REL = "generators/rocket-chip"
 CONFIG = "RocketConfig"
 TOP = "RocketTile"
+SOC_TOP = "ChipTop"
 STAGE_DIR = "/home/ray/rocket_fmax"          # on chipyard: what the agent may read
 SIM_WORK_DIR = "/home/ray/rocket_fmax_sim"   # on verilator_run
+AUDIT_STAGE_DIR = "/home/ray/config_audit"   # on chipyard: inputs/outputs of the audit agent
+# Written by config_audit.py only (never by an agent), removed at the end of the run.
+AUDIT_CONFIG_FILE = f"{CHIPYARD}/generators/chipyard/src/main/scala/config/RocketFmaxAudit.scala"
 
 ISA_SUITES = ("rv64ui", "rv64um", "rv64ua", "rv64uf", "rv64ud")
 BENCHMARKS = ("dhrystone", "median", "multiply", "qsort", "towers", "vvadd")
@@ -186,15 +194,37 @@ def apply_edit(patch: str | None, marker_file: str, marker: str) -> str:
 
 
 @ChiaFunction(resources={"chipyard": 1}, max_retries=0)
-def stage_for_agent(files: dict) -> str:
-    """Write {relative path: text} under STAGE_DIR (wiped first)."""
-    shutil.rmtree(STAGE_DIR, ignore_errors=True)
+def stage_for_agent(files: dict, root: str = STAGE_DIR) -> str:
+    """Write {relative path: text} under `root` (wiped first)."""
+    shutil.rmtree(root, ignore_errors=True)
+    os.makedirs(root, exist_ok=True)
     for rel, text in files.items():
-        path = os.path.join(STAGE_DIR, rel)
+        path = os.path.join(root, rel)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             f.write(text)
-    return _sh(f"find {STAGE_DIR} -maxdepth 1 | sort")
+    return _sh(f"find {root} -maxdepth 1 | sort")
+
+
+@ChiaFunction(resources={"chipyard": 1}, max_retries=0)
+def read_text(path: str) -> str | None:
+    """A file written by the agent on the chipyard worker (None if missing)."""
+    if not os.path.isfile(path):
+        return None
+    with open(path, errors="replace") as f:
+        return f.read()
+
+
+@ChiaFunction(resources={"chipyard": 1}, max_retries=0)
+def write_audit_config(text: str | None) -> str:
+    """Write (or, with None, delete) AUDIT_CONFIG_FILE."""
+    if text is None:
+        if os.path.exists(AUDIT_CONFIG_FILE):
+            os.remove(AUDIT_CONFIG_FILE)
+        return "removed"
+    with open(AUDIT_CONFIG_FILE, "w") as f:
+        f.write(text)
+    return AUDIT_CONFIG_FILE
 
 
 def scope_violations(files: list[str], outside_changed: list[str]) -> list[str]:
@@ -244,8 +274,9 @@ class TileRTL:
     mems_conf: str = ""
 
 
-def tile_rtl_from_sources(generated_src_files: list, top: str = TOP) -> TileRTL:
-    """Pure function behind extract_tile_rtl (kept separate for local tests)."""
+def tile_rtl_from_sources(generated_src_files: list, top: str = TOP, stub_modules=()) -> TileRTL:
+    """Pure function behind extract_tile_rtl (kept separate for local tests).
+    `stub_modules` become black boxes like the SRAMs (e.g. RocketTile in ChipTop)."""
     files = {}
     mems_conf = ""
     for name, text in generated_src_files:
@@ -253,7 +284,7 @@ def tile_rtl_from_sources(generated_src_files: list, top: str = TOP) -> TileRTL:
             mems_conf = text
         elif name.endswith((".v", ".sv")):
             files.setdefault(name, text)
-    srams = {l.split()[1] for l in mems_conf.splitlines() if l.startswith("name ")}
+    srams = {l.split()[1] for l in mems_conf.splitlines() if l.startswith("name ")} | set(stub_modules)
 
     defined: dict[str, tuple[str, str]] = {}     # module -> (file, module text)
     for fname, text in files.items():
@@ -289,6 +320,23 @@ def extract_tile_rtl(artifact) -> TileRTL:
     """RocketTile hierarchy (as text) from a BuildArtifact built with
     collect_generated_src=True."""
     return tile_rtl_from_sources(artifact.generated_src_files, TOP)
+
+
+@ChiaFunction(max_retries=0)
+def extract_soc_rtl(artifact) -> TileRTL:
+    """ChipTop hierarchy with RocketTile and the SRAMs as black boxes (config audit)."""
+    return tile_rtl_from_sources(artifact.generated_src_files, SOC_TOP, stub_modules=(TOP,))
+
+
+def sram_bits(mems_conf: str) -> dict:
+    """{sram module: depth * width} from a .top.mems.conf."""
+    out = {}
+    for line in mems_conf.splitlines():
+        f = line.split()
+        kv = dict(zip(f[0::2], f[1::2]))
+        if "name" in kv and "depth" in kv and "width" in kv:
+            out[kv["name"]] = int(kv["depth"]) * int(kv["width"])
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -424,6 +472,7 @@ def endpoint_families(endpoints: str, n: int = 15) -> str:
             continue
         pin, slack = m.group(1), float(m.group(2))
         key = re.sub(r"\[\d+\]", "[*]", pin.rsplit("/", 1)[0])
+        key = re.sub(r"_\d+(?=_reg$)", "_*", key)
         f = fam.setdefault(key, [slack, 0, pin])
         f[1] += 1
         if slack < f[0]:
@@ -513,6 +562,189 @@ def synth_sta(rtl: TileRTL, period_ns: float, flow: str = "v2",
             return res
         res.success = True
         return res
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+# Area only, hierarchy kept (config audit): per-module cells -> area per block.
+AREA_SCRIPT = """\
+read_liberty -lib {lib}
+{read_blackboxes}
+read_verilog -sv -DSYNTHESIS {files}
+hierarchy -check -top {top}
+synth -top {top}
+dfflibmap -liberty {lib}
+abc -D {period_ps} -liberty {lib} -constr abc.constr
+opt_clean -purge
+tee -o {stat} stat -liberty {lib} -top {top}
+"""
+
+
+@dataclass
+class AreaResult:
+    success: bool
+    top: str
+    area_um2: float | None = None      # whole hierarchy (black boxes count 0)
+    module_area: dict = field(default_factory=dict)   # {module: own cell area}
+    stat: str = ""
+    yosys_log_tail: str = ""
+    seconds: float = 0.0
+    error: str = ""
+
+
+def parse_module_areas(stat: str) -> dict:
+    out = {}
+    for m in re.finditer(r"Chip area for module '\\?([^']+)':\s*([\d.]+)", stat):
+        out[m.group(1)] = float(m.group(2))
+    return out
+
+
+@ChiaFunction(resources={"eda": 1}, num_cpus=2, max_retries=0)
+def synth_area(rtl: TileRTL, period_ns: float, yosys_timeout: int = 4 * 3600) -> AreaResult:
+    """Hierarchical Yosys run on rtl.top (no flatten, no STA): area per module."""
+    res = AreaResult(success=False, top=rtl.top)
+    lib_src = os.environ.get("SKY130HD_LIB", "/home/ray/pdk/sky130hd/sky130_fd_sc_hd__tt_025C_1v80.lib")
+    work = tempfile.mkdtemp(prefix="rocket_fmax_area_")
+    try:
+        lib = "sky130hd_filtered.lib"
+        with open(lib_src) as f:
+            filtered, _ = filter_liberty(f.read())
+        with open(os.path.join(work, lib), "w") as f:
+            f.write(filtered)
+        os.makedirs(os.path.join(work, "rtl"))
+        for name, text in rtl.files.items():
+            with open(os.path.join(work, "rtl", name), "w") as f:
+                f.write(text)
+        bb_paths = []
+        for name, text in rtl.blackboxes.items():
+            bb_paths.append(f"bb_{name}.v")
+            with open(os.path.join(work, bb_paths[-1]), "w") as f:
+                f.write(text + "\n")
+        with open(os.path.join(work, "abc.constr"), "w") as f:
+            f.write(ABC_CONSTR)
+        with open(os.path.join(work, "area.ys"), "w") as f:
+            f.write(AREA_SCRIPT.format(
+                lib=lib, top=rtl.top, period_ps=int(round(period_ns * 1000)), stat="stat.txt",
+                read_blackboxes="\n".join(f"read_verilog -lib -sv {p}" for p in bb_paths),
+                files=" ".join(f"rtl/{n}" for n in sorted(rtl.files))))
+        t0 = time.time()
+        try:
+            y = subprocess.run(["yosys", "-q", "-l", "yosys.log", "-s", "area.ys"],
+                               cwd=work, capture_output=True, text=True, timeout=yosys_timeout)
+            rc, yerr = y.returncode, y.stdout + y.stderr
+        except subprocess.TimeoutExpired:
+            rc, yerr = -1, ""
+        res.seconds = time.time() - t0
+        ylog = os.path.join(work, "yosys.log")
+        res.yosys_log_tail = (open(ylog, errors="replace").read()[-20000:] if os.path.exists(ylog) else "") \
+            + (f"\n[yosys stdout/stderr]\n{yerr[-5000:]}" if yerr else "")
+        stat = os.path.join(work, "stat.txt")
+        if rc != 0 or not os.path.exists(stat):
+            res.error = f"yosys returncode {rc}" + (" (timeout)" if rc == -1 else "")
+            return res
+        res.stat = open(stat).read()
+        res.area_um2 = parse_area(res.stat)
+        res.module_area = parse_module_areas(res.stat)
+        res.success = res.area_um2 is not None
+        if not res.success:
+            res.error = "không đọc được area trong stat"
+        return res
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def block_tree(rtl: TileRTL, module_area: dict, max_depth: int = 3) -> list[tuple]:
+    """[(depth, instance path, module, subtree area or None for black boxes)]
+    for rtl.top down to `max_depth`, from the RTL instance structure."""
+    mods = E.modules_of(rtl.files)
+    inst_re = re.compile(r"^\s*([A-Za-z_]\w*)\s+(?:#\s*\(.*?\)\s*)?([A-Za-z_]\w*)\s*\(", re.M | re.S)
+    kids = {m: [(i, c) for c, i in inst_re.findall(t) if c in mods or c in rtl.blackboxes]
+            for m, t in mods.items()}
+    memo: dict[str, float] = {}
+
+    def area(m):
+        if m not in memo:
+            memo[m] = module_area.get(m, 0.0) + sum(area(c) for _, c in kids.get(m, []))
+        return memo[m]
+
+    rows = []
+
+    def walk(m, path, depth):
+        rows.append((depth, path, m, None if m in rtl.blackboxes else area(m)))
+        if depth < max_depth:
+            for inst, c in sorted(kids.get(m, []), key=lambda ic: -area(ic[1])):
+                walk(c, f"{path}.{inst}", depth + 1)
+
+    walk(rtl.top, rtl.top, 0)
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# equivalence of the best patch vs the baseline (see equiv.py)
+# ---------------------------------------------------------------------------
+
+def _write_unit(work: str, unit) -> None:
+    for name, text in (("gold.sv", unit.gold), ("gate.sv", unit.gate), ("shared.sv", unit.shared),
+                       ("tb.sv", E.tb_verilog(unit)), ("tb.cpp", E.tb_cpp(unit)),
+                       ("eq.ys", E.formal_script(unit))):
+        with open(os.path.join(work, name), "w") as f:
+            f.write(text)
+
+
+@ChiaFunction(resources={"eda": 1}, num_cpus=2, max_retries=0)
+def equiv_formal(unit, timeout_s: int = 1800) -> dict:
+    """Yosys equiv_* on one unit. status: proven / unproven / timeout / error."""
+    work = tempfile.mkdtemp(prefix="rocket_fmax_equiv_")
+    t0 = time.time()
+    try:
+        _write_unit(work, unit)
+        try:
+            y = subprocess.run(["yosys", "-q", "-l", "formal.log", "-s", "eq.ys"], cwd=work,
+                               capture_output=True, text=True, timeout=timeout_s)
+            rc, err = y.returncode, y.stdout + y.stderr
+        except subprocess.TimeoutExpired:
+            rc, err = None, ""
+        log_path, st_path = os.path.join(work, "formal.log"), os.path.join(work, "equiv_status.txt")
+        log = open(log_path, errors="replace").read() if os.path.exists(log_path) else ""
+        st = E.parse_equiv_status(open(st_path).read()) if os.path.exists(st_path) else {}
+        if rc is None:
+            status = "timeout"
+        elif rc != 0 or st.get("unproven") is None:
+            status = "error"
+        else:
+            status = "proven" if st["unproven"] == 0 and st["total"] else "unproven"
+        return {"unit": unit.top, "status": status, "counts": st, "returncode": rc,
+                "seconds": time.time() - t0, "log_tail": log[-8000:] + err[-2000:]}
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+@ChiaFunction(resources={"chipyard": 1}, max_retries=0)
+def equiv_sim(unit, cycles: int = 10_000_000, seed: int = 1, jobs: int = 8,
+              timeout_s: int = 3600) -> dict:
+    """Verilator lockstep of the baseline and patched unit (random inputs,
+    every output compared). status: pass / mismatch / error."""
+    work = tempfile.mkdtemp(prefix="rocket_fmax_equivsim_")
+    t0 = time.time()
+    try:
+        _write_unit(work, unit)
+        env = (f"[ -f {CHIPYARD}/env.sh ] && source {CHIPYARD}/env.sh >/dev/null 2>&1; "
+               f"export PATH=$PATH:{CHIPYARD}/.conda-env/bin; cd {work}")
+        vcmd = E.VERILATOR_CMD.format(jobs=jobs, shared="shared.sv" if unit.shared else "")
+        b = subprocess.run(["bash", "-lc", f"{env} && {vcmd}"], capture_output=True, text=True,
+                           timeout=timeout_s)
+        build_log = (b.stdout + b.stderr)[-6000:]
+        if b.returncode != 0:
+            return {"unit": unit.top, "status": "error", "error": "verilator build lỗi",
+                    "build_log": build_log, "seconds": time.time() - t0}
+        r = subprocess.run(["bash", "-lc", f"{env} && obj/equiv_sim {cycles} {seed}"],
+                           capture_output=True, text=True, timeout=timeout_s)
+        p = E.parse_sim(r.stdout)
+        status = ("pass" if r.returncode == 0 and p["bad_cycles"] == 0
+                  else "mismatch" if p["bad_cycles"] else "error")
+        return {"unit": unit.top, "status": status, **p, "returncode": r.returncode,
+                "output_tail": (r.stdout + r.stderr)[-4000:], "build_log": build_log,
+                "seconds": time.time() - t0}
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

@@ -132,7 +132,11 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   slack −1,00 → +6,98 ns ở 21,2 ns, Fmax ~45,0 → ~70,3 MHz, area +1,4 %; tổng ~116 phút. Lợi
   chủ yếu do agent thay `+`/`-`/`*` bằng prefix adder/CSA viết tay (bù điểm yếu của Yosys/ABC),
   và vòng 4 dời một tầng prefix của FMA qua thanh ghi pipeline sẵn có. Gate chỉ gồm riscv-tests +
-  6 benchmark; chưa kiểm equivalence hình thức cho các thay đổi FPU. Claude không tự viết patch Chisel: mọi chỉnh sửa Chisel do loop
+  6 benchmark; chưa kiểm equivalence hình thức cho các thay đổi FPU.
+  Đã thêm (chưa chạy thật, mới kiểm bằng mock): kiểm tương đương `--equiv`/`--equiv-only`
+  (`equiv.py`: Yosys `equiv_*` + lockstep Verilator từng module đổi) và mốc phụ `config_audit.py`
+  (agent chỉ đọc tìm khối thừa trong `RocketConfig`; loop tự ghi `RocketFmaxAudit.scala` trong
+  `generators/chipyard` — ngoại lệ đã được người dùng duyệt — build, gate, area từng ứng viên). Claude không tự viết patch Chisel: mọi chỉnh sửa Chisel do loop
   (agent) làm. Đã kiểm (probe 25/10/2026): riscv-tests ở
   `$RISCV/riscv64-unknown-elf/share/riscv-tests` (107 test ISA -p), module `RocketTile` có cổng
   `clock`/`reset`, `chia-cacti` có `sta` (dùng `-group_count`, không phải `-group_path_count`),

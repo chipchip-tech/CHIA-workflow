@@ -13,6 +13,8 @@ Milestones (run from this directory on the head):
   M1  chia job submit --working-dir . -- python rocket_fmax.py --baseline-only --period-ns 10
   M2  chia job submit --working-dir . -- python rocket_fmax.py --period-ns <P> --iters 1 --bypass-llm
   M3  chia job submit --working-dir . -- python rocket_fmax.py --period-ns <P> --iters 5
+  equivalence of a finished run's best patch vs the baseline (no loop):
+      chia job submit --working-dir . -- python rocket_fmax.py --equiv-only --patch-file <best.patch>
 
 Outputs go to --out-dir/<run-name>/ on the head (results.csv, patches/, runs/,
 profile/). Needs workers advertising chipyard, verilator_run, eda, opencode_creds
@@ -34,6 +36,7 @@ from pathlib import Path
 
 import ray
 
+import equiv as E
 import fmax_nodes as N
 from chia.base.ChiaFunction import chia_cancel, get
 from chia.base.bypass import Bypass
@@ -55,7 +58,8 @@ SYSTEM_MESSAGE = ("You are a hardware timing engineer working on the Rocket core
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--period-ns", type=float, required=True, help="fixed clock period for abc -D and STA")
+    p.add_argument("--period-ns", type=float, default=None,
+                   help="fixed clock period for abc -D and STA (required unless --equiv-only)")
     p.add_argument("--synth-flow", choices=sorted(N.SYNTH_FLOWS), default="v2",
                    help="Yosys flow (see SYNTH_FLOWS in fmax_nodes.py); fixed for a whole run")
     p.add_argument("--baseline-only", action="store_true", help="milestone 1: baseline only")
@@ -80,9 +84,21 @@ def parse_args():
     p.add_argument("--llm-timeout", type=int, default=1800)
     p.add_argument("--min-gain-ns", type=float, default=0.0,
                    help="accept only if worst slack improves by more than this")
+    p.add_argument("--equiv", action="store_true",
+                   help="after the loop: equivalence check of the best patch vs the baseline")
+    p.add_argument("--equiv-only", action="store_true",
+                   help="only the equivalence check of --patch-file vs the baseline (no loop)")
+    p.add_argument("--equiv-cycles", type=int, default=10_000_000, help="lockstep cycles per unit")
+    p.add_argument("--equiv-seed", type=int, default=1)
+    p.add_argument("--equiv-timeout", type=int, default=900, help="Yosys equiv time limit per unit (s)")
     a = p.parse_args()
+    if a.equiv_only and not a.patch_file:
+        p.error("--equiv-only cần --patch-file")
+    if not a.equiv_only and a.period_ns is None:
+        p.error("--period-ns là bắt buộc")
     if a.run_name is None:
-        mode = "baseline" if a.baseline_only else ("m2" if a.bypass_llm else "agent")
+        mode = ("equiv" if a.equiv_only else "baseline" if a.baseline_only
+                else "m2" if a.bypass_llm else "agent")
         a.run_name = f"{mode}-{datetime.now().strftime('%Y%m%d-%H%M')}"
     a.out_dir = os.path.expanduser(a.out_dir)
     a.cache_dir = os.path.expanduser(a.cache_dir)
@@ -129,8 +145,8 @@ def cache_has(tag: str) -> bool:
     return bool(get(get_active_cache().has.chia_remote(tag)))
 
 
-def build(a, name: str):
-    cb = ChiselBuildNode(N.CHIPYARD, N.CONFIG, target=BuildTarget.VERILATOR, make_jobs=a.make_jobs,
+def build(a, name: str, config: str = N.CONFIG):
+    cb = ChiselBuildNode(N.CHIPYARD, config, target=BuildTarget.VERILATOR, make_jobs=a.make_jobs,
                          timeout_seconds=a.build_timeout, collect_generated_src=True, name=name)
     return cb.build.chia_remote(cb)
 
@@ -450,6 +466,81 @@ def run(a, out: Path):
     write(out / "best.json", json.dumps({"best": best["name"], **synth_row(best["synth"])}, indent=2))
     get(N.reset_rocket.chia_remote(snap["rocket_head"], best["patch"]))
     print(f"\nbest: {best['name']} | " + json.dumps(synth_row(best["synth"]), ensure_ascii=False))
+    if a.equiv and best["patch"]:
+        run_equiv(a, out, base["rtl"], best["rtl"], best["name"])
+
+
+# ---------------------------------------------------------------------------
+# equivalence: best patch vs baseline
+# ---------------------------------------------------------------------------
+
+def rtl_sources(rtl) -> dict:
+    """All module texts of a TileRTL, SRAM models included (named bb_*)."""
+    return {**rtl.files, **{f"bb_{m}.v": t for m, t in rtl.blackboxes.items()}}
+
+
+def run_equiv(a, out: Path, base_rtl, best_rtl, label: str) -> dict:
+    d = out / "runs" / "equiv"
+    cs = E.find_units(rtl_sources(base_rtl), rtl_sources(best_rtl), N.TOP)
+    info = {"label": label, "changed": cs.changed, "added": cs.added, "removed": cs.removed,
+            "skipped": cs.skipped,
+            "units": [{"top": u.top, "changed_inside": u.changed, "inputs": len(u.inputs),
+                       "outputs": len(u.outputs), "clock": u.clock, "reset": u.reset} for u in cs.units]}
+    write(d / "units.json", json.dumps(info, indent=2, ensure_ascii=False))
+    print(f"\n===== equivalence {label}: module đổi {cs.changed}, thêm {cs.added}, bỏ {cs.removed}; "
+          f"đơn vị kiểm: {[u.top for u in cs.units]}", flush=True)
+    for u in cs.units:
+        for name, text in (("gold.sv", u.gold), ("gate.sv", u.gate), ("tb.sv", E.tb_verilog(u))):
+            write(d / u.top / name, text)
+    formal_refs = {u.top: N.equiv_formal.chia_remote(u, a.equiv_timeout) for u in cs.units}
+    sim_refs = {u.top: N.equiv_sim.chia_remote(u, a.equiv_cycles, a.equiv_seed) for u in cs.units}
+    rows = []
+    for u in cs.units:
+        f, s = get(formal_refs[u.top]), get(sim_refs[u.top])
+        write(d / u.top / "formal.json", json.dumps(f, indent=2, default=str))
+        write(d / u.top / "sim.json", json.dumps(s, indent=2, default=str))
+        c = f.get("counts") or {}
+        rows.append({"unit": u.top, "formal": f["status"],
+                     "proven": f"{c.get('proven')}/{c.get('total')}", "formal_s": round(f["seconds"]),
+                     "sim": s["status"], "sim_cycles": s.get("cycles"), "bad_cycles": s.get("bad_cycles"),
+                     "first_mismatch": (s.get("mismatches") or [""])[0]})
+    ok = bool(rows) and all(r["sim"] == "pass" for r in rows) and not cs.skipped
+    lines = [f"# Equivalence: {label} so với baseline", "",
+             f"- Module đổi: {', '.join(cs.changed) or '(không)'}",
+             f"- Module thêm: {', '.join(cs.added) or '(không)'}; bỏ: {', '.join(cs.removed) or '(không)'}",
+             f"- Bỏ qua: {cs.skipped or '(không)'}", "",
+             "| Đơn vị | Formal | proven/total | Formal (s) | Lockstep | Cycle | Cycle lệch | Lệch đầu tiên |",
+             "|---|---|---|---|---|---|---|---|"]
+    lines += [f"| {r['unit']} | {r['formal']} | {r['proven']} | {r['formal_s']} | {r['sim']} | "
+              f"{r['sim_cycles']} | {r['bad_cycles']} | {r['first_mismatch']} |" for r in rows]
+    lines += ["", f"Kết luận: {'PASS' if ok else 'CHƯA ĐẠT'} (lockstep phải pass mọi đơn vị; "
+              "formal `unproven`/`timeout` là chưa chứng minh được, không phải sai)."]
+    write(d / "equiv_report.md", "\n".join(lines) + "\n")
+    print("\n".join(lines), flush=True)
+    return {"ok": ok, "rows": rows}
+
+
+def run_equiv_only(a, out: Path):
+    snap = get(N.tree_snapshot.chia_remote())
+    if cache_has("baseline_rtl"):
+        base_rtl = get(N.extract_tile_rtl.chia_remote(None, _chia_tag="baseline_rtl"))
+    else:
+        get(N.reset_rocket.chia_remote(snap["rocket_head"], ""))
+        art = get(build(a, "equiv-baseline"))
+        if not art.success:
+            raise SystemExit(f"baseline build failed:\n{build_errors(art)}")
+        base_rtl = get(N.extract_tile_rtl.chia_remote(art, _chia_tag="baseline_rtl"))
+    patch = Path(a.patch_file).expanduser().read_text()
+    write(out / "patches" / "checked.patch", patch)
+    get(N.reset_rocket.chia_remote(snap["rocket_head"], patch))
+    art = get(build(a, "equiv-patched"))
+    save_build(out / "runs" / "equiv", art)
+    if not art.success:
+        raise SystemExit(f"build với patch lỗi:\n{build_errors(art)}")
+    best_rtl = get(N.extract_tile_rtl.chia_remote(art))
+    res = run_equiv(a, out, base_rtl, best_rtl, Path(a.patch_file).name)
+    print(f"rocket-chip đang ở trạng thái đã áp {a.patch_file}")
+    return res
 
 
 def export_profile(out: Path):
@@ -486,7 +577,7 @@ def main():
     if a.bypass_llm:
         bypass.set_provider("OpenCodeLLM.prompt", N.canned_llm_result)
     try:
-        run(a, out)
+        run_equiv_only(a, out) if a.equiv_only else run(a, out)
     finally:
         try:
             stop_collector()
