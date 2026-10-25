@@ -78,6 +78,19 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   resource cho tới khi gọi `.stop()`.
 - Image Chipyard của CHIA dùng nhánh `chia_artifact` của `ucb-bar/chipyard`, Ubuntu 22.04.
 
+Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
+- Khi bật profiler (`start_collector`), ObjectRef trả về từ `chia_remote` mà truyền thẳng vào
+  một task khác sẽ đến nơi dưới dạng lớp bọc `_ProfiledResult` (lỗi kiểu
+  `'_ProfiledResult' object has no attribute ...`). Chỉ `get()` mới gỡ lớp bọc, nên phải `get()`
+  rồi truyền giá trị.
+- Cache (`_chia_tag`) chỉ phân biệt theo tag, không theo tên hàm hay tham số, và chỉ được ghi khi
+  `get()` kết quả. Nên đưa các tham số vào tag (ví dụ `baseline_synth_v2_p21p2`).
+- Actor cache là detached và lưu đối tượng Python bằng pickle. Vì vậy module định nghĩa
+  dataclass trả về phải import được lúc đọc lại: luôn `chia job submit --working-dir .` từ
+  đúng thư mục project.
+- `DockerConfig.pull_before_run: false` để dùng image tự build tại máy.
+- `chia job logs -f` có thể ngắt kết nối mà job vẫn chạy; dừng job bằng `chia job stop <id>`.
+
 ## Quy ước làm việc
 
 - Trả lời người dùng bằng **tiếng Việt**.
