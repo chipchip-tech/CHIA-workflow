@@ -4,6 +4,15 @@ Ghi chú, config và script để chạy [CHIA](https://github.com/ucb-bar/chia)
 
 Bối cảnh cho session Claude Code mới: [CLAUDE.md](CLAUDE.md).
 
+## Nhánh
+
+- `main`: bản ổn định, hạn chế đụng.
+- `setup`: tài liệu, config, script dùng chung. Mọi sửa đổi chung làm ở đây.
+- `project/<tên>`: mỗi project một nhánh, tách từ `setup`, code nằm trong `projects/<tên>/`.
+  Hiện có `project/ascon-secureboot`.
+
+Chi tiết xem mục "Quy ước nhánh" trong [CLAUDE.md](CLAUDE.md).
+
 ## Tài liệu
 
 - [docs/setup-bazzite.md](docs/setup-bazzite.md): cài đặt trên Bazzite (Docker qua bazzite-dx, SSH, conda/`chia_env`, image CHIA, Hello World, agent AI, Chipyard native trong distrobox).
