@@ -117,6 +117,9 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   `$RISCV/riscv64-unknown-elf/share/riscv-tests` (107 test ISA -p), module `RocketTile` có cổng
   `clock`/`reset`, `chia-cacti` có `sta` (dùng `-group_count`, không phải `-group_path_count`),
   `make verilog CONFIG=RocketConfig` chỉ mất ~1 phút.
+  Ghi chú CHIA (nên chuyển lên `setup`): khi `start_collector` bật profiler, ObjectRef từ
+  `chia_remote` truyền thẳng vào task khác sẽ đến nơi là `_ProfiledResult` (chỉ `get()` gỡ
+  lớp bọc) → phải `get()` rồi truyền giá trị. Build baseline RocketConfig thật: 1,7 phút.
 
 ## Việc tiếp theo (gợi ý)
 

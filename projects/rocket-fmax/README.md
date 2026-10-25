@@ -115,4 +115,12 @@ Cuối mỗi lần chạy, loop cũng để sẵn bản tốt nhất trong conta
   - Script Yosys chạy với yosys 0.70 trên một thiết kế thử kiểu firtool (blackbox SRAM, EICG, tên `_reg`).
   - Bộ lọc liberty bỏ 36 cell.
   - Driver chạy hết với CHIA/Ray giả và một chipyard giả: baseline, đọc lại từ cache, Mốc 2 bypass, và các trường hợp loại (lệch cycle, sửa config, sửa ngoài rocket-chip, build lỗi, không đổi gì, không nhanh hơn).
+- **Chạy thật lần 1 (25/10/2026):**
+  - Image eda build được: Yosys 0.38+92, `sta` có, liberty đúng sha256.
+  - Cluster lên đủ 4 worker, `verilator_run` 4 slot.
+  - ELF: 107 test ISA và 6 benchmark.
+  - Build baseline mất 1,7 phút, gom được 471 file Verilog.
+  - Lỗi: `'_ProfiledResult' object has no attribute 'generated_src_files'`. Khi profiler bật, ref
+    của `chia_remote` truyền thẳng sang task khác sẽ đến nơi dưới dạng lớp bọc. Đã sửa bằng cách
+    luôn `get()` giá trị rồi mới truyền.
 - **Chưa chạy thật:** cả ba mốc trên cluster, image eda, OpenSTA thật (định dạng output của `report_*`), thời gian Yosys trên RocketTile.

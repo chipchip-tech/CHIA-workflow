@@ -205,18 +205,19 @@ def ensure_baseline(a, out: Path, elfs: dict, snap: dict) -> dict:
           flush=True)
     d = out / "runs" / "baseline"
     t0 = time.time()
-    build_ref = None
+    art = None
     if not (hits["rtl"] and hits["gate"]):
         print(get(N.reset_rocket.chia_remote(snap["rocket_head"], "")) or "rocket-chip clean", flush=True)
-        build_ref = build(a, "baseline")
-        art = get(build_ref)
+        art = get(build(a, "baseline"))
         save_build(d, art)
         if not art.success:
             raise SystemExit(f"baseline build failed:\n{build_errors(art)}")
         print(f"baseline build ok ({(time.time() - t0) / 60:.1f} min)", flush=True)
-    # build -> (gate || synth); synth is only dispatched once the build is done
-    rtl = get(N.extract_tile_rtl.chia_remote(build_ref, _chia_tag=tags["rtl"]))
-    gate_ref = N.run_gate.chia_remote(build_ref, elfs, repeat_seed=a.repeat_seed, _chia_tag=tags["gate"])
+    # build -> (gate || synth); synth is only dispatched once the build is done.
+    # Pass values, not refs: with the profiler on, a ref from chia_remote resolves
+    # to a _ProfiledResult wrapper inside the next task (only get() unwraps it).
+    rtl = get(N.extract_tile_rtl.chia_remote(art, _chia_tag=tags["rtl"]))
+    gate_ref = N.run_gate.chia_remote(art, elfs, repeat_seed=a.repeat_seed, _chia_tag=tags["gate"])
     synth_ref = N.synth_sta.chia_remote(rtl, a.period_ns, _chia_tag=tags["synth"])
     gate = get(gate_ref)
     synth = get(synth_ref)
@@ -327,16 +328,15 @@ def run_round(a, i: int, out: Path, llm, elfs, snap, base, best, history) -> dic
     violations = N.scope_violations(diff["files"], diff["outside_changed"])
     if r["reason"]:
         return r
-    if diff["patch"] == best["patch"]:
-        r["reason"] = f"agent không thay đổi gì so với {best['name']}"
-        return r
     if violations:
         r["reason"] = "vi phạm phạm vi: " + "; ".join(violations)
         return r
+    if diff["patch"] == best["patch"]:
+        r["reason"] = f"agent không thay đổi gì so với {best['name']}"
+        return r
 
     t_build = time.time()
-    build_ref = build(a, f"iter{i}")
-    art = get(build_ref)
+    art = get(build(a, f"iter{i}"))       # values only, see ensure_baseline
     save_build(d, art)
     r["build_min"] = (time.time() - t_build) / 60
     if not art.success:
@@ -344,12 +344,12 @@ def run_round(a, i: int, out: Path, llm, elfs, snap, base, best, history) -> dic
         return r
 
     try:
-        rtl = get(N.extract_tile_rtl.chia_remote(build_ref))
+        rtl = get(N.extract_tile_rtl.chia_remote(art))
     except Exception as e:                                           # noqa: BLE001
         r["reason"] = f"không lấy được Verilog {N.TOP}: {e}"[:1000]
         return r
     r["rtl"] = rtl
-    gate_ref = N.run_gate.chia_remote(build_ref, elfs)
+    gate_ref = N.run_gate.chia_remote(art, elfs)
     synth_ref = N.synth_sta.chia_remote(rtl, a.period_ns)
     gate = get(gate_ref)
     save_gate(d, gate)
