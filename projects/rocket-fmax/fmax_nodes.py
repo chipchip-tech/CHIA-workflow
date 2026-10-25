@@ -295,10 +295,19 @@ def extract_tile_rtl(artifact) -> TileRTL:
 # eda: Yosys + OpenSTA
 # ---------------------------------------------------------------------------
 
-# Bump when the synthesis/STA flow changes: it is part of the baseline cache tag.
-#   v1: abc -D without -constr (no buffering/sizing: unbuffered high-fanout nets, ~80 ns)
-#   v2: abc -D -constr (ABC's default script then adds buffer; upsize; dnsize)
-SYNTH_FLOW = "v2"
+# Synthesis flows; the name is part of the baseline cache tag, so add a new
+# name instead of changing an existing flow.
+#   v1 (gone): abc -D without -constr: no buffering/sizing, ~80 ns of unbuffered fanout.
+#   v2: abc -D -constr (ABC's default script then adds buffer; upsize; dnsize).
+#       Yosys maps every $alu/$lcu to a ripple-carry chain (maj3 cells).
+#   v3: v2 + Booth multipliers + Kogge-Stone carry lookahead for adders,
+#       closer to what a commercial tool builds.
+SYNTH_FLOWS = {
+    "v2": "synth -flatten -top {top}",
+    "v3": ("synth -flatten -booth -top {top} -run :fine\n"
+           "techmap -map +/techmap.v -map +/choices/kogge-stone.v\n"
+           "synth -flatten -booth -top {top} -run fine:"),
+}
 
 # Same driver/load as ORFS sky130hd (ABC_DRIVER_CELL, ABC_LOAD_IN_FF).
 ABC_CONSTR = "set_driving_cell sky130_fd_sc_hd__buf_1\nset_load 5\n"
@@ -308,7 +317,7 @@ read_liberty -lib {lib}
 {read_blackboxes}
 read_verilog -sv -DSYNTHESIS {files}
 hierarchy -check -top {top}
-synth -flatten -top {top}
+{synth}
 rename -wire -suffix _reg t:*DFF*
 dfflibmap -liberty {lib}
 abc -D {period_ps} -liberty {lib} -constr abc.constr
@@ -346,6 +355,7 @@ puts "@@END"
 class SynthResult:
     success: bool
     period_ns: float
+    flow: str = ""
     worst_slack_ns: float | None = None   # report_worst_slack (can be > 0)
     wns_ns: float | None = None           # report_wns (0 when nothing fails)
     tns_ns: float | None = None
@@ -433,11 +443,12 @@ def parse_area(stat: str) -> float | None:
 
 
 @ChiaFunction(resources={"eda": 1}, num_cpus=2, max_retries=0)
-def synth_sta(rtl: TileRTL, period_ns: float, yosys_timeout: int = 4 * 3600) -> SynthResult:
+def synth_sta(rtl: TileRTL, period_ns: float, flow: str = "v2",
+              yosys_timeout: int = 4 * 3600) -> SynthResult:
     """Yosys (synth -flatten, dfflibmap, abc -D) + OpenSTA on rtl.top at a fixed
     clock period. SRAM *_ext modules stay black boxes (their pins are
     unconstrained), I/O get 0 delay against `clock`."""
-    res = SynthResult(success=False, period_ns=period_ns)
+    res = SynthResult(success=False, period_ns=period_ns, flow=flow)
     lib_src = os.environ.get("SKY130HD_LIB", "/home/ray/pdk/sky130hd/sky130_fd_sc_hd__tt_025C_1v80.lib")
     with open(lib_src) as f:
         lib_text = f.read()
@@ -463,6 +474,7 @@ def synth_sta(rtl: TileRTL, period_ns: float, yosys_timeout: int = 4 * 3600) -> 
             f.write(rtl.stubs)
         ys = YOSYS_SCRIPT.format(
             lib=lib, top=rtl.top, period_ps=int(round(period_ns * 1000)),
+            synth=SYNTH_FLOWS[flow].format(top=rtl.top),
             read_blackboxes="\n".join(f"read_verilog -lib -sv {p}" for p in bb_paths),
             files=" ".join(f"rtl/{n}" for n in sorted(rtl.files)),
             stat=stat, netlist=netlist)

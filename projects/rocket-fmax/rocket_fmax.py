@@ -56,6 +56,8 @@ SYSTEM_MESSAGE = ("You are a hardware timing engineer working on the Rocket core
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--period-ns", type=float, required=True, help="fixed clock period for abc -D and STA")
+    p.add_argument("--synth-flow", choices=sorted(N.SYNTH_FLOWS), default="v2",
+                   help="Yosys flow (see SYNTH_FLOWS in fmax_nodes.py); fixed for a whole run")
     p.add_argument("--baseline-only", action="store_true", help="milestone 1: baseline only")
     p.add_argument("--iters", type=int, default=5)
     p.add_argument("--bypass-llm", action="store_true",
@@ -187,7 +189,7 @@ def compare_gate(base, cur, exclude=()) -> tuple[bool, bool, list[str]]:
 
 
 def print_synth(label: str, s):
-    print(f"\n===== {label}: period {s.period_ns} ns")
+    print(f"\n===== {label}: flow {s.flow}, period {s.period_ns} ns")
     print(f"worst slack {fmt(s.worst_slack_ns, 4)} ns | WNS {fmt(s.wns_ns, 4)} | TNS {fmt(s.tns_ns, 4)} | "
           f"Fmax ~ {fmt(s.fmax_mhz, 2)} MHz | area {fmt(s.area_um2, 0)} um2 | "
           f"yosys {s.yosys_seconds / 60:.1f} min, sta {s.sta_seconds:.0f} s")
@@ -204,7 +206,7 @@ def ensure_baseline(a, out: Path, elfs: dict, snap: dict) -> dict:
     """Build + gate + synth of the unmodified tree, served from the cache when
     available (tags baseline_rtl / baseline_gate / baseline_synth_<flow>_p<period>)."""
     tags = {"rtl": "baseline_rtl", "gate": "baseline_gate",
-            "synth": f"baseline_synth_{N.SYNTH_FLOW}_p" + f"{a.period_ns:g}".replace(".", "p")}
+            "synth": f"baseline_synth_{a.synth_flow}_p" + f"{a.period_ns:g}".replace(".", "p")}
     hits = {k: cache_has(t) for k, t in tags.items()}
     print(f"baseline cache: " + ", ".join(f"{tags[k]}={'HIT' if v else 'miss'}" for k, v in hits.items()),
           flush=True)
@@ -223,7 +225,7 @@ def ensure_baseline(a, out: Path, elfs: dict, snap: dict) -> dict:
     # to a _ProfiledResult wrapper inside the next task (only get() unwraps it).
     rtl = get(N.extract_tile_rtl.chia_remote(art, _chia_tag=tags["rtl"]))
     gate_ref = N.run_gate.chia_remote(art, elfs, repeat_seed=a.repeat_seed, _chia_tag=tags["gate"])
-    synth_ref = N.synth_sta.chia_remote(rtl, a.period_ns, _chia_tag=tags["synth"])
+    synth_ref = N.synth_sta.chia_remote(rtl, a.period_ns, a.synth_flow, _chia_tag=tags["synth"])
     gate = get(gate_ref)
     synth = get(synth_ref)
 
@@ -362,7 +364,7 @@ def run_round(a, i: int, out: Path, llm, elfs, snap, base, best, history) -> dic
         return r
     r["rtl"] = rtl
     gate_ref = N.run_gate.chia_remote(art, elfs)
-    synth_ref = N.synth_sta.chia_remote(rtl, a.period_ns)
+    synth_ref = N.synth_sta.chia_remote(rtl, a.period_ns, a.synth_flow)
     gate = get(gate_ref)
     save_gate(d, gate)
     isa_ok, cyc_ok, why = compare_gate(base["gate"], gate, a.exclude_isa)

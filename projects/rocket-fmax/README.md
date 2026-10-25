@@ -21,9 +21,11 @@ synthesis đang chạy bị huỷ.
 
 - Yosys: `synth -flatten`, `dfflibmap`, `abc -D <period> -constr` (driving cell `buf_1`, load 5 như
   ORFS; có `-constr` thì script mặc định của ABC thêm `buffer; upsize; dnsize`), liberty
-  `sky130_fd_sc_hd__tt_025C_1v80`. Đổi luồng synth thì tăng `SYNTH_FLOW` trong `fmax_nodes.py`
-  (đang là `v2`); giá trị này nằm trong tag cache của baseline.
-  Các cell `lpflow_*`, `probe*` bị lọc khỏi liberty, giống danh sách dont_use của ORFS.
+  `sky130_fd_sc_hd__tt_025C_1v80`. `--synth-flow` chọn luồng (xem `SYNTH_FLOWS` trong
+  `fmax_nodes.py`); tên luồng nằm trong tag cache của baseline:
+  - `v2`: bộ cộng/trừ do Yosys tự sinh là ripple-carry (chuỗi `maj3`).
+  - `v3`: `v2` + `synth -booth` + `+/choices/kogge-stone.v` (carry lookahead), gần với công cụ
+    thương mại hơn.
 - OpenSTA: `create_clock` trên cổng `clock`, I/O có delay 0, `report_worst_slack`, `report_wns`,
   `report_tns`, `report_checks -group_count 10`.
 - Fmax ≈ 1000 / (period − worst slack) MHz. Chu kỳ clock cố định cho mọi vòng.
@@ -138,4 +140,11 @@ Cuối mỗi lần chạy, loop cũng để sẵn bản tốt nhất trong conta
   - Benchmark: dhrystone 225027, median 6117, multiply 27281, qsort 173402, towers 4075,
     vvadd 2476 cycle. Đổi seed (`+verilator+seed+7`) số cycle vẫn y hệt. Tuy vậy không thấy dòng
     "seed" trong output, nên chưa chắc plusarg này có tác dụng.
+- **Chạy thật lần 3 (25/10/2026), luồng `v2` ở 10 ns:**
+  - Yosys 2,5 phút. Worst slack −11,22 ns, tức đường găng 21,2 ns, khoảng 47 MHz. Area 1.067.643 um².
+  - Đường găng là `core.div.divisor[1]_reg -> core.div.remainder[65]_reg`: bộ trừ 65 bit trong
+    MulDiv, synth thành chuỗi `maj3` ripple.
+  - Kế tiếp là `div.count`, `dfma` postMul pipe_b (−10,48), `mem_reg_wdata` (−6,17), `sfma`,
+    `ifpu`, `dcache.pstore2_storegen_data`.
+  - Gate ở baseline: 106/107 pass, `ma_data` được loại bằng `--exclude-isa`.
 - **Chưa chạy thật:** cả ba mốc trên cluster, image eda, OpenSTA thật (định dạng output của `report_*`), thời gian Yosys trên RocketTile.
