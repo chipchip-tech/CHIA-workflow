@@ -121,8 +121,8 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   `chia_remote` truyền thẳng vào task khác sẽ đến nơi là `_ProfiledResult` (chỉ `get()` gỡ
   lớp bọc) → phải `get()` rồi truyền giá trị. Build baseline RocketConfig thật: 1,3–1,7 phút;
   gate 15,5 phút (4 slot); Yosys trên RocketTile 3,4 phút. `abc -D` không có `-constr` thì không
-  chèn buffer, cho đường găng ~80 ns ảo → dùng `-constr` (luồng `v2`: 21,2 ns, đường găng là bộ trừ
-  ripple của `core.div`; `v3` thêm Booth + Kogge-Stone, chưa chạy thật). `rv64ui-p-ma_data` fail ở
+  chèn buffer, cho đường găng ~80 ns ảo → dùng `-constr` (luồng `v2`: 21,2 ns, đường găng trong `core.div`; `v3` dùng
+  `+/choices/kogge-stone.v` nhưng file này chỉ có từ Yosys 0.40, image eda có 0.38 → đã bỏ). `rv64ui-p-ma_data` fail ở
   baseline (Rocket không hỗ trợ truy cập lệch địa chỉ).
 
 ## Việc tiếp theo (gợi ý)

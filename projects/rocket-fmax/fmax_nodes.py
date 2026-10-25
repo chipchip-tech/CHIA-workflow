@@ -299,14 +299,11 @@ def extract_tile_rtl(artifact) -> TileRTL:
 # name instead of changing an existing flow.
 #   v1 (gone): abc -D without -constr: no buffering/sizing, ~80 ns of unbuffered fanout.
 #   v2: abc -D -constr (ABC's default script then adds buffer; upsize; dnsize).
-#       Yosys maps every $alu/$lcu to a ripple-carry chain (maj3 cells).
-#   v3: v2 + Booth multipliers + Kogge-Stone carry lookahead for adders,
-#       closer to what a commercial tool builds.
+#       $lcu is Brent-Kung (techmap.v default), $mul is Yosys' array multiplier.
+#   v3 (gone): -booth + +/choices/kogge-stone.v; that file only exists from Yosys 0.40
+#       and the eda image has 0.38.
 SYNTH_FLOWS = {
     "v2": "synth -flatten -top {top}",
-    "v3": ("synth -flatten -booth -top {top} -run :fine\n"
-           "techmap -map +/techmap.v -map +/choices/kogge-stone.v\n"
-           "synth -flatten -booth -top {top} -run fine:"),
 }
 
 # Same driver/load as ORFS sky130hd (ABC_DRIVER_CELL, ABC_LOAD_IN_FF).

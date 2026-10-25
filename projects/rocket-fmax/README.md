@@ -23,9 +23,10 @@ synthesis đang chạy bị huỷ.
   ORFS; có `-constr` thì script mặc định của ABC thêm `buffer; upsize; dnsize`), liberty
   `sky130_fd_sc_hd__tt_025C_1v80`. `--synth-flow` chọn luồng (xem `SYNTH_FLOWS` trong
   `fmax_nodes.py`); tên luồng nằm trong tag cache của baseline:
-  - `v2`: bộ cộng/trừ do Yosys tự sinh là ripple-carry (chuỗi `maj3`).
-  - `v3`: `v2` + `synth -booth` + `+/choices/kogge-stone.v` (carry lookahead), gần với công cụ
-    thương mại hơn.
+  - `v2`: `synth -flatten` mặc định. Bộ cộng (`$lcu`) là Brent-Kung, bộ nhân là array multiplier
+    của Yosys.
+  - `v3` (đã bỏ): thêm `-booth` và `+/choices/kogge-stone.v`. File kogge-stone chỉ có từ Yosys 0.40,
+    image eda có 0.38, nên Yosys lỗi (lần chạy thật 4).
 - OpenSTA: `create_clock` trên cổng `clock`, I/O có delay 0, `report_worst_slack`, `report_wns`,
   `report_tns`, `report_checks -group_count 10`.
 - Fmax ≈ 1000 / (period − worst slack) MHz. Chu kỳ clock cố định cho mọi vòng.
@@ -147,4 +148,7 @@ Cuối mỗi lần chạy, loop cũng để sẵn bản tốt nhất trong conta
   - Kế tiếp là `div.count`, `dfma` postMul pipe_b (−10,48), `mem_reg_wdata` (−6,17), `sfma`,
     `ifpu`, `dcache.pstore2_storegen_data`.
   - Gate ở baseline: 106/107 pass, `ma_data` được loại bằng `--exclude-isa`.
+- **Chạy thật lần 4 (25/10/2026), luồng `v3`:** Yosys lỗi sau 0,4 phút, vì `+/choices/kogge-stone.v`
+  không có trong Yosys 0.38 (file xuất hiện từ tag `yosys-0.40`). Default `$lcu` của 0.38 đã là
+  Brent-Kung, nên chuỗi `maj3` trên đường găng không phải do bộ cộng ripple. Đã bỏ `v3`, chốt `v2`.
 - **Chưa chạy thật:** cả ba mốc trên cluster, image eda, OpenSTA thật (định dạng output của `report_*`), thời gian Yosys trên RocketTile.
