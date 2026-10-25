@@ -137,9 +137,7 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   `$RISCV/riscv64-unknown-elf/share/riscv-tests` (107 test ISA -p), module `RocketTile` có cổng
   `clock`/`reset`, `chia-cacti` có `sta` (dùng `-group_count`, không phải `-group_path_count`),
   `make verilog CONFIG=RocketConfig` chỉ mất ~1 phút.
-  Ghi chú CHIA (nên chuyển lên `setup`): khi `start_collector` bật profiler, ObjectRef từ
-  `chia_remote` truyền thẳng vào task khác sẽ đến nơi là `_ProfiledResult` (chỉ `get()` gỡ
-  lớp bọc) → phải `get()` rồi truyền giá trị. Build baseline RocketConfig thật: 1,3–1,7 phút;
+  Ghi chú CHIA dùng chung (đã chuyển lên `setup`, mục Ghi chú kỹ thuật về CHIA). Build baseline RocketConfig thật: 1,3–1,7 phút;
   gate 15,5 phút (4 slot); Yosys trên RocketTile 3,4 phút. `abc -D` không có `-constr` thì không
   chèn buffer, cho đường găng ~80 ns ảo → dùng `-constr` (luồng `v2`: 21,2 ns, đường găng trong `core.div`; `v3` dùng
   `+/choices/kogge-stone.v` nhưng file này chỉ có từ Yosys 0.40, image eda có 0.38 → đã bỏ). `rv64ui-p-ma_data` fail ở
