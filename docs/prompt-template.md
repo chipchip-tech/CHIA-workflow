@@ -4,8 +4,9 @@ Dùng khi mở một session Claude Code mới để làm một project bằng C
 (máy, cách cài, các lỗi đã gặp) đã có trong `CLAUDE.md`, nên prompt chỉ cần tập trung
 vào **project**: mục tiêu, phạm vi, tài nguyên, thế nào là "xong", và cách làm việc.
 
-Nhớ mở session trên nhánh `temp`, hoặc bảo session checkout nhánh
-đó trước.
+Mỗi project có một nhánh `project/<tên>` tách từ `setup` (xem "Quy ước nhánh" trong
+`CLAUDE.md`). Project mới thì bảo session tạo nhánh đó từ `origin/setup`. Project đang
+làm thì bảo session checkout nhánh của project trước.
 
 ## Bước 0: Phỏng vấn để dựng prompt
 
@@ -82,7 +83,8 @@ nên loop phải tự ghi file config trước khi build.
 ## Template
 
 ```
-Đọc CLAUDE.md và docs/usage-local.md trước (nhánh claude/zen-pasteur-gygy0m).
+Đọc CLAUDE.md và docs/usage-local.md trước.
+Làm trên nhánh project/<tên>, tách từ origin/setup nếu chưa có; code đặt trong projects/<tên>/.
 
 ## Mục tiêu
 <Project làm gì, đầu vào và đầu ra.>
@@ -173,7 +175,7 @@ viết test C gọi lệnh custom, build và mô phỏng, phản hồi lỗi cho
   `timing_opt`, `riscv_extensions`, `gem5_align`).
 - **Gửi log đầy đủ** khi có lỗi: lệnh đã chạy, output của `chia status`, và đoạn log từ
   chỗ bắt đầu lỗi.
-- **Repo hoặc nhánh riêng:** nếu project lớn, bảo session tạo thư mục `projects/<tên>/`
-  trong repo này, hoặc dùng một nhánh mới. Như vậy code project không lẫn với tài liệu setup.
+- **Mỗi project một nhánh:** `project/<tên>`, code trong `projects/<tên>/`. Như vậy code
+  project không lẫn với tài liệu setup, và `main` không bị đụng tới.
 - **Kết thúc mỗi session** bằng câu: "Cập nhật CLAUDE.md: đã làm gì, đã kiểm chứng gì,
   việc tiếp theo". Session sau sẽ đọc file này để tiếp tục.

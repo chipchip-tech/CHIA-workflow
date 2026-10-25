@@ -15,7 +15,8 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 
 - OS: `ghcr.io/ublue-os/bazzite-dx-nvidia:stable`. Đã chạy `ujust dx-group`; `docker`
   dùng được không cần sudo.
-- User `dingus`, home `/var/home/dingus`, IP LAN `192.168.1.3`.
+- User `dingus`, home `/var/home/dingus`. IP LAN từng là `192.168.1.3`, có lần là
+  `10.232.8.80`. `THIS_MACHINE` tự dò nên không phải sửa config.
 - 20 CPU, 23 GB RAM (dưới mức 32 GB khuyến nghị nhưng vẫn build được RocketConfig với
   `make -j 32`), 1 GPU NVIDIA, khoảng 259 GB trống ở `/var`.
 - sshd đã bật. SSH không mật khẩu vào chính máy đã chạy được. Đã chạy
@@ -28,6 +29,12 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 - Đã clone: `~/work/chia` (repo CHIA), `~/chia-hello-world` (copy của
   `examples/hello-world`, trong đó `cluster.yaml` đã được sửa giống
   `configs/cluster-local.yaml`), `~/CHIA-workflow` (repo này).
+  **Lưu ý (23/10/2026):** `git pull` trong `~/CHIA-workflow` báo `not a git repository`,
+  tức thư mục này không phải bản git clone (có thể chép tay). Khi đưa code mới, phải kiểm
+  người dùng đã thật sự lấy được bản mới chưa (ví dụ `grep` một dòng mới trong file).
+  Người dùng **không `git push` được**: tài khoản GitHub đăng nhập bằng Google, không có
+  mật khẩu. Muốn đưa file từ máy họ lên repo thì dùng GitHub web (Upload files), `gh auth
+  login`, hoặc họ dán nội dung để session dựng lại và so `sha256sum`.
 - Chưa có máy remote nào.
 
 ## Đã kiểm chứng và chưa kiểm chứng
@@ -74,14 +81,34 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 ## Quy ước làm việc
 
 - Trả lời người dùng bằng **tiếng Việt**.
-- Phát triển trên nhánh `temp`, push bằng
-  `git push -u origin temp`. **Không tạo PR** trừ khi người dùng yêu cầu.
+- Theo **Quy ước nhánh** ở dưới. **Không tạo PR** trừ khi người dùng yêu cầu.
 - Trước khi tạo, xoá hoặc tách file tài liệu, **liệt kê file hiện có và file dự định
   thay đổi để người dùng duyệt**.
 - Claude không chạy được lệnh trên máy người dùng: đưa lệnh cho người dùng chạy, rồi đọc
   log họ gửi lại.
 - Ghi rõ phần nào đã kiểm chứng và phần nào chưa. Khi một thứ chạy được hoặc gặp lỗi
   mới, cập nhật docs và file này.
+
+## Quy ước nhánh
+
+| Nhánh | Chứa gì | Ghi chú |
+|---|---|---|
+| `main` | Bản ổn định | **Hạn chế đụng.** Chỉ nhận merge từ `setup` qua PR, khi người dùng yêu cầu. |
+| `setup` | Tài liệu, config, script chung, `CLAUDE.md` | Sửa phần dùng chung cho mọi project ở đây. |
+| `project/<tên>` | Một project, code nằm trong `projects/<tên>/` | Tách từ `setup`. Tên viết thường, nối bằng `-`. |
+
+- Mở project mới: `git checkout -b project/<tên> origin/setup`, rồi tạo `projects/<tên>/`
+  kèm `README.md` (mục tiêu, lệnh chạy, trạng thái kiểm chứng).
+- Trong nhánh project, chỉ sửa `projects/<tên>/`, và thêm một mục ngắn về project vào
+  `CLAUDE.md`. Nếu phát hiện điều gì dùng chung (lỗi Bazzite mới, ghi chú CHIA), sửa trên
+  `setup` rồi `git merge origin/setup` vào nhánh project. Không sửa docs chung ngay trong
+  nhánh project.
+- Không rebase hay force-push các nhánh `setup` và `project/*`.
+- Session Claude Code được giao nhánh `claude/*` thì vẫn push lên nhánh đó, nhưng phải
+  checkout đúng nhánh `setup` hoặc `project/<tên>` làm gốc. Khi được người dùng cho phép,
+  push luôn lên nhánh đích.
+- Project hiện có: `project/ascon-secureboot` (RoCC Ascon-Hash256, secure boot; xong M1–M4).
+  Nhánh `temp` cũ đã đổi tên thành nhánh này.
 
 ## Việc tiếp theo (gợi ý)
 
