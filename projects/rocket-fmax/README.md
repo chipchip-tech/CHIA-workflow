@@ -237,7 +237,20 @@ Cuối mỗi lần chạy, loop cũng để sẵn bản tốt nhất trong conta
   - **Mức kiểm chứng:** gate chỉ gồm riscv-tests `-p` và 6 benchmark. Các thay đổi FPU (vòng 2, 4)
     mới được kiểm bằng `rv64uf/ud` (ít vector). Chưa có kiểm equivalence hình thức.
   - Họ endpoint đặt tên kiểu `mulAddResult_gHiR_36_reg` trước đây không được gom; nay gom cả `_<N>_reg`.
-- **Kiểm tương đương và mốc phụ (25/10/2026): code xong, chỉ mới kiểm bằng mock, chưa chạy thật.**
+- **Chạy thật lần 9 (25/10/2026), kiểm tương đương `best.patch` của `m3` (`--equiv-only`, `m3-equiv`):
+  PASS.** Module đổi: `FPU`, `MulAddRecFNPipe_l2_e{11_s53,8_s24,5_s11}`, `MulDiv`, `RocketALU`.
+  `FPU` cũng đổi text nên các `MulAddRecFNPipe_*` được kiểm chung trong đơn vị `FPU`.
+
+  | Đơn vị | Formal | Lockstep 10⁷ cycle |
+  |---|---|---|
+  | `RocketALU` | proven 1812/1812 (3 s) | pass |
+  | `MulDiv` | unproven 675/741 (8 s) | pass |
+  | `FPU` | timeout (900 s) | pass |
+
+  Chỉ `RocketALU` được chứng minh hình thức; `MulDiv` và `FPU` dựa vào lockstep ngẫu nhiên ở mức
+  module (FPU nhận lệnh ngẫu nhiên, nên FMA chỉ được kích ở một phần các cycle).
+  Container chipyard có Verilator 5.022 (`.conda-env/bin`, sau khi `source env.sh`).
+- **Mốc phụ (`config_audit.py`): code xong, chỉ mới kiểm bằng mock, chưa chạy thật.**
   - `equiv.py` với Yosys 0.70 (yowasp) và Verilator 5.020: chứng minh được bộ cộng viết lại
     (16/16 proven), bắt được lỗi cài vào (lockstep lệch), chứng minh cả trường hợp dời thanh ghi
     qua bộ cộng; phép nhân đảo thứ tự thì formal `timeout`, lockstep pass.

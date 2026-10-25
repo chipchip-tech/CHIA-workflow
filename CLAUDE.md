@@ -133,8 +133,9 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   chủ yếu do agent thay `+`/`-`/`*` bằng prefix adder/CSA viết tay (bù điểm yếu của Yosys/ABC),
   và vòng 4 dời một tầng prefix của FMA qua thanh ghi pipeline sẵn có. Gate chỉ gồm riscv-tests +
   6 benchmark; chưa kiểm equivalence hình thức cho các thay đổi FPU.
-  Đã thêm (chưa chạy thật, mới kiểm bằng mock): kiểm tương đương `--equiv`/`--equiv-only`
-  (`equiv.py`: Yosys `equiv_*` + lockstep Verilator từng module đổi) và mốc phụ `config_audit.py`
+  **Kiểm tương đương `best.patch` (25/10/2026): PASS** (`--equiv-only`, `equiv.py`): `RocketALU`
+  proven hình thức; `MulDiv` (unproven) và `FPU` (timeout) pass lockstep Verilator 10⁷ cycle.
+  Chưa chạy thật: mốc phụ `config_audit.py`
   (agent chỉ đọc tìm khối thừa trong `RocketConfig`; loop tự ghi `RocketFmaxAudit.scala` trong
   `generators/chipyard` — ngoại lệ đã được người dùng duyệt — build, gate, area từng ứng viên). Claude không tự viết patch Chisel: mọi chỉnh sửa Chisel do loop
   (agent) làm. Đã kiểm (probe 25/10/2026): riscv-tests ở
