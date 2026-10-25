@@ -149,8 +149,10 @@ Cuối mỗi lần chạy, loop cũng để sẵn bản tốt nhất trong conta
     `ifpu`, `dcache.pstore2_storegen_data`.
   - Gate ở baseline: 106/107 pass, `ma_data` được loại bằng `--exclude-isa`.
 - **Chạy thật lần 4 (25/10/2026), luồng `v3`:** Yosys lỗi sau 0,4 phút, vì `+/choices/kogge-stone.v`
-  không có trong Yosys 0.38 (file xuất hiện từ tag `yosys-0.40`). Default `$lcu` của 0.38 đã là
-  Brent-Kung, nên chuỗi `maj3` trên đường găng không phải do bộ cộng ripple. Đã bỏ `v3`, chốt `v2`.
+  không có trong Yosys 0.38 (file xuất hiện từ tag `yosys-0.40`). Đã bỏ `v3`, chốt `v2`. (Ghi chú
+  này từng kết luận chuỗi `maj3` không phải bộ cộng ripple vì `$lcu` mặc định là Brent-Kung. Mốc 3
+  cho thấy kết luận đó sai: thay `-`/`+` bằng prefix adder viết tay rút ngắn hẳn đường găng, tức
+  luồng Yosys + ABC này thực tế vẫn cho ra chuỗi carry dài.)
 - **Chạy thật lần 5 (25/10/2026), baseline chính thức, Mốc 1 xong:** luồng `v2`, chu kỳ cố định
   **21,2 ns** (dùng cho mọi vòng). Worst slack −1,00 ns, TNS −106,5 ns, đường găng 22,2 ns
   (~45,0 MHz), area 1.069.069 um², Yosys 2,6 phút. Đường găng `core.div.divisor[1]_reg ->
@@ -163,4 +165,24 @@ Cuối mỗi lần chạy, loop cũng để sẵn bản tốt nhất trong conta
   bằng baseline → bị loại với lý do "slack không tốt hơn", đúng như dự kiến. Một vòng mất 13,4–14,4
   phút. Lần 2: `baseline_rtl`, `baseline_gate`, `baseline_synth_v2_p21p2` đều HIT. Có
   `results.csv`, `patches/iter1.patch`, `best.patch`, `runs/iter1/*` và timeline html.
-- **Chưa chạy thật:** Mốc 3 (agent thật).
+- **Chạy thật lần 8 (25/10/2026), Mốc 3 xong:** 5 vòng agent thật (`m3`), tổng ~116 phút.
+
+  | Vòng | Kết quả | Worst slack (ns) | Fmax ~ (MHz) | Agent sửa |
+  |---|---|---|---|---|
+  | baseline | | −1,001 | 45,0 | |
+  | 1 | nhận | 1,003 | 49,5 | `Multiplier.scala`: phép trừ của bộ chia → Kogge-Stone |
+  | 2 | nhận | 4,501 | 59,9 | `FPU.scala`: `a*b +& c` của DFMA → cây CSA 3:2 + prefix adder |
+  | 3 | loại | 3,963 | 58,0 | carry-select trong FMA + `AMOALU.scala`: chậm hơn vòng 2 |
+  | 4 | nhận | 6,755 | 69,2 | `FPU.scala`: dời tầng prefix cuối qua thanh ghi `mulAddResult` có sẵn |
+  | 5 | nhận | 6,980 | 70,3 | `ALU.scala`: bộ cộng → Kogge-Stone |
+
+  - Mọi vòng: ISA pass, mcycle của 6 benchmark khớp đúng. Area 1.069.069 → 1.083.776 um² (+1,4 %).
+  - Yosys tăng từ 2,6 lên 9–13 phút vì logic prefix lớn hơn.
+  - Đường găng cuối: `dcache.pstore1_data -> dcache.pstore2_storegen_data_r_7` (AMOALU).
+  - **Cách hiểu kết quả:** phần lớn mức tăng đến từ việc viết tay bộ cộng/nhân nhanh thay cho
+    `+`/`-`/`*`. Công cụ thương mại (DesignWare) thường tự làm được việc này, nên mức tăng
+    Fmax chỉ có nghĩa trong luồng Yosys + ABC này. Vòng 4 là thay đổi cấu trúc thật: dời logic qua
+    thanh ghi pipeline có sẵn, không thêm tầng.
+  - **Mức kiểm chứng:** gate chỉ gồm riscv-tests `-p` và 6 benchmark. Các thay đổi FPU (vòng 2, 4)
+    mới được kiểm bằng `rv64uf/ud` (ít vector). Chưa có kiểm equivalence hình thức.
+  - Họ endpoint đặt tên kiểu `mulAddResult_gHiR_36_reg` chưa được gom (bộ gom chỉ xử lý `[N]`).

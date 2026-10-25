@@ -115,7 +115,11 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   chu kỳ cố định **21,2 ns**; baseline worst slack −1,00 ns (đường găng 22,2 ns, ~45 MHz),
   `~/rocket-fmax-out/m1-final`. **Mốc 2 xong (25/10/2026)**: 1 vòng bypass LLM (`m2a`, `m2b`),
   vòng bị loại đúng (slack bằng baseline), lần 2 cả 3 bước baseline HIT cache; một vòng
-  ~13–14 phút (build 1,3 + gate ~12, synth chạy song song). Mốc 3: chưa chạy. Claude không tự viết patch Chisel: mọi chỉnh sửa Chisel do loop
+  ~13–14 phút (build 1,3 + gate ~12, synth chạy song song). **Mốc 3 xong (25/10/2026)**: 5 vòng agent thật (`m3`), nhận 4/5;
+  slack −1,00 → +6,98 ns ở 21,2 ns, Fmax ~45,0 → ~70,3 MHz, area +1,4 %; tổng ~116 phút. Lợi
+  chủ yếu do agent thay `+`/`-`/`*` bằng prefix adder/CSA viết tay (bù điểm yếu của Yosys/ABC),
+  và vòng 4 dời một tầng prefix của FMA qua thanh ghi pipeline sẵn có. Gate chỉ gồm riscv-tests +
+  6 benchmark; chưa kiểm equivalence hình thức cho các thay đổi FPU. Claude không tự viết patch Chisel: mọi chỉnh sửa Chisel do loop
   (agent) làm. Đã kiểm (probe 25/10/2026): riscv-tests ở
   `$RISCV/riscv64-unknown-elf/share/riscv-tests` (107 test ISA -p), module `RocketTile` có cổng
   `clock`/`reset`, `chia-cacti` có `sta` (dùng `-group_count`, không phải `-group_path_count`),
