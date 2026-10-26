@@ -45,6 +45,7 @@ synthesis đang chạy bị huỷ.
 | `equiv.py` | Tìm module đổi, đổi tên hai bản, sinh script Yosys `equiv_*` và testbench lockstep Verilator |
 | `area_check.py` | Kiểm luồng area `ChipTop` ngay trong container `eda`, ngoài CHIA (parse từng file, rồi `synth_area`) |
 | `config_audit.py` | Mốc phụ: agent tìm khối thừa trong `RocketConfig`, loop build và kiểm từng ứng viên |
+| `measure_soc.py` | Đo lại Fmax `RocketTile` với config sau audit, có/không `best.patch` (4 điểm) |
 | `prompts/improve_timing.md` | Prompt của agent (IPC-neutral, không build) |
 | `prompts/audit_config.md` | Prompt của agent kiểm config (chỉ đọc, ghi `candidates.json`) |
 | `exp.yaml` | Cache và bypass |
@@ -174,6 +175,22 @@ SRAM được báo bằng số bit (từ `.top.mems.conf`). Kết quả: `audit.
 `runs/agent/` (prompt, câu trả lời, `candidates.json`), `runs/cand<k>_<id>/`.
 
 Sau mốc này rocket-chip ở trạng thái HEAD; muốn có lại bản Fmax tốt nhất thì áp `best.patch` như mục dưới.
+
+### Đo lại Fmax sau audit (`measure_soc.py`)
+
+```bash
+chia job submit --no-wait --submission-id fmax-soc --working-dir . -- \
+    python measure_soc.py --run-name soc-fmax --exclude-isa rv64ui-p-ma_data \
+    --patch-file ~/rocket-fmax-out/m3/patches/best.patch
+```
+
+Fmax ở project này là Yosys + OpenSTA trên `RocketTile` (luồng `v2`, chu kỳ cố định 21,2 ns). Các khối bỏ
+đi nằm ngoài tile, nhưng tile vẫn thấy bản đồ địa chỉ (TLB/PMA, kiểm địa chỉ hợp lệ) nên RTL của nó có thể
+đổi. Script đo 4 điểm: `base` (RocketConfig, từ cache), `cfg` (fragment audit), `best` (`best.patch`),
+`best_cfg` (cả hai, kèm gate so với baseline). Build chạy lần lượt (chung cây chipyard), synth/STA và gate
+chạy song song. Báo cáo `soc_fmax.md`: slack, Fmax, area tile, sha RTL tile và module nào khác nhau. Mặc định
+fragment là hai ứng viên của `audit2` (`--fragments` để đổi). Cuối lần chạy rocket-chip ở trạng thái đã áp
+`best.patch`, file config tạm bị xoá. Đã chạy trên mock; chưa chạy thật.
 
 ## Đầu ra: `~/rocket-fmax-out/<run>/`
 

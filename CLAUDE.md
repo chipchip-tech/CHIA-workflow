@@ -149,7 +149,7 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   bên container opencode (`read_text_opencode`). Câu trả lời agent cache theo `audit_<run-name>_llm`: chạy lại phải đổi
   `--run-name`. **Audit chạy thật xong (26/10/2026, `fmax-audit-4`, `--candidates-file`, `~/rocket-fmax-out/audit2`)**:
   cả 2 ứng viên và bản gộp gate pass, mcycle giữ nguyên, khối bảo vệ còn đủ; bản gộp bớt 61 207 µm² (5,17 % area
-  `ChipTop` ngoài tile) + 64 KiB SRAM scratchpad. Đã xuất `chipyard-config.patch`; kiểm tay: áp được, `RocketFmaxSoCConfig` elaborate qua. Bản Arty chưa elaborate được vì project `chipyard_fpga` của nhánh `chia_artifact` vốn không compile (6 harness FPGA thiếu `def wf_active: chisel3.Bool` của `HasHarnessInstantiators`; lỗi y hệt với `RocketArty100TConfig` gốc).
+  `ChipTop` ngoài tile) + 64 KiB SRAM scratchpad. Đã xuất `chipyard-config.patch`; kiểm tay: áp được, `RocketFmaxSoCConfig` elaborate qua. Bản Arty chưa elaborate được vì project `chipyard_fpga` của nhánh `chia_artifact` vốn không compile (6 harness FPGA thiếu `def wf_active: chisel3.Bool` của `HasHarnessInstantiators`; lỗi y hệt với `RocketArty100TConfig` gốc). Đo lại Fmax sau audit: `measure_soc.py` (4 điểm base/cfg/best/best_cfg, gate cho best_cfg; mới chạy mock).
   Bỏ error device: truy cập địa chỉ không ánh xạ có thể treo bus thay vì báo lỗi (gate không kiểm). Vivado/ORFS chưa
   chạy (người dùng: để sau, chỉ cần audit không bỏ khối hai luồng này cần). Claude không tự viết patch Chisel: mọi chỉnh sửa Chisel do loop
   (agent) làm. Đã kiểm (probe 25/10/2026): riscv-tests ở
