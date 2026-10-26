@@ -224,7 +224,29 @@ chia job submit --no-wait --submission-id fmax-m4 --working-dir . -- \
   `measure_soc.py`). Gate các vòng vẫn so với `baseline_gate` (config audit không đổi mcycle).
 - `best.patch` cuối là patch tích luỹ (gồm cả start patch). `--equiv` so bản tốt nhất với **điểm xuất phát**
   (cùng config), không so với baseline, vì config đổi RTL tile (bản đồ địa chỉ).
-- Đã chạy trên mock (lần 2 điểm xuất phát HIT cache, file config tạm bị xoá); chưa chạy thật.
+- Đã chạy trên mock (lần 2 điểm xuất phát HIT cache, file config tạm bị xoá).
+
+**Chạy thật (`fmax-m4`, 26/10/2026, `~/rocket-fmax-out/m4`).** Lần chạy đầu dừng ở vòng 1 (agent hết
+`--llm-timeout` 30 phút); chạy lại cùng `--run-name` nên `results.csv` có hai khối dòng, dưới đây là lần hai.
+
+| Vòng | Nhận | Worst slack (ns) | Fmax (MHz) | Area tile (µm²) | Đường găng | Ghi chú |
+|---|---|---|---|---|---|---|
+| baseline | | −1,001 | 45,04 | 1 069 069 | `core.div` | RocketConfig gốc |
+| start | | +7,350 | 72,20 | 1 078 378 | `dcache` store data → storegen | m3 best.patch + config audit |
+| 1 | có | +8,158 | 76,68 | 1 088 086 | `fpuOpt.ifpu` | 14,8 phút |
+| 2 | không | +7,761 | 74,41 | 1 078 451 | `fpuOpt.ifpu` | kém hơn vòng 1 |
+| 3 | không | | | | | build lỗi (sbt) |
+| 4 | không | | | | | agent hết 30 phút |
+| 5 | có | **+8,745** | **80,29** | 1 082 577 | `fpuOpt.dfma` (FMA) | 26,9 phút |
+
+- So với điểm xuất phát: +1,40 ns slack, 72,2 → 80,3 MHz (+11 %), area +0,4 %. Mỗi bước nhận (+0,81 và +0,59 ns)
+  lớn hơn nhiễu synth (~0,1 ns). So với RocketConfig gốc: 45,0 → 80,3 MHz.
+- Kiểm tương đương iter5 so với điểm xuất phát: **PASS**. Module đổi `AMOALU`, `FPU`, `IntToFP`; `AMOALU`
+  proven hình thức (195/195), `FPU` formal timeout (1870 s) nhưng lockstep Verilator 10⁷ cycle không lệch
+  (`IntToFP` nằm trong đơn vị `FPU`). Gate (ISA + mcycle) pass ở cả hai vòng được nhận.
+- Lỗi của loop phát hiện ở lần này (đã sửa): lý do "build lỗi" trong `results.csv`/prompt vòng sau chỉ có phần
+  đầu log sbt vì `build_errors` lọc `[error]` mà không bỏ mã màu ANSI; tiêu đề báo cáo equiv ghi "so với
+  baseline" dù so với điểm xuất phát.
 
 ## Đầu ra: `~/rocket-fmax-out/<run>/`
 

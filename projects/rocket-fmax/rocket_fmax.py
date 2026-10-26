@@ -215,7 +215,8 @@ def ensure_start(a, out: Path, snap: dict, base: dict) -> dict:
 
 
 def build_errors(art) -> str:
-    text = (art.stdout or "") + "\n" + (art.stderr or "")
+    # sbt is run with -Dsbt.color=always: "[\x1b[31merror\x1b[0m]" would not match "[error]".
+    text = re.sub(r"\x1b\[[0-9;]*m", "", (art.stdout or "") + "\n" + (art.stderr or ""))
     lines = [l for l in text.splitlines()
              if re.search(r"\[error\]|error:|%Error|Exception|FAILED", l)]
     return "\n".join(lines[:80]) if lines else "\n".join(text.splitlines()[-60:])
@@ -536,7 +537,7 @@ def run(a, out: Path):
     if a.equiv and best is not start:
         # against the start point: with --fragments the tile RTL differs from the
         # baseline by the config itself (address map), which is not an equivalence
-        run_equiv(a, out, start["rtl"], best["rtl"], best["name"])
+        run_equiv(a, out, start["rtl"], best["rtl"], best["name"], start["name"])
 
 
 # ---------------------------------------------------------------------------
@@ -548,7 +549,7 @@ def rtl_sources(rtl) -> dict:
     return {**rtl.files, **{f"bb_{m}.v": t for m, t in rtl.blackboxes.items()}}
 
 
-def run_equiv(a, out: Path, base_rtl, best_rtl, label: str) -> dict:
+def run_equiv(a, out: Path, base_rtl, best_rtl, label: str, ref: str = "baseline") -> dict:
     d = out / "runs" / "equiv"
     cs = E.find_units(rtl_sources(base_rtl), rtl_sources(best_rtl), N.TOP)
     info = {"label": label, "changed": cs.changed, "added": cs.added, "removed": cs.removed,
@@ -574,7 +575,7 @@ def run_equiv(a, out: Path, base_rtl, best_rtl, label: str) -> dict:
                      "sim": s["status"], "sim_cycles": s.get("cycles"), "bad_cycles": s.get("bad_cycles"),
                      "first_mismatch": (s.get("mismatches") or [""])[0]})
     ok = bool(rows) and all(r["sim"] == "pass" for r in rows) and not cs.skipped
-    lines = [f"# Equivalence: {label} so với baseline", "",
+    lines = [f"# Equivalence: {label} so với {ref}", "",
              f"- Module đổi: {', '.join(cs.changed) or '(không)'}",
              f"- Module thêm: {', '.join(cs.added) or '(không)'}; bỏ: {', '.join(cs.removed) or '(không)'}",
              f"- Bỏ qua: {cs.skipped or '(không)'}", "",
