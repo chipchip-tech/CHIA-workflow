@@ -21,15 +21,34 @@ loop will build and test every candidate you propose.
 
 A block is a candidate when removing it (with an existing config fragment) still lets the
 SoC run every riscv-test and benchmark through the current harness with exactly the same
-`mcycle`. Typical places to look: debug module / JTAG / DMI / system-bus access, extra
-peripherals (UART, GPIO, SPI, I2C, PWM, timers), boot-select pins and boot-address
-registers, clock taps, chip-id pins, on-chip scratchpads, extra ports, unused buses.
+`mcycle`, AND it is not needed by the two flows this SoC is headed for:
+
+- FPGA: Digilent Arty A7-100T (`chipyard.fpga.arty100t`, `WithArty100TTweaks ++
+  WithBroadcastManager ++ <this config>`): UART console, UART-TSI, JTAG, DDR over the mem port.
+- ASIC: OpenROAD flow scripts (sky130), chip set up like `chipyard.ChipLikeRocketConfig`:
+  serial-TL to the bring-up host, JTAG, boot-select pin, clock tap, clock/reset.
+
+Typical places to look: on-chip scratchpads, unused bus-error devices, extra peripherals
+the default config adds but nothing uses (GPIO, SPI, I2C, PWM, timers), extra ports,
+unused buses, oversized buffers or FIFOs that a fragment can shrink.
+
+### Protected blocks (never propose removing these)
+
+The FPGA and ASIC flows need them even though the Verilator harness does not. The loop
+refuses any fragment that removes one (`WithNoDebug`, `WithDMIDTM`, `WithNoUART`,
+`WithNoSerialTL*`, `WithNoMemPort`, `WithNMemoryChannels(0)`, `WithNoBootROM`, `WithNoCLINT`,
+`WithNoPLIC`, `WithNoCustomBootPin`, `WithNoBootAddrReg`, `WithNoClockTap`,
+`WithNoResetSynchronizers`) and also refuses any build whose `ChipTop` lost a port or module
+of these blocks, so a fragment that removes one indirectly is wasted too:
+
+```
+$PROTECTED
+```
 
 Out of scope: the core and its caches (`WithNHugeCores`), the L2 (`WithInclusiveCache`),
 the bus topology and anything that changes performance.
 
-For each candidate also say whether a real chip would still need it (for example JTAG debug
-is needed for bring-up of real silicon even if the simulation does not use it).
+For each candidate also say whether a real chip would still need it.
 
 ## Inputs (on the chipyard worker, through `chipyard_bash`; each command is limited to 120 s)
 
@@ -38,6 +57,7 @@ is needed for bring-up of real silicon even if the simulation does not use it).
 - `$STAGE_DIR/sram_macros.txt`: every SRAM macro and its size in bits.
 - `$STAGE_DIR/modules.txt`: every module under `ChipTop`.
 - `$STAGE_DIR/baseline_cycles.txt`: benchmark `mcycle` of the baseline.
+- `$STAGE_DIR/protected_blocks.txt`: the protected blocks above and where they are in `ChipTop`.
 - Generated Verilog of the baseline:
   `/home/ray/chipyard/sims/verilator/generated-src/chipyard.harness.TestHarness.RocketConfig/gen-collateral/`
   (it may be missing; the Scala sources are the reference).
@@ -59,10 +79,11 @@ $CYCLES
 - Do NOT edit, create or delete any file under `/home/ray/chipyard` (the loop checks the
   tree and reverts every change). Do NOT run `make`, `sbt`, `verilator`, `yosys` or any build.
 - Every fragment you propose must already exist. Find its definition with `grep -rn "class
-  WithNoUART" /home/ray/chipyard/generators --include=*.scala` (or similar) and give the fully
+  WithNoBusErrorDevices" /home/ray/chipyard/generators --include=*.scala` (or similar) and give the fully
   qualified name. Only plain expressions of the form `new a.b.ClassName` or
-  `new a.b.ClassName(args)` are accepted, e.g. `new chipyard.config.WithNoUART`. Keep in mind
+  `new a.b.ClassName(args)` are accepted, e.g. `new chipyard.config.WithNoBusErrorDevices`. Keep in mind
   that a fragment placed in front of `RocketConfig` overrides the same key set further down.
+- Never propose a protected block, not even as a note-only candidate.
 - If a block can only be removed by changing Scala code (not a config fragment), put it in
   `notes` of a candidate with an empty `removal`, or mention it in your final reply.
 - At most $MAX candidates, the most promising (largest area or clearest leftover) first.
@@ -75,11 +96,11 @@ for example with a heredoc, as a JSON list:
 ```json
 [
   {
-    "id": "uart",
-    "block": "ChipTop.system.uartClockDomainWrapper (TLUART)",
-    "category": "peripheral",
-    "comes_from": "new chipyard.config.WithUART in AbstractConfig.scala:85",
-    "removal": ["new chipyard.config.WithNoUART"],
+    "id": "scratchpad",
+    "block": "ChipTop.system... (64 KiB mbus scratchpad)",
+    "category": "memory",
+    "comes_from": "new testchipip.soc.WithMbusScratchpad(...) in AbstractConfig.scala:120",
+    "removal": ["new testchipip.soc.WithNoScratchpads"],
     "evidence": "why the SoC does not need it: who uses it, what the harness does with it",
     "needed_for_tapeout": "no / yes / maybe, and why",
     "expected_area_um2": 12345,

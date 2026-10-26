@@ -137,7 +137,10 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   proven hình thức; `MulDiv` (unproven) và `FPU` (timeout) pass lockstep Verilator 10⁷ cycle.
   Chưa chạy thật: mốc phụ `config_audit.py`
   (agent chỉ đọc tìm khối thừa trong `RocketConfig`; loop tự ghi `RocketFmaxAudit.scala` trong
-  `generators/chipyard` — ngoại lệ đã được người dùng duyệt — build, gate, area từng ứng viên). Claude không tự viết patch Chisel: mọi chỉnh sửa Chisel do loop
+  `generators/chipyard` — ngoại lệ đã được người dùng duyệt — build, gate, area từng ứng viên). Audit có danh sách khối bảo vệ cho FPGA Arty A7-100T và ASIC (ORFS): debug/JTAG,
+  UART, serial-TL, mem port, BootROM, CLINT/PLIC, boot-select, clock tap, clock/reset; chặn theo fragment và so cổng/module
+  `ChipTop` với baseline; xuất `patches/chipyard-config.patch` (`RocketFmaxSoCConfig` + biến thể Arty). Vivado/ORFS chưa
+  chạy (người dùng: để sau, chỉ cần audit không bỏ khối hai luồng này cần). Claude không tự viết patch Chisel: mọi chỉnh sửa Chisel do loop
   (agent) làm. Đã kiểm (probe 25/10/2026): riscv-tests ở
   `$RISCV/riscv64-unknown-elf/share/riscv-tests` (107 test ISA -p), module `RocketTile` có cổng
   `clock`/`reset`, `chia-cacti` có `sta` (dùng `-group_count`, không phải `-group_path_count`),

@@ -126,9 +126,34 @@ chia job submit --no-wait --submission-id fmax-audit --working-dir . -- \
    ∥ area. Fragment chỉ được có dạng `new a.b.C` hoặc `new a.b.C(...)`. File này bị xoá sau mỗi build
    và ở cuối lần chạy; `RocketConfig` không bị sửa.
 4. Gộp mọi ứng viên "bỏ được" vào `RocketFmaxAuditAll` và kiểm lần nữa (`--no-combine` để bỏ).
+5. Xuất config cuối (bản gộp nếu pass, hoặc ứng viên duy nhất pass) thành
+   `patches/chipyard-config.patch`: thêm `RocketFmaxSoCConfig`
+   (`generators/chipyard/.../config/RocketFmaxSoC.scala`) và `RocketFmaxSoCArty100TConfig`
+   (`fpga/src/main/scala/arty100t/`, = `WithArty100TTweaks ++ WithBroadcastManager ++ RocketFmaxSoCConfig`,
+   như `RocketArty100TConfig`). Loop không áp patch này; áp tay bằng `git -C /home/ray/chipyard apply`.
+
+**Khối bảo vệ cho FPGA (Arty A7-100T) và ASIC (OpenROAD flow scripts).** Hai luồng này chưa chạy,
+nhưng audit không được bỏ khối mà chúng cần, dù harness Verilator không dùng. Danh sách
+`PROTECTED` trong `config_audit.py` (dựa trên `WithArty100TTweaks` và `ChipLikeRocketConfig` của nhánh
+`chia_artifact`): debug/JTAG, UART, serial-TL, mem port, BootROM, CLINT, PLIC, boot-select
+(`custom_boot`, boot-addr reg), clock tap, clock/reset. Chặn hai lớp:
+
+- trước build: fragment bỏ khối bảo vệ (`WithNoDebug`, `WithDMIDTM`, `WithNoUART`, `WithNoSerialTL*`,
+  `WithNoMemPort`, `WithNMemoryChannels(0)`, `WithNoBootROM`, `WithNoCLINT`, `WithNoPLIC`,
+  `WithNoCustomBootPin`, `WithNoBootAddrReg`, `WithNoClockTap`, `WithNoResetSynchronizers`,
+  `WithNoClockGenerator*`) bị từ chối, không build;
+- sau build: cổng `ChipTop` (`jtag_*`, `uart_*`, `serial_tl_*`, `axi4_mem_*`, `custom_boot`, `clock_tap`,
+  `clock*`/`reset*`) và module (`TLDebugModule*`, `TLUART*`, `TLROM`/`BootROM`, `CLINT`, `TLPLIC`,
+  `*Serdes*`, `*BootAddrReg*`, reset sync) phải còn đủ như baseline; mất thì bỏ qua gate.
+
+`runs/baseline/protected_blocks.txt` ghi khối nào tìm thấy trong `ChipTop` baseline. Dòng `NOT FOUND` nghĩa
+là regex tên module/cổng chưa khớp tên thật (chưa kiểm trên RTL thật), khối đó khi ấy chỉ được bảo vệ
+bằng lớp fragment. Gate còn treo, ghi trong `audit.md`: Vivado (synth/timing 50 MHz, elaborate config
+Arty) và ORFS; adder viết tay trong `best.patch` cần kiểm lại timing trên FPGA (carry chain cứng).
 
 Kết luận mỗi ứng viên: *bỏ được* (gate pass, mcycle giữ nguyên), *chạy được nhưng đổi cycle*,
-*cần cho harness/chức năng* (gate trượt) hoặc *không build được*. Area không tính SRAM macro; phần
+*cần cho harness/chức năng* (gate trượt), *bị chặn: khối bảo vệ FPGA/ASIC*, *cần cho FPGA/ASIC (đụng
+khối bảo vệ)* hoặc *không build được*. Area không tính SRAM macro; phần
 SRAM được báo bằng số bit (từ `.top.mems.conf`). Kết quả: `audit.md`, `audit.csv`,
 `runs/agent/` (prompt, câu trả lời, `candidates.json`), `runs/cand<k>_<id>/`.
 
@@ -251,6 +276,8 @@ Cuối mỗi lần chạy, loop cũng để sẵn bản tốt nhất trong conta
   module (FPU nhận lệnh ngẫu nhiên, nên FMA chỉ được kích ở một phần các cycle).
   Container chipyard có Verilator 5.022 (`.conda-env/bin`, sau khi `source env.sh`).
 - **Mốc phụ (`config_audit.py`): code xong, chỉ mới kiểm bằng mock, chưa chạy thật.**
+  Khối bảo vệ FPGA/ASIC và xuất `chipyard-config.patch` (26/10/2026): kiểm bằng mock (chặn fragment,
+  chặn build mất cổng JTAG, patch `git apply` được); tên module/cổng thật chưa đối chiếu với RTL thật.
   - `equiv.py` với Yosys 0.70 (yowasp) và Verilator 5.020: chứng minh được bộ cộng viết lại
     (16/16 proven), bắt được lỗi cài vào (lockstep lệch), chứng minh cả trường hợp dời thanh ghi
     qua bộ cộng; phép nhân đảo thứ tự thì formal `timeout`, lockstep pass.
