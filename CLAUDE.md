@@ -141,8 +141,9 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   UART, serial-TL, mem port, BootROM, CLINT/PLIC, boot-select, clock tap, clock/reset; chặn theo fragment và so cổng/module
   `ChipTop` với baseline; xuất `patches/chipyard-config.patch` (`RocketFmaxSoCConfig` + biến thể Arty). Lần chạy thật đầu (26/10/2026): Yosys area `ChipTop` lỗi `unexpected OP_CAST` ở `'{...}` (bảng tra Vec
   của firtool ngoài `RocketTile`); đã thêm `sv_packed_patterns` (đổi `'{`→`{`) cho luồng area, tag `audit_soc_area_a2_*`,
-  và `area_check.py` để kiểm trong container `eda` ngoài CHIA. Yosys của image đọc được `wire [3:0][3:0]` (Yosys 0.38 thật thì
-  không), nên số phiên bản 0.38 ghi ở dưới có thể sai: kiểm `yosys -V`. Vivado/ORFS chưa
+  và `area_check.py` để kiểm trong container `eda` ngoài CHIA. Image `eda` có Yosys `0.38+92` (litex-hub, bản dev sau 0.38; đọc được
+  `wire [3:0][3:0]` nhưng không đọc `'{`). `area_check.py` chạy thật: 334 file, 126 pattern đổi, parse hết, area `ChipTop`
+  (trừ `RocketTile` và SRAM) 1,18 mm², Yosys 149 s. Vivado/ORFS chưa
   chạy (người dùng: để sau, chỉ cần audit không bỏ khối hai luồng này cần). Claude không tự viết patch Chisel: mọi chỉnh sửa Chisel do loop
   (agent) làm. Đã kiểm (probe 25/10/2026): riscv-tests ở
   `$RISCV/riscv64-unknown-elf/share/riscv-tests` (107 test ISA -p), module `RocketTile` có cổng
