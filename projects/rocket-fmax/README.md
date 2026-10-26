@@ -235,7 +235,7 @@ chia job submit --no-wait --submission-id fmax-m4 --working-dir . -- \
 | start | | +7,350 | 72,20 | 1 078 378 | `dcache` store data → storegen | m3 best.patch + config audit |
 | 1 | có | +8,158 | 76,68 | 1 088 086 | `fpuOpt.ifpu` | 14,8 phút |
 | 2 | không | +7,761 | 74,41 | 1 078 451 | `fpuOpt.ifpu` | kém hơn vòng 1 |
-| 3 | không | | | | | build lỗi (sbt) |
+| 3 | không | | | | | build lỗi: Scala, default param `isNaNx = xt.isNaN(x)` dùng tham số cùng danh sách (`FPU.scala:340`) |
 | 4 | không | | | | | agent hết 30 phút |
 | 5 | có | **+8,745** | **80,29** | 1 082 577 | `fpuOpt.dfma` (FMA) | 26,9 phút |
 
