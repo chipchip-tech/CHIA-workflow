@@ -207,6 +207,25 @@ size hẹp lại); `MulDiv` không đổi. Gate `best_cfg` pass, mcycle giữ ng
 trong `core.div` (RTL không đổi) mà slack vẫn lệch 0,09 ns, tức nhiễu của synth flatten + ABC cỡ 0,1 ns; mức lợi
 0,37 ns (+2,7 % Fmax) của `best_cfg` lớn hơn nhiễu đó nhưng cùng bậc.
 
+### Chạy tiếp vòng agent trên nền config audit (`--fragments`, `--start-patch`)
+
+```bash
+chia job submit --no-wait --submission-id fmax-m4 --working-dir . -- \
+    python rocket_fmax.py --run-name m4 --period-ns 21.2 --iters 5 --exclude-isa rv64ui-p-ma_data --equiv \
+    --start-patch ~/rocket-fmax-out/m3/patches/best.patch \
+    --fragments "new testchipip.soc.WithNoScratchpads" "new chipyard.config.WithNoBusErrorDevices"
+```
+
+- `--fragments`: mỗi lần build của vòng (và điểm xuất phát), loop ghi class `RocketFmaxCfg` (= fragment ++
+  `RocketConfig`) vào `RocketFmaxAudit.scala`, build, rồi xoá. File được ghi sau `collect_diff` nên kiểm phạm vi
+  không thấy nó; agent vẫn chỉ được sửa rocket-chip. Prompt ghi config này thay cho `RocketConfig`.
+- `--start-patch`: các vòng bắt đầu từ patch này (thay vì rocket-chip gốc). Điểm xuất phát được build + synth/STA
+  một lần, cache theo `baseline_start_<hash>_*` (hash của patch và fragment); không chạy gate (đã gate bằng
+  `measure_soc.py`). Gate các vòng vẫn so với `baseline_gate` (config audit không đổi mcycle).
+- `best.patch` cuối là patch tích luỹ (gồm cả start patch). `--equiv` so bản tốt nhất với **điểm xuất phát**
+  (cùng config), không so với baseline, vì config đổi RTL tile (bản đồ địa chỉ).
+- Đã chạy trên mock (lần 2 điểm xuất phát HIT cache, file config tạm bị xoá); chưa chạy thật.
+
 ## Đầu ra: `~/rocket-fmax-out/<run>/`
 
 ```

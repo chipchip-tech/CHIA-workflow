@@ -1,11 +1,11 @@
-Shorten the critical path of the Rocket core (Chipyard `RocketConfig`, module `RocketTile`)
+Shorten the critical path of the Rocket core (Chipyard `$CONFIG_DESC`, module `RocketTile`)
 **without changing its cycle-by-cycle behaviour**. This is round $ITER of $MAX_ITERS.
 
 ## How your change is judged
 
 After you finish, the loop (not you) will:
 
-1. Build `RocketConfig` (Chisel -> Verilog -> Verilator).
+1. Build `$CONFIG_DESC` (Chisel -> Verilog -> Verilator).
 2. Run riscv-tests `rv64ui/um/ua/uf/ud-p-*` (all must pass) and the benchmarks dhrystone,
    median, multiply, qsort, towers, vvadd. Each benchmark must report **exactly** the same
    `mcycle` as the baseline. One cycle of difference rejects the change.
