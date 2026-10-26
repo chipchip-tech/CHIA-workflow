@@ -43,6 +43,7 @@ synthesis đang chạy bị huỷ.
 | `rocket_fmax.py` | Driver: baseline, các vòng, nhận/loại, ghi kết quả, profiler; `--equiv`, `--equiv-only` |
 | `fmax_nodes.py` | Các `@ChiaFunction`: chipyard (ELF, git, kiểm phạm vi), `extract_tile_rtl`, `run_gate`, `synth_sta`, `equiv_formal`, `equiv_sim`, `extract_soc_rtl`, `synth_area` |
 | `equiv.py` | Tìm module đổi, đổi tên hai bản, sinh script Yosys `equiv_*` và testbench lockstep Verilator |
+| `area_check.py` | Kiểm luồng area `ChipTop` ngay trong container `eda`, ngoài CHIA (parse từng file, rồi `synth_area`) |
 | `config_audit.py` | Mốc phụ: agent tìm khối thừa trong `RocketConfig`, loop build và kiểm từng ứng viên |
 | `prompts/improve_timing.md` | Prompt của agent (IPC-neutral, không build) |
 | `prompts/audit_config.md` | Prompt của agent kiểm config (chỉ đọc, ghi `candidates.json`) |
@@ -116,7 +117,7 @@ chia job submit --no-wait --submission-id fmax-audit --working-dir . -- \
 ```
 
 1. Build `RocketConfig` gốc (rocket-chip reset về HEAD, **bỏ** patch Fmax), Yosys area của `ChipTop`
-   theo từng khối, `RocketTile` và SRAM là blackbox (cache `audit_soc_rtl`, `audit_soc_area_p<P>`;
+   theo từng khối, `RocketTile` và SRAM là blackbox (cache `audit_soc_rtl`, `audit_soc_area_a2_p<P>`;
    gate dùng lại `baseline_gate`).
 2. Agent chỉ đọc: nguồn config, cây module, bảng area. Ghi `/home/ray/config_audit/candidates.json`.
    Loop kiểm agent không sửa gì trong cây chipyard (có thì revert).
@@ -131,6 +132,21 @@ chia job submit --no-wait --submission-id fmax-audit --working-dir . -- \
    (`generators/chipyard/.../config/RocketFmaxSoC.scala`) và `RocketFmaxSoCArty100TConfig`
    (`fpga/src/main/scala/arty100t/`, = `WithArty100TTweaks ++ WithBroadcastManager ++ RocketFmaxSoCConfig`,
    như `RocketArty100TConfig`). Loop không áp patch này; áp tay bằng `git -C /home/ray/chipyard apply`.
+
+**Yosys và `'{...}`.** firtool ghi các bảng tra nhỏ (Vec) ngoài `RocketTile` (L2 `Atomics`, `TLError`,
+`TLMonitor`, serializer...) thành `wire [3:0][3:0] _GEN = '{4'hC, ...};`. Yosys trong image `eda` báo
+`unexpected OP_CAST`. Luồng area đổi `'{` thành `{` (`fmax_nodes.sv_packed_patterns`; với mảng packed và
+phần tử đúng độ rộng thì hai cách viết như nhau), báo lỗi nếu gặp `default:`/khoá hay số không độ rộng.
+Luồng đo `RocketTile` (`v2`) không đổi. Kiểm nhanh ngoài CHIA trên bản build có sẵn:
+
+```bash
+C=chia-chipyard-$USER-0; E=$(docker ps --format '{{.Names}}' | grep -i eda | head -1)
+D=/home/ray/chipyard/sims/verilator/generated-src/chipyard.harness.TestHarness.RocketConfig
+rm -rf /tmp/ac && mkdir -p /tmp/ac/gen && docker cp $C:$D/gen-collateral /tmp/ac/gen/
+docker cp $C:$D/chipyard.harness.TestHarness.RocketConfig.top.mems.conf /tmp/ac/gen/
+cp area_check.py fmax_nodes.py equiv.py /tmp/ac/ && docker exec $E rm -rf /tmp/ac && docker cp /tmp/ac $E:/tmp/ac
+docker exec $E bash -lc 'cd /tmp/ac && python area_check.py gen/gen-collateral'
+```
 
 **Khối bảo vệ cho FPGA (Arty A7-100T) và ASIC (OpenROAD flow scripts).** Hai luồng này chưa chạy,
 nhưng audit không được bỏ khối mà chúng cần, dù harness Verilator không dùng. Danh sách

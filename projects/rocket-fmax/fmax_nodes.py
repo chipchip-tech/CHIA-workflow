@@ -580,6 +580,32 @@ tee -o {stat} stat -liberty {lib} -top {top}
 """
 
 
+def sv_packed_patterns(text: str) -> tuple[str, int]:
+    """firtool writes small Vec lookups as packed-array assignment patterns
+    (`wire [3:0][3:0] _GEN = '{4'hC, 4'h8, ...};`), which the Yosys in the eda
+    image cannot parse (`unexpected OP_CAST`). For a packed array '{a, b, ...}
+    equals the concatenation {a, b, ...} as long as every element has the
+    element's width, which firtool's sized literals and signals do. Returns
+    (text, patterns rewritten); raises on patterns that are not plain lists."""
+    code = re.sub(r"//[^\n]*", lambda m: " " * len(m.group(0)), text)   # comments masked, same offsets
+    starts = [m.start() for m in re.finditer(r"'\{", code)]
+    for s in starts:
+        depth, i = 0, s + 1
+        while i < len(code):
+            depth += {"{": 1, "}": -1}.get(code[i], 0)
+            if depth == 0:
+                break
+            i += 1
+        body = code[s + 2: i]
+        if re.search(r"\bdefault\b|[{,]\s*\w+\s*:(?!:)|^\s*\w+\s*:(?!:)", body) or \
+                any(re.fullmatch(r"\s*\d+\s*", e) for e in body.split(",")):
+            raise ValueError(f"unsupported assignment pattern: '{{{body[:120]}}}")
+    out = list(text)
+    for s in starts:
+        out[s] = " "
+    return "".join(out), len(starts)
+
+
 @dataclass
 class AreaResult:
     success: bool
@@ -613,6 +639,11 @@ def synth_area(rtl: TileRTL, period_ns: float, yosys_timeout: int = 4 * 3600) ->
             f.write(filtered)
         os.makedirs(os.path.join(work, "rtl"))
         for name, text in rtl.files.items():
+            try:
+                text, _ = sv_packed_patterns(text)
+            except ValueError as e:
+                res.error = f"{name}: {e}"
+                return res
             with open(os.path.join(work, "rtl", name), "w") as f:
                 f.write(text)
         bb_paths = []

@@ -249,7 +249,9 @@ def export_config(out: Path, frags: list[str], ids: list[str]) -> Path:
 
 
 def baseline(a, out: Path, elfs: dict, snap: dict) -> dict:
-    tags = {"rtl": "audit_soc_rtl", "area": f"audit_soc_area_p{a.period_ns:g}".replace(".", "p"),
+    # area tag a2: '{...} patterns rewritten (fmax_nodes.sv_packed_patterns); the first
+    # audit_soc_area_p21p2 cached a failed Yosys run
+    tags = {"rtl": "audit_soc_rtl", "area": f"audit_soc_area_a2_p{a.period_ns:g}".replace(".", "p"),
             "gate": "baseline_gate"}
     hits = {k: cache_has(t) for k, t in tags.items()}
     print("audit baseline cache: " + ", ".join(f"{tags[k]}={'HIT' if v else 'miss'}" for k, v in hits.items()),

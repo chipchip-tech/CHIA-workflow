@@ -139,7 +139,10 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   (agent chỉ đọc tìm khối thừa trong `RocketConfig`; loop tự ghi `RocketFmaxAudit.scala` trong
   `generators/chipyard` — ngoại lệ đã được người dùng duyệt — build, gate, area từng ứng viên). Audit có danh sách khối bảo vệ cho FPGA Arty A7-100T và ASIC (ORFS): debug/JTAG,
   UART, serial-TL, mem port, BootROM, CLINT/PLIC, boot-select, clock tap, clock/reset; chặn theo fragment và so cổng/module
-  `ChipTop` với baseline; xuất `patches/chipyard-config.patch` (`RocketFmaxSoCConfig` + biến thể Arty). Vivado/ORFS chưa
+  `ChipTop` với baseline; xuất `patches/chipyard-config.patch` (`RocketFmaxSoCConfig` + biến thể Arty). Lần chạy thật đầu (26/10/2026): Yosys area `ChipTop` lỗi `unexpected OP_CAST` ở `'{...}` (bảng tra Vec
+  của firtool ngoài `RocketTile`); đã thêm `sv_packed_patterns` (đổi `'{`→`{`) cho luồng area, tag `audit_soc_area_a2_*`,
+  và `area_check.py` để kiểm trong container `eda` ngoài CHIA. Yosys của image đọc được `wire [3:0][3:0]` (Yosys 0.38 thật thì
+  không), nên số phiên bản 0.38 ghi ở dưới có thể sai: kiểm `yosys -V`. Vivado/ORFS chưa
   chạy (người dùng: để sau, chỉ cần audit không bỏ khối hai luồng này cần). Claude không tự viết patch Chisel: mọi chỉnh sửa Chisel do loop
   (agent) làm. Đã kiểm (probe 25/10/2026): riscv-tests ở
   `$RISCV/riscv64-unknown-elf/share/riscv-tests` (107 test ISA -p), module `RocketTile` có cổng
