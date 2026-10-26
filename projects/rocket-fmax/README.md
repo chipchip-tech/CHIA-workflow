@@ -190,7 +190,22 @@ Fmax ở project này là Yosys + OpenSTA trên `RocketTile` (luồng `v2`, chu 
 `best_cfg` (cả hai, kèm gate so với baseline). Build chạy lần lượt (chung cây chipyard), synth/STA và gate
 chạy song song. Báo cáo `soc_fmax.md`: slack, Fmax, area tile, sha RTL tile và module nào khác nhau. Mặc định
 fragment là hai ứng viên của `audit2` (`--fragments` để đổi). Cuối lần chạy rocket-chip ở trạng thái đã áp
-`best.patch`, file config tạm bị xoá. Đã chạy trên mock; chưa chạy thật.
+`best.patch`, file config tạm bị xoá.
+
+Chạy thật (26/10/2026, `fmax-soc`, `~/rocket-fmax-out/soc-fmax`), 21,2 ns:
+
+| Điểm | Worst slack | Đường găng | Fmax | Area tile (v2) | Đường găng đi qua |
+|---|---|---|---|---|---|
+| base | −1,001 ns | 22,201 ns | 45,04 MHz | 1 069 069 µm² | `core.div` |
+| cfg | −0,911 ns | 22,111 ns | 45,23 MHz | 1 064 271 µm² | `core.div` |
+| best | +6,980 ns | 14,220 ns | 70,32 MHz | 1 083 776 µm² | `dcache` (pstore1 → storegen) |
+| best_cfg | +7,350 ns | 13,850 ns | 72,20 MHz | 1 078 378 µm² | `dcache` (s2_data → storegen) |
+
+`base` và `best` khớp số của `m1-final`/`m3` (đo lặp lại được). Bỏ hai khối làm RTL tile đổi thật: `DCache`,
+`Frontend`, `ICache`, `PMAChecker`, `PTW` (bản đồ địa chỉ ít vùng hơn) và master xbar của tile (`z4` → `z3`, trường
+size hẹp lại); `MulDiv` không đổi. Gate `best_cfg` pass, mcycle giữ nguyên. Lưu ý: ở `base`→`cfg` đường găng nằm
+trong `core.div` (RTL không đổi) mà slack vẫn lệch 0,09 ns, tức nhiễu của synth flatten + ABC cỡ 0,1 ns; mức lợi
+0,37 ns (+2,7 % Fmax) của `best_cfg` lớn hơn nhiễu đó nhưng cùng bậc.
 
 ## Đầu ra: `~/rocket-fmax-out/<run>/`
 
