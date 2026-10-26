@@ -303,8 +303,12 @@ Cuối mỗi lần chạy, loop cũng để sẵn bản tốt nhất trong conta
   | `bus_error_devices` | `chipyard.config.WithNoBusErrorDevices` | bỏ được, mcycle giữ nguyên | 21 636 µm² (1,83 %) | 0 |
   | gộp | cả hai | bỏ được, mcycle giữ nguyên | 61 207 µm² (5,17 %) | 532 480 bit |
 
-  Đã xuất `patches/chipyard-config.patch` (`RocketFmaxSoCConfig` + `RocketFmaxSoCArty100TConfig`); chưa áp,
-  chưa elaborate bản Arty. Lưu ý: bỏ error device thì truy cập địa chỉ không ánh xạ có thể treo bus thay vì
+  Đã xuất `patches/chipyard-config.patch` (`RocketFmaxSoCConfig` + `RocketFmaxSoCArty100TConfig`). Kiểm tay
+  (26/10/2026): patch `git apply` được; `make verilog CONFIG=RocketFmaxSoCConfig` trong `sims/verilator` qua.
+  Bản Arty **chưa elaborate được vì image**: project `chipyard_fpga` của nhánh `chia_artifact` không compile
+  (6 lỗi `needs to be abstract ... def wf_active: chisel3.Bool`, ở harness arty, arty100t, datastorm,
+  nexysvideo, vc707, vcu118; `HasHarnessInstantiators` có thêm `wf_active` mà harness FPGA chưa cài). Lỗi y
+  hệt khi không có patch (`RocketArty100TConfig` gốc), nên không do file sinh ra. Lưu ý: bỏ error device thì truy cập địa chỉ không ánh xạ có thể treo bus thay vì
   báo lỗi truy cập (gate không có test nào làm việc này). Vivado/ORFS chưa chạy.
   Trước đó (mock): chặn fragment, chặn build mất cổng JTAG, patch `git apply` được.
   - `equiv.py` với Yosys 0.70 (yowasp) và Verilator 5.020: chứng minh được bộ cộng viết lại
