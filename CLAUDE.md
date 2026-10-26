@@ -143,7 +143,11 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   của firtool ngoài `RocketTile`); đã thêm `sv_packed_patterns` (đổi `'{`→`{`) cho luồng area, tag `audit_soc_area_a2_*`,
   và `area_check.py` để kiểm trong container `eda` ngoài CHIA. Image `eda` có Yosys `0.38+92` (litex-hub, bản dev sau 0.38; đọc được
   `wire [3:0][3:0]` nhưng không đọc `'{`). `area_check.py` chạy thật: 334 file, 126 pattern đổi, parse hết, area `ChipTop`
-  (trừ `RocketTile` và SRAM) 1,18 mm², Yosys 149 s. Vivado/ORFS chưa
+  (trừ `RocketTile` và SRAM) 1,18 mm², Yosys 149 s. Lần `fmax-audit-3`: bảng khối bảo vệ tìm đủ 10 khối; agent đề xuất 2 ứng viên (scratchpad,
+  bus error devices) nhưng ghi `candidates.json` bằng `bash` có sẵn của opencode (chạy trong container opencode, không phải
+  `chipyard_bash`) nên loop không thấy → prompt bắt dùng `chipyard_bash` + lặp JSON ở cuối câu trả lời; loop đọc dự phòng
+  bên container opencode (`read_text_opencode`). Câu trả lời agent cache theo `audit_<run-name>_llm`: chạy lại phải đổi
+  `--run-name`. Vivado/ORFS chưa
   chạy (người dùng: để sau, chỉ cần audit không bỏ khối hai luồng này cần). Claude không tự viết patch Chisel: mọi chỉnh sửa Chisel do loop
   (agent) làm. Đã kiểm (probe 25/10/2026): riscv-tests ở
   `$RISCV/riscv64-unknown-elf/share/riscv-tests` (107 test ISA -p), module `RocketTile` có cổng

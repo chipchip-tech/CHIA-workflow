@@ -52,6 +52,9 @@ For each candidate also say whether a real chip would still need it.
 
 ## Inputs (on the chipyard worker, through `chipyard_bash`; each command is limited to 120 s)
 
+Use the `chipyard_bash` tool for every command. Your built-in `bash` tool runs in the opencode
+container, not on the chipyard worker: these files are not there, and nothing it writes is read.
+
 - `$STAGE_DIR/area_by_block.txt`: Yosys area (sky130hd) of the generated `ChipTop`, per
   instance down to depth 6. `RocketTile` and the SRAM macros (`*_ext`) are black boxes.
 - `$STAGE_DIR/sram_macros.txt`: every SRAM macro and its size in bits.
@@ -90,8 +93,8 @@ $CYCLES
 
 ## Output
 
-Write the candidates to `$CANDIDATES` (outside the chipyard tree, so writing it is allowed),
-for example with a heredoc, as a JSON list:
+Write the candidates **with `chipyard_bash`** to `$CANDIDATES` (outside the chipyard tree, so
+writing it is allowed), for example with a heredoc, as a JSON list:
 
 ```json
 [
@@ -113,3 +116,4 @@ for example with a heredoc, as a JSON list:
 
 Finish with a short report: the candidates in order, and anything you found that cannot be
 removed with an existing fragment but looks like a leftover.
+End the reply with the same JSON list again, in a ```json block.

@@ -292,6 +292,7 @@ def run_agent(a, out: Path, base: dict, snap: dict) -> tuple[list, str]:
              "baseline_cycles.txt": cycles,
              "protected_blocks.txt": protected_table(base["sig"])}
     get(N.stage_for_agent.chia_remote(files, N.AUDIT_STAGE_DIR))
+    get(N.read_text_opencode.chia_remote(CANDIDATES, True))     # no stale file from an earlier run
     prompt = string.Template(PROMPT.read_text()).safe_substitute(
         STAGE_DIR=N.AUDIT_STAGE_DIR, CANDIDATES=CANDIDATES, MAX=a.max_candidates,
         AREA=area_table(base["rtl"], base["area"], 2), CYCLES=cycles, PROTECTED=protected_table(base["sig"]))
@@ -319,6 +320,10 @@ def run_agent(a, out: Path, base: dict, snap: dict) -> tuple[list, str]:
         notes.append(f"agent đã sửa ngoài rocket-chip ({diff['outside_changed']}); đã khôi phục")
         get(N.restore_outside.chia_remote(snap["outside"]))
     raw = get(N.read_text.chia_remote(CANDIDATES))
+    if raw is None:
+        raw = get(N.read_text_opencode.chia_remote(CANDIDATES))
+        if raw is not None:
+            notes.append("agent ghi candidates.json bằng bash của opencode (container opencode), không qua chipyard_bash")
     write(d / "candidates.json", raw or "")
     cands, err = parse_candidates(raw, resp.result if resp else "")
     if err:

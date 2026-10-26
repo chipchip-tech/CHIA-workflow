@@ -215,6 +215,19 @@ def read_text(path: str) -> str | None:
         return f.read()
 
 
+@ChiaFunction(resources={"opencode_creds": 1}, max_retries=0)
+def read_text_opencode(path: str, remove: bool = False) -> str | None:
+    """Same as read_text on the opencode worker: opencode's built-in bash runs there, so an
+    agent that used it instead of chipyard_bash left its output there. `remove` deletes it."""
+    if not os.path.isfile(path):
+        return None
+    with open(path, errors="replace") as f:
+        text = f.read()
+    if remove:
+        os.remove(path)
+    return text
+
+
 @ChiaFunction(resources={"chipyard": 1}, max_retries=0)
 def write_audit_config(text: str | None) -> str:
     """Write (or, with None, delete) AUDIT_CONFIG_FILE."""
