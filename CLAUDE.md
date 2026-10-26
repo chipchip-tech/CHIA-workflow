@@ -147,7 +147,10 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   bus error devices) nhưng ghi `candidates.json` bằng `bash` có sẵn của opencode (chạy trong container opencode, không phải
   `chipyard_bash`) nên loop không thấy → prompt bắt dùng `chipyard_bash` + lặp JSON ở cuối câu trả lời; loop đọc dự phòng
   bên container opencode (`read_text_opencode`). Câu trả lời agent cache theo `audit_<run-name>_llm`: chạy lại phải đổi
-  `--run-name`. Vivado/ORFS chưa
+  `--run-name`. **Audit chạy thật xong (26/10/2026, `fmax-audit-4`, `--candidates-file`, `~/rocket-fmax-out/audit2`)**:
+  cả 2 ứng viên và bản gộp gate pass, mcycle giữ nguyên, khối bảo vệ còn đủ; bản gộp bớt 61 207 µm² (5,17 % area
+  `ChipTop` ngoài tile) + 64 KiB SRAM scratchpad. Đã xuất `chipyard-config.patch`, chưa áp/elaborate bản Arty.
+  Bỏ error device: truy cập địa chỉ không ánh xạ có thể treo bus thay vì báo lỗi (gate không kiểm). Vivado/ORFS chưa
   chạy (người dùng: để sau, chỉ cần audit không bỏ khối hai luồng này cần). Claude không tự viết patch Chisel: mọi chỉnh sửa Chisel do loop
   (agent) làm. Đã kiểm (probe 25/10/2026): riscv-tests ở
   `$RISCV/riscv64-unknown-elf/share/riscv-tests` (107 test ISA -p), module `RocketTile` có cổng

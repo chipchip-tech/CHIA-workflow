@@ -399,7 +399,8 @@ def run(a, out: Path):
 
     if a.candidates_file:
         cands, err = parse_candidates(Path(a.candidates_file).expanduser().read_text(), "")
-        resp = ""
+        resp = (f"(agent không chạy lần này: ứng viên lấy từ `--candidates-file {a.candidates_file}`; "
+                "báo cáo của agent nằm ở run đã sinh ra file đó)")
         if err:
             raise SystemExit(err)
     else:

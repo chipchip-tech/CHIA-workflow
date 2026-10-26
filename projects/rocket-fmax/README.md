@@ -291,9 +291,22 @@ Cuối mỗi lần chạy, loop cũng để sẵn bản tốt nhất trong conta
   Chỉ `RocketALU` được chứng minh hình thức; `MulDiv` và `FPU` dựa vào lockstep ngẫu nhiên ở mức
   module (FPU nhận lệnh ngẫu nhiên, nên FMA chỉ được kích ở một phần các cycle).
   Container chipyard có Verilator 5.022 (`.conda-env/bin`, sau khi `source env.sh`).
-- **Mốc phụ (`config_audit.py`): code xong, chỉ mới kiểm bằng mock, chưa chạy thật.**
-  Khối bảo vệ FPGA/ASIC và xuất `chipyard-config.patch` (26/10/2026): kiểm bằng mock (chặn fragment,
-  chặn build mất cổng JTAG, patch `git apply` được); tên module/cổng thật chưa đối chiếu với RTL thật.
+- **Mốc phụ (`config_audit.py`): chạy thật xong (26/10/2026, `fmax-audit-4`, `~/rocket-fmax-out/audit2`).**
+  Bảng khối bảo vệ tìm đủ 10 khối trong `ChipTop` baseline (không có dòng `NOT FOUND`). Area `ChipTop`
+  (trừ `RocketTile` và SRAM) 1 183 581 µm², SRAM 2 143 744 bit. Agent (`fmax-audit-3`) đề xuất 2 ứng viên;
+  vì nó ghi `candidates.json` bằng `bash` của opencode nên lần đó loop không thấy, lần `fmax-audit-4` chạy lại
+  với `--candidates-file` (file lấy từ container opencode):
+
+  | Ứng viên | Fragment | Kết luận | Area bớt | SRAM bớt |
+  |---|---|---|---|---|
+  | `mbus_scratchpad` | `testchipip.soc.WithNoScratchpads` | bỏ được, mcycle giữ nguyên | 39 592 µm² (3,35 %) | 532 480 bit (64 KiB) |
+  | `bus_error_devices` | `chipyard.config.WithNoBusErrorDevices` | bỏ được, mcycle giữ nguyên | 21 636 µm² (1,83 %) | 0 |
+  | gộp | cả hai | bỏ được, mcycle giữ nguyên | 61 207 µm² (5,17 %) | 532 480 bit |
+
+  Đã xuất `patches/chipyard-config.patch` (`RocketFmaxSoCConfig` + `RocketFmaxSoCArty100TConfig`); chưa áp,
+  chưa elaborate bản Arty. Lưu ý: bỏ error device thì truy cập địa chỉ không ánh xạ có thể treo bus thay vì
+  báo lỗi truy cập (gate không có test nào làm việc này). Vivado/ORFS chưa chạy.
+  Trước đó (mock): chặn fragment, chặn build mất cổng JTAG, patch `git apply` được.
   - `equiv.py` với Yosys 0.70 (yowasp) và Verilator 5.020: chứng minh được bộ cộng viết lại
     (16/16 proven), bắt được lỗi cài vào (lockstep lệch), chứng minh cả trường hợp dời thanh ghi
     qua bộ cộng; phép nhân đảo thứ tự thì formal `timeout`, lockstep pass.
