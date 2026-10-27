@@ -122,6 +122,8 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   push luôn lên nhánh đích.
 - Project hiện có: `project/ascon-secureboot` (RoCC Ascon-Hash256, secure boot; xong M1–M4).
   Nhánh `temp` cũ đã đổi tên thành nhánh này.
+- `project/rocket-fmax`: **session mới đọc `projects/rocket-fmax/HANDOFF.md` trước** (bàn giao 27/10/2026,
+  xuất phát từ mốc m5; các lần chạy sau m5 được bỏ qua).
 - `project/rocket-fmax` (`projects/rocket-fmax/`): loop agent tối ưu Fmax của RocketTile, giữ
   nguyên cycle (gate: riscv-tests + mcycle của benchmark phải khớp baseline; đo bằng Yosys +
   OpenSTA sky130hd, worker `eda` tự build). **Mốc 1 xong (25/10/2026)**: chốt luồng `v2`,
