@@ -270,8 +270,8 @@ class SalvageOpenCodeLLM(OpenCodeLLM):
                     proc = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=out_fh,
                                           stderr=subprocess.PIPE, text=True,
                                           timeout=self.timeout_seconds, env=env)
-                except subprocess.TimeoutExpired:
-                    self._salvage(out_path, env)
+                except subprocess.TimeoutExpired as e:
+                    self._salvage(out_path, env, e.stderr)
                     raise
             with open(out_path) as f:
                 stdout = f.read()
@@ -282,7 +282,7 @@ class SalvageOpenCodeLLM(OpenCodeLLM):
             except OSError:
                 pass
 
-    def _salvage(self, out_path: str, env: dict) -> None:
+    def _salvage(self, out_path: str, env: dict, stderr=None) -> None:
         try:
             with open(out_path, errors="replace") as f:
                 raw = f.read()
@@ -290,6 +290,9 @@ class SalvageOpenCodeLLM(OpenCodeLLM):
             stream = self._extract_from_export(self._run_export(sid, env))[2] if sid else ""
             with open(LLM_PARTIAL_FILE, "w") as f:
                 f.write(f"[opencode run hết {self.timeout_seconds} s, session {sid}]\n\n{stream or raw}")
+                if stderr:   # empty stdout (fmax-ab-t1: no event in 45 min) -> stderr is all there is
+                    err = stderr.decode(errors="replace") if isinstance(stderr, bytes) else stderr
+                    f.write(f"\n\n----- stderr (cuối) -----\n{err[-20000:]}")
         except Exception as e:                                       # noqa: BLE001
             self.logger.warning("could not salvage timed-out run: %s", e)
 

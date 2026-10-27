@@ -97,6 +97,9 @@ def parse_args():
     p.add_argument("--builtin-tools", action="store_true",
                    help="keep opencode's own bash/read/edit tools (they run in the opencode container, "
                         "which has no Chipyard; off by default so the agent only uses chipyard_bash/synth_ab)")
+    p.add_argument("--opencode-logs", default=None, metavar="LEVEL",
+                   help="pass --print-logs --log-level LEVEL to opencode run; on timeout the stderr tail goes "
+                        "into <prefix>_transcript.txt")
     p.add_argument("--llm-timeout", type=int, default=1800)
     p.add_argument("--build-fixes", type=int, default=2,
                    help="when a round's build fails, let an agent fix the compile errors and rebuild, "
@@ -590,10 +593,13 @@ def run(a, out: Path):
     if a.baseline_only:
         return
 
+    oc_args = ["--print-logs", "--log-level", a.opencode_logs] if a.opencode_logs else None
     llm = N.SalvageOpenCodeLLM(model=a.model, system_message=SYSTEM_MESSAGE_AB if a.ab_tool else SYSTEM_MESSAGE,
-                      timeout_seconds=a.llm_timeout, retries=1, builtin_tools=a.builtin_tools)
+                      timeout_seconds=a.llm_timeout, retries=1, builtin_tools=a.builtin_tools,
+                      extra_cli_args=oc_args)
     fix_llm = N.SalvageOpenCodeLLM(model=a.fix_model or a.model, system_message=SYSTEM_MESSAGE_FIX,
-                                   timeout_seconds=a.fix_timeout, retries=1, builtin_tools=a.builtin_tools)
+                                   timeout_seconds=a.fix_timeout, retries=1, builtin_tools=a.builtin_tools,
+                                   extra_cli_args=oc_args)
     best = {"name": "baseline", "patch": "", "synth": base["synth"], "rtl": base["rtl"]}
     if a.start_patch or a.fragments:
         best = ensure_start(a, out, snap, base)

@@ -278,6 +278,12 @@ không có Chipyard. Lần `fmax-ab1` agent gọi 142 lần `bash` sẵn có nà
 lần nào và hết 45 phút. `--builtin-tools` bật lại chúng. Khi agent hết `--llm-timeout`, `SalvageOpenCodeLLM`
 vẫn giữ transcript (`agent_transcript.txt`).
 
+**Lần chạy thật `fmax-ab-t1` (27/10/2026, `--ab-tool`, tool sẵn có tắt, big-pickle): hỏng.** opencode không in
+event nào trong 45 phút (`session None`, transcript rỗng); hai server MCP chỉ nhận lượt khởi tạo và
+`tools/list`, không có lời gọi tool nào. Chưa rõ nguyên nhân. Để chẩn đoán: `probe_tools.py` (một prompt nhỏ gọi
+`chipyard_bash`, chạy với tool sẵn có tắt và bật, log opencode ra stderr) và `--opencode-logs INFO` cho loop;
+khi hết giờ, đuôi stderr của opencode được ghi vào `agent_transcript.txt`.
+
 Chưa kiểm chứng trên lần chạy thật nào: tắt tool sẵn có (mới kiểm cấu hình sinh ra trên mock), và một vòng
 agent dùng `synth_ab` từ đầu đến cuối. Dự kiến synth một sub-block mất 1–2 phút, `RocketTile` 3–4 phút
 (Yosys trên tile của bản tốt nhất từng mất 9–13 phút ở m3, nên con số này có thể lớn hơn). Sub-block dùng
