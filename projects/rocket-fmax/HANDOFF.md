@@ -111,9 +111,11 @@ Xem đầy đủ trong `CLAUDE.md`.
 - Trả lời bằng tiếng Việt.
 - Claude không chạy lệnh trên máy người dùng: đưa lệnh cho người dùng chạy, rồi đọc log họ gửi lại.
 - **Claude không tự viết patch Chisel.** Mọi chỉnh sửa Chisel do loop (agent) làm.
-- `~/CHIA-workflow` trên máy người dùng giờ là bản git clone thật (27/10/2026). Người dùng tự `git pull` nhánh
-  `project/rocket-fmax` khi có cập nhật; `git push` vẫn chưa chắc làm được.
-  - Sau mỗi lần đưa code, nhờ người dùng chạy `git log -1 --oneline` để xác nhận đã có commit mới.
+- `~/CHIA-workflow` trên máy người dùng: người dùng báo đã clone lại, nhưng ngày 27/10/2026 `git pull` trong
+  thư mục này vẫn báo `not a git repository`. Chưa rõ bản clone nằm ở đâu. Người dùng cập nhật code thủ
+  công khi nhánh có thay đổi; `git push` chưa chắc làm được.
+  - Sau mỗi lần đưa code, kiểm người dùng đã có bản mới (`git log -1 --oneline` nếu là git clone, nếu không
+    thì `sha256sum` hoặc `grep` một dòng mới).
   - Muốn lấy file từ máy người dùng thì nhờ họ upload qua GitHub web hoặc dán nội dung.
 - Làm việc trên nhánh `project/rocket-fmax`.
   - Không tạo PR.

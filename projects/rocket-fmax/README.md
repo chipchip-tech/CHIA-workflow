@@ -299,14 +299,16 @@ là diff cuối cùng. Đã chạy trên mock: sửa được ở lần 1, hết
 
 ### Chọn model của agent (`--model`, `--fix-model`)
 
-`--model` nhận mọi id dạng `<provider>/<model>` mà opencode trong container `chia-opencode-$USER` biết (mặc định
+`--model` nhận mọi id dạng `<provider>/<model>` mà opencode trong container opencode biết (mặc định
 `opencode/big-pickle`). Xem danh sách model, kể cả model free của OpenCode Zen (thường là `big-pickle` và các
-id có đuôi `-free`; danh sách thay đổi theo thời gian):
+id có đuôi `-free`; danh sách thay đổi theo thời gian). CHIA thêm hậu tố vào tên container (ví dụ
+`chia-chipyard-$USER-0`), nên phải dò tên:
 
 ```bash
-docker exec chia-opencode-$USER bash -lc 'opencode models opencode'
-# thử nhanh một model có gọi được tool hay không:
-docker exec chia-opencode-$USER bash -lc 'opencode run --model opencode/<id> "say hi"'
+O=$(docker ps --format '{{.Names}}' | grep -i opencode | head -1); echo "$O"
+docker exec "$O" bash -lc 'opencode models opencode'
+# thử nhanh một model:
+docker exec "$O" bash -lc 'opencode run --model opencode/<id> "say hi"'
 ```
 
 Model phải gọi được tool MCP (`chipyard_bash`, `synth_ab`). Ví dụ BOOM của CHIA dùng Claude (`ClaudeCodeLLM`),
