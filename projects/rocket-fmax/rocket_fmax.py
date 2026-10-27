@@ -89,6 +89,9 @@ def parse_args():
                         "e.g. tests that already fail on the unmodified baseline)")
     p.add_argument("--repeat-seed", type=int, default=7, help="baseline: rerun benchmarks with this seed")
     p.add_argument("--model", default="opencode/big-pickle")
+    p.add_argument("--builtin-tools", action="store_true",
+                   help="keep opencode's own bash/read/edit tools (they run in the opencode container, "
+                        "which has no Chipyard; off by default so the agent only uses chipyard_bash/synth_ab)")
     p.add_argument("--llm-timeout", type=int, default=1800)
     p.add_argument("--ab-tool", action="store_true",
                    help="give the agent the synth_ab tool (ab_tool.py: make verilog + Yosys/OpenSTA "
@@ -533,7 +536,7 @@ def run(a, out: Path):
         return
 
     llm = N.SalvageOpenCodeLLM(model=a.model, system_message=SYSTEM_MESSAGE_AB if a.ab_tool else SYSTEM_MESSAGE,
-                      timeout_seconds=a.llm_timeout, retries=1)
+                      timeout_seconds=a.llm_timeout, retries=1, builtin_tools=a.builtin_tools)
     best = {"name": "baseline", "patch": "", "synth": base["synth"], "rtl": base["rtl"]}
     if a.start_patch or a.fragments:
         best = ensure_start(a, out, snap, base)

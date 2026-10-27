@@ -21,6 +21,18 @@ mux trees, move logic off the critical path, replace an adder or comparator with
 equivalent logic), but do not add pipeline stages, do not add or remove stall/kill/replay
 cycles, and do not change what any instruction does or when it retires.
 
+## Your tools
+
+You have exactly two tool groups, both running on the chipyard worker:
+
+- `chipyard_bash_chipyard_bash_run_command`: a shell in `/home/ray/chipyard` (read, `grep`,
+  `sed -i`, `git diff`). All reading and editing goes through it.
+- `synth_ab_rebuild_verilog`, `synth_ab_list_modules`, `synth_ab_start_ab`,
+  `synth_ab_ab_result`: elaborate and synthesize (see below).
+
+There is no other shell or file editor: opencode's own bash/read/edit tools are switched off
+because they run on a machine without Chipyard.
+
 ## Rules
 
 - Edit only Scala under `/home/ray/chipyard/generators/rocket-chip/src/main/scala/`
@@ -65,23 +77,23 @@ of $BEST_NAME. Use it: earlier rounds without it often handed in edits that made
 0.8-1.4 ns *longer*. Every call returns within about a minute; when it answers `running`, call
 it again.
 
-- `rebuild_verilog()`: runs `make verilog` on your current edits (1-3 min, poll until `ok`).
+- `synth_ab_rebuild_verilog()`: runs `make verilog` on your current edits (1-3 min, poll until `ok`).
   It lists the modules your edit changed. Compile errors come back here: fix them first.
-- `list_modules(pattern, only_changed)`: modules under `RocketTile` with their size.
-- `start_ab(module)`: synthesizes `module` of your edit (child) and of $BEST_NAME (parent),
+- `synth_ab_list_modules(pattern, only_changed)`: modules under `RocketTile` with their size.
+- `synth_ab_start_ab(module)`: synthesizes `module` of your edit (child) and of $BEST_NAME (parent),
   returns a handle. A sub-block such as `Rocket`, `FPU`, `FPUFMAPipe`, `MulDiv`, `DCache`,
   `Frontend` takes 1-2 min; its ports get zero input/output delay, so only paths inside it
   count. Pick the smallest module that holds both ends of the path you target.
-  `start_ab("RocketTile")` synthesizes the whole tile (3-4 min) and compares it with the full
+  `synth_ab_start_ab("RocketTile")` synthesizes the whole tile (3-4 min) and compares it with the full
   result of $BEST_NAME (worst slack $BEST_SLACK ns): that is exactly what the loop judges.
-- `ab_result(handle)`: worst slack of child and parent, the delta (positive = your edit
+- `synth_ab_ab_result(handle)`: worst slack of child and parent, the delta (positive = your edit
   shortened the worst path; |delta| <= 0.1 ns is synthesis noise) and the child's worst
   endpoint families. Full reports are under `$STAGE_DIR/ab/<handle>/` for `chipyard_bash`.
 
-Workflow for each idea: edit -> `rebuild_verilog` -> `start_ab(<sub-block>)` -> `ab_result`.
+Workflow for each idea: edit (through `chipyard_bash`) -> `synth_ab_rebuild_verilog` -> `synth_ab_start_ab(<sub-block>)` -> `synth_ab_ab_result`.
 If the sub-block got worse or did not move, revert or change the edit
 (`git -C /home/ray/chipyard/generators/rocket-chip checkout -- <file>` restores a file).
-When the sub-block is clearly better, run `start_ab("RocketTile")` once on the final edit.
+When the sub-block is clearly better, run `synth_ab_start_ab("RocketTile")` once on the final edit.
 Only finish with an edit whose `RocketTile` result beats $BEST_SLACK ns. Several path
 families sit within ~0.2 ns of each other, so fixing one may expose the next: look at the
 child's endpoint families and, if time allows, shorten the next family too. If nothing you

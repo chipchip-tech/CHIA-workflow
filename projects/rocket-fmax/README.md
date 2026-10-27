@@ -306,6 +306,12 @@ Mọi lời gọi trả về trong ≤ 60 s (việc dài chạy nền, agent g�
 hai tool, gọi `ab_cleanup` (giết `make verilog` còn chạy, xoá file config) rồi mới `collect_diff`. Tiêu chí
 nhận vòng không đổi (build, gate, synth đầy đủ của loop).
 
+opencode ghép tên server vào trước tên hàm, nên agent thấy `synth_ab_rebuild_verilog`, ... và
+`chipyard_bash_chipyard_bash_run_command`. Mặc định loop **tắt các tool sẵn có của opencode** (`bash`, `read`,
+`edit`, ...; class `SalvageOpenCodeLLM` trong `fmax_nodes.py`): chúng chạy trong container opencode, nơi
+không có Chipyard. Lần `fmax-ab1` agent gọi 142 lần `bash` sẵn có này để tìm workspace, không gọi `synth_ab`
+lần nào và hết 45 phút. `--builtin-tools` bật lại chúng.
+
 ```bash
 chia job submit --no-wait --submission-id fmax-m6 --working-dir . -- python rocket_fmax.py \
     --period-ns 12 --iters 5 --ab-tool --llm-timeout 2700 --exclude-isa rv64ui-p-ma_data \

@@ -238,7 +238,27 @@ class SalvageOpenCodeLLM(OpenCodeLLM):
 
     The stock prompt() turns a timeout into an empty result, so nothing shows what the
     agent did. Here a timed-out `opencode run` is exported (or its raw event stream kept)
-    to LLM_PARTIAL_FILE on the opencode worker; the loop reads it with read_text_opencode."""
+    to LLM_PARTIAL_FILE on the opencode worker; the loop reads it with read_text_opencode.
+
+    With builtin_tools=False it also switches off opencode's own tools (bash, read, edit, ...):
+    they run in the opencode container, which has no Chipyard (fmax-ab1: 142 such bash calls
+    hunting for the workspace), so the agent only has the MCP tools on the chipyard worker."""
+
+    BUILTIN_TOOLS = ("bash", "read", "edit", "write", "patch", "multiedit", "grep", "glob", "list",
+                     "lsp", "task", "webfetch", "websearch", "codesearch")
+
+    def __init__(self, *args, builtin_tools: bool = True, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.builtin_tools = builtin_tools
+
+    def _build_config(self, tools):
+        cfg = super()._build_config(tools)
+        if not self.builtin_tools:
+            off = {t: False for t in self.BUILTIN_TOOLS}
+            cfg["tools"] = off
+            cfg["agent"][self.agent_name]["tools"] = dict(off)
+            cfg["permission"] = {**cfg.get("permission", {}), "bash": "deny", "edit": "deny", "webfetch": "deny"}
+        return cfg
 
     def _capture(self, cmd, env):
         if cmd[1:2] != ["run"]:

@@ -116,10 +116,11 @@ class SynthABTool(ChiaTool):
         self._parent_refs: dict = {}                # module -> ref (parent never changes)
         self._jobs: dict = {}                       # handle -> A/B job
         self._n = 0
-        self.mcp.add_tool(self.rebuild_verilog, name=f"{name}_rebuild_verilog")
-        self.mcp.add_tool(self.list_modules, name=f"{name}_list_modules")
-        self.mcp.add_tool(self.start_ab, name=f"{name}_start_ab")
-        self.mcp.add_tool(self.ab_result, name=f"{name}_ab_result")
+        # opencode prefixes the server name: the agent sees synth_ab_rebuild_verilog, ...
+        self.mcp.add_tool(self.rebuild_verilog, name="rebuild_verilog")
+        self.mcp.add_tool(self.list_modules, name="list_modules")
+        self.mcp.add_tool(self.start_ab, name="start_ab")
+        self.mcp.add_tool(self.ab_result, name="ab_result")
         super().__post_init__()
 
     # A lock does not pickle; the actor gets a fresh one.
@@ -205,16 +206,16 @@ class SynthABTool(ChiaTool):
     def _rebuild_text(self, job: dict) -> str:
         if not job.get("done"):
             return (f"status: running ({time.time() - job['started']:.0f} s; usually 1-3 min)\n"
-                    "call rebuild_verilog again to keep waiting (it does not start a second build "
+                    "call synth_ab_rebuild_verilog again to keep waiting (it does not start a second build "
                     "while one is running)")
         if "error" in job:
-            return f"status: FAILED after {job['seconds']:.0f} s\n{job['error']}\nFix the Chisel and call rebuild_verilog again."
+            return f"status: FAILED after {job['seconds']:.0f} s\n{job['error']}\nFix the Chisel and call synth_ab_rebuild_verilog again."
         c = job["changes"]
         return (f"status: ok ({job['seconds']:.0f} s)\n"
                 f"modules changed vs {self._parent_name}: {', '.join(c['changed']) or '(none)'}\n"
                 + (f"added: {', '.join(c['added'][:20])}\n" if c["added"] else "")
                 + (f"removed: {', '.join(c['removed'][:20])}\n" if c["removed"] else "")
-                + "next: start_ab(module) on the smallest changed module that holds the path you target")
+                + "next: synth_ab_start_ab(module) on the smallest changed module that holds the path you target")
 
     # -- MCP methods ---------------------------------------------------------
 
@@ -263,13 +264,13 @@ class SynthABTool(ChiaTool):
         full result: that is the number the loop judges.
         """
         if self._rebuild is not None and not self._rebuild.get("done"):
-            return "ERROR: a rebuild is running. Call rebuild_verilog until it says ok first."
+            return "ERROR: a rebuild is running. Call synth_ab_rebuild_verilog until it says ok first."
         child = self._child
         if child is None:
-            return "ERROR: no good rebuild yet. Call rebuild_verilog first."
+            return "ERROR: no good rebuild yet. Call synth_ab_rebuild_verilog first."
         if self._diff_hash() != child["diff_hash"]:
             return ("ERROR: the source changed since your last rebuild, so its Verilog is stale. "
-                    "Call rebuild_verilog again first.")
+                    "Call synth_ab_rebuild_verilog again first.")
         whole = module == N.TOP
         try:
             c_rtl = N.tile_rtl_from_sources(tile_sources(child["rtl"]), module)
@@ -293,7 +294,7 @@ class SynthABTool(ChiaTool):
             self._jobs[handle] = job
         return (f"started: handle={handle}, module={module} ({len(c_rtl.modules)} modules, "
                 f"{'whole tile' if whole else 'child + parent'})\n"
-                f"poll with ab_result(handle=\"{handle}\", max_wait_seconds=60)")
+                f"poll with synth_ab_ab_result(handle=\"{handle}\", max_wait_seconds=60)")
 
     def ab_result(self, handle: str, max_wait_seconds: int = MAX_WAIT) -> str:
         """Result of start_ab: worst slack of child and parent and the delta (child - parent;
@@ -308,7 +309,7 @@ class SynthABTool(ChiaTool):
         ready, _ = ray.wait(refs, num_returns=len(refs), timeout=max(0, min(int(max_wait_seconds), MAX_WAIT)))
         if len(ready) < len(refs):
             return (f"status: running ({time.time() - job['started']:.0f} s)\n"
-                    f"call ab_result(handle=\"{handle}\", max_wait_seconds=60) again")
+                    f"call synth_ab_ab_result(handle=\"{handle}\", max_wait_seconds=60) again")
         try:
             child = get(job["child"])
             parent = get(job["parent"]) if "parent" in job else None
