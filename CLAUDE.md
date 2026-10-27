@@ -123,7 +123,8 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
 - Project hiện có: `project/ascon-secureboot` (RoCC Ascon-Hash256, secure boot; xong M1–M4).
   Nhánh `temp` cũ đã đổi tên thành nhánh này.
 - `project/rocket-fmax`: **session mới đọc `projects/rocket-fmax/HANDOFF.md` trước** (bàn giao từ mốc m4;
-  kết quả ở `projects/rocket-fmax/results/`).
+  kết quả ở `projects/rocket-fmax/results/`). Sau m4 có thêm `--ab-tool` (agent synth A/B một module) và
+  `--build-fixes` (agent sửa lỗi build), theo ví dụ `timing_opt` của CHIA. Hai phần này chưa chạy thật.
 - `project/rocket-fmax` (`projects/rocket-fmax/`): loop agent tối ưu Fmax của RocketTile, giữ
   nguyên cycle (gate: riscv-tests + mcycle của benchmark phải khớp baseline; đo bằng Yosys +
   OpenSTA sky130hd, worker `eda` tự build). **Mốc 1 xong (25/10/2026)**: chốt luồng `v2`,

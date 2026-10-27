@@ -46,7 +46,10 @@ synthesis đang chạy bị huỷ.
 | `area_check.py` | Kiểm luồng area `ChipTop` ngay trong container `eda`, ngoài CHIA (parse từng file, rồi `synth_area`) |
 | `config_audit.py` | Mốc phụ: agent tìm khối thừa trong `RocketConfig`, loop build và kiểm từng ứng viên |
 | `measure_soc.py` | Đo lại Fmax `RocketTile` với config sau audit, có/không `best.patch` (4 điểm) |
+| `ab_tool.py` | Tool MCP `synth_ab` (`--ab-tool`): agent elaborate bản sửa rồi synth A/B một module so với bản tốt nhất |
 | `prompts/improve_timing.md` | Prompt của agent (IPC-neutral, không build) |
+| `prompts/improve_timing_ab.md` | Như trên, kèm hướng dẫn dùng `synth_ab` (dùng khi `--ab-tool`) |
+| `prompts/fix_build.md` | Prompt của agent sửa lỗi build (`--build-fixes`) |
 | `prompts/audit_config.md` | Prompt của agent kiểm config (chỉ đọc, ghi `candidates.json`) |
 | `exp.yaml` | Cache và bypass |
 | `cluster.yaml` | `configs/cluster-local.yaml` + 4 slot `verilator_run` + worker `eda` |
@@ -248,6 +251,67 @@ chia job submit --no-wait --submission-id fmax-m4 --working-dir . -- \
   đầu log sbt vì `build_errors` lọc `[error]` mà không bỏ mã màu ANSI; tiêu đề báo cáo equiv ghi "so với
   baseline" dù so với điểm xuất phát.
 
+### Tool A/B synth cho agent (`--ab-tool`)
+
+Theo `TimingExperimentTool` của ví dụ `timing_opt` (BOOM) trong CHIA: thay vì sửa "mù" rồi chờ loop
+build + gate + synth, agent tự kiểm từng ý tưởng. Tool `synth_ab` (`ab_tool.py`) chạy trên worker
+chipyard cạnh `chipyard_bash` (hai tool chia slot `chipyard` 0,5 mỗi cái, nên build của loop chờ tới khi
+cả hai dừng) và có 4 hàm:
+
+| Hàm | Việc |
+|---|---|
+| `rebuild_verilog(max_wait_seconds)` | `make verilog CONFIG=<config của vòng>` trên bản sửa hiện tại (chạy nền; với `--fragments` tool tự ghi rồi xoá `RocketFmaxAudit.scala`); báo module nào đổi so với bản tốt nhất (bỏ qua comment `@[...]`) |
+| `list_modules(pattern, only_changed)` | Module dưới `RocketTile`, số dòng, đánh dấu module bị đổi |
+| `start_ab(module)` | `synth_sta` (cùng flow, cùng chu kỳ với loop) cho `module` của bản sửa và của bản tốt nhất, song song trên `eda` (0,5 slot mỗi cái; kết quả bản tốt nhất được nhớ theo module). `module=RocketTile`: synth cả tile (1 slot) và so với kết quả đầy đủ của bản tốt nhất, đúng con số loop dùng để nhận/loại |
+| `ab_result(handle, max_wait_seconds)` | Slack hai bên, delta (dương = tốt hơn; ≤ 0,1 ns coi là nhiễu), họ endpoint xấu nhất; báo cáo đầy đủ ở `/home/ray/rocket_fmax/ab/<handle>/` |
+
+Mọi lời gọi trả về trong ≤ 60 s (việc dài chạy nền, agent gọi lại để chờ). Tool từ chối synth khi mã nguồn
+đã đổi sau lần `rebuild_verilog` cuối. Prompt `improve_timing_ab.md` yêu cầu chỉ nộp bản sửa có kết quả
+`start_ab("RocketTile")` tốt hơn bản tốt nhất, và revert nếu không cải thiện được. Sau lượt agent, loop dừng
+hai tool, gọi `ab_cleanup` (giết `make verilog` còn chạy, xoá file config) rồi mới `collect_diff`. Tiêu chí
+nhận vòng không đổi (build, gate, synth đầy đủ của loop).
+
+opencode ghép tên server vào trước tên hàm, nên agent thấy `synth_ab_rebuild_verilog`, ... và
+`chipyard_bash_chipyard_bash_run_command`. Mặc định loop **tắt các tool sẵn có của opencode** (`bash`, `read`,
+`edit`, ...; class `SalvageOpenCodeLLM` trong `fmax_nodes.py`): chúng chạy trong container opencode, nơi
+không có Chipyard. Lần `fmax-ab1` agent gọi 142 lần `bash` sẵn có này để tìm workspace, không gọi `synth_ab`
+lần nào và hết 45 phút. `--builtin-tools` bật lại chúng. Khi agent hết `--llm-timeout`, `SalvageOpenCodeLLM`
+vẫn giữ transcript (`agent_transcript.txt`).
+
+Chưa kiểm chứng trên lần chạy thật nào: tắt tool sẵn có (mới kiểm cấu hình sinh ra trên mock), và một vòng
+agent dùng `synth_ab` từ đầu đến cuối. Dự kiến synth một sub-block mất 1–2 phút, `RocketTile` 3–4 phút
+(Yosys trên tile của bản tốt nhất từng mất 9–13 phút ở m3, nên con số này có thể lớn hơn). Sub-block dùng
+input/output delay 0, nên chỉ đo các đường nằm trong module. Synth của agent còn chạy khi agent kết thúc
+sẽ chạy nốt, nên synth của vòng có thể phải chờ vài phút.
+
+### Agent sửa lỗi build (`--build-fixes`)
+
+Theo `build_with_debug_retry` / `debug_failure` của ví dụ `timing_opt`: khi build của vòng lỗi (ví dụ m4 vòng 3,
+lỗi Scala ở `FPU.scala:340`), loop không loại vòng ngay mà gọi một agent sửa lỗi (`prompts/fix_build.md`). Agent
+này nhận lỗi build (đã bỏ mã màu), tóm tắt của agent vòng đó và diff hiện tại. Nó phải sửa lỗi mà giữ nguyên ý
+tưởng của bản sửa, không được revert. Sau đó loop kiểm phạm vi lại và build lại. Mặc định làm tối đa
+`--build-fixes 2` lần (`0` là hành vi cũ). Mỗi lần agent có `--fix-timeout` (900 s) và chạy model
+`--fix-model` (mặc định bằng `--model`). Có `--ab-tool` thì agent sửa lỗi cũng có `synth_ab_rebuild_verilog`
+để tự kiểm bản sửa compile được hay không. Câu trả lời được cache theo `agent_<run-name>_iter<i>_fix<k>_llm`.
+File ghi ra: `runs/iter<i>/fix<k>_{prompt,response,transcript}.*` và `build_fix<k>.log`; `patches/iter<i>.patch`
+là diff cuối cùng. Đã chạy trên mock: sửa được ở lần 1, hết số lần sửa, `--build-fixes 0`, có/không
+`--ab-tool`. Chưa chạy thật.
+
+### Chọn model của agent (`--model`, `--fix-model`)
+
+`--model` nhận mọi id dạng `<provider>/<model>` mà opencode trong container `chia-opencode-$USER` biết (mặc định
+`opencode/big-pickle`). Xem danh sách model, kể cả model free của OpenCode Zen (thường là `big-pickle` và các
+id có đuôi `-free`; danh sách thay đổi theo thời gian):
+
+```bash
+docker exec chia-opencode-$USER bash -lc 'opencode models opencode'
+# thử nhanh một model có gọi được tool hay không:
+docker exec chia-opencode-$USER bash -lc 'opencode run --model opencode/<id> "say hi"'
+```
+
+Model phải gọi được tool MCP (`chipyard_bash`, `synth_ab`). Ví dụ BOOM của CHIA dùng Claude (`ClaudeCodeLLM`),
+còn loop này hiện chỉ dùng opencode.
+
 ## Đầu ra: `~/rocket-fmax-out/<run>/`
 
 ```
@@ -258,6 +322,9 @@ patches/best.patch     bản tốt nhất (rỗng nếu không vòng nào đư�
 runs/baseline/         timing_paths.rpt, timing_endpoints.rpt, timing_families.txt, sta.log, yosys.log, gate.json, cycles.csv, build.log
 runs/iter<N>/          prompt.md, agent_response.md, agent_transcript.txt, diff_files.txt, build.log,
                        gate.json, gate_compare.txt, sim_fail.log, timing_*.rpt, decision.json
+                       (--ab-tool) agent_ab_experiments.jsonl: mỗi lần rebuild/A-B của agent; agent_ab_cleanup.txt
+                       (build lỗi) fix<k>_prompt.md, fix<k>_response.md, fix<k>_transcript.txt, build_fix<k>.log
+                       agent hết --llm-timeout: agent_transcript.txt vẫn có; agent_response.md rỗng
 profile/               ChiaProfileCollector.log + timeline html
 ```
 

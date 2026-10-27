@@ -74,8 +74,18 @@ Chi tiết ở `README.md`.
 
 ## Code
 
-Code trong nhánh là đúng bản đã chạy m4 (`rocket_fmax.py`, `fmax_nodes.py`, `equiv.py`, `measure_soc.py`,
-`config_audit.py`, `prompts/`). Các tùy chọn dùng ở m4: `--fragments`, `--start-patch`, `--equiv`.
+m4 chạy bằng code ở commit `2d6590b` (`rocket_fmax.py`, `fmax_nodes.py`, `equiv.py`, `measure_soc.py`,
+`config_audit.py`, `prompts/`), với các tùy chọn `--fragments`, `--start-patch`, `--equiv`.
+
+Sau m4 (27/10/2026), theo ví dụ `timing_opt` (BOOM) của CHIA, có thêm phần sau. **Chưa chạy thật**, chỉ mới
+kiểm bằng mock:
+
+- `--ab-tool` (`ab_tool.py`, `prompts/improve_timing_ab.md`): agent tự elaborate bản sửa rồi synth A/B một
+  module so với bản tốt nhất. Code lấy lại từ commit `69f8ba0`.
+- `--build-fixes N` (mặc định 2, `prompts/fix_build.md`): khi build lỗi, một agent sửa lỗi rồi loop build lại.
+- `--fix-model`, `--fix-timeout`. Cờ `--model` có từ trước; cách xem model free nằm trong README.
+- **Đổi mặc định:** tắt các tool sẵn có của opencode (`SalvageOpenCodeLLM`). Muốn chạy y như m4 thì thêm
+  `--builtin-tools --build-fixes 0`.
 
 ## Chạy tiếp từ m4
 
@@ -85,6 +95,7 @@ máy họ trùng sha256 với `results/m4/best.patch`.
 ```bash
 chia job submit --no-wait --submission-id fmax-<tên> --working-dir . -- python rocket_fmax.py \
     --period-ns 21.2 --iters 5 --exclude-isa rv64ui-p-ma_data --equiv \
+    --ab-tool --llm-timeout 2700 --model opencode/<model> \
     --fragments "new testchipip.soc.WithNoScratchpads" "new chipyard.config.WithNoBusErrorDevices" \
     --start-patch ~/rocket-fmax-out/m4/patches/best.patch --run-name <tên>
 chia job logs -f fmax-<tên>        # dừng: chia job stop fmax-<tên>
@@ -100,10 +111,9 @@ Xem đầy đủ trong `CLAUDE.md`.
 - Trả lời bằng tiếng Việt.
 - Claude không chạy lệnh trên máy người dùng: đưa lệnh cho người dùng chạy, rồi đọc log họ gửi lại.
 - **Claude không tự viết patch Chisel.** Mọi chỉnh sửa Chisel do loop (agent) làm.
-- `~/CHIA-workflow` trên máy người dùng không phải bản git clone, và người dùng không `git push` được.
-  - Đưa code bằng commit trên GitHub. Người dùng tải zip
-    `https://github.com/chipchip-tech/CHIA-workflow/archive/<sha>.zip` bằng trình duyệt (repo private), chép file
-    vào máy, rồi so `sha256sum`.
+- `~/CHIA-workflow` trên máy người dùng giờ là bản git clone thật (27/10/2026). Người dùng tự `git pull` nhánh
+  `project/rocket-fmax` khi có cập nhật; `git push` vẫn chưa chắc làm được.
+  - Sau mỗi lần đưa code, nhờ người dùng chạy `git log -1 --oneline` để xác nhận đã có commit mới.
   - Muốn lấy file từ máy người dùng thì nhờ họ upload qua GitHub web hoặc dán nội dung.
 - Làm việc trên nhánh `project/rocket-fmax`.
   - Không tạo PR.
