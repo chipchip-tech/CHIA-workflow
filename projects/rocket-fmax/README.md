@@ -288,9 +288,9 @@ deepseek-v4.1-flash-free, còn khi bật thì cùng model đó, chạy xen kẽ 
 8–9 s. Tức là không phải hết hạn mức thật: các model free dường như chỉ nhận request trông giống opencode
 mặc định. Sau lỗi đó `opencode run` không thoát mà treo tới hết giờ. Đã sửa: bỏ mặc định `off`; log opencode
 (INFO) luôn ra stderr, và khi dòng log cuối là `stream error` rồi im 60 s thì `SalvageOpenCodeLLM` giết
-opencode, ghi đuôi stderr vào `agent_transcript.txt` và trả lượt hỏng thay vì chờ hết giờ. Chế độ `deny` và
-`readonly` chưa chạy thật: chạy `probe_tools.py` (mặc định thử `deny`, `readonly`, `on`) để biết chế độ nào
-model free chấp nhận.
+opencode, ghi đuôi stderr vào `agent_transcript.txt` và trả lượt hỏng thay vì chờ hết giờ. Probe lần 2
+(27/10/2026, big-pickle): `deny` (15 s), `readonly` (8 s) và `on` đều gọi được `chipyard_bash`, nên lần chạy
+`--ab-tool` tiếp theo dùng `--builtin-tools readonly`.
 
 Chưa kiểm chứng trên lần chạy thật nào: tắt tool sẵn có (mới kiểm cấu hình sinh ra trên mock), và một vòng
 agent dùng `synth_ab` từ đầu đến cuối. Dự kiến synth một sub-block mất 1–2 phút, `RocketTile` 3–4 phút

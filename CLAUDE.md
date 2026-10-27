@@ -127,7 +127,7 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   `--build-fixes` (agent sửa lỗi build), theo ví dụ `timing_opt` của CHIA. Lần chạy thật đầu `fmax-ab-t1`
   (27/10/2026) hỏng: tắt hết tool sẵn có của opencode thì model free trả `Free usage limit reached` (bật thì
   chạy được, `probe_tools.py`) và opencode treo tới hết giờ. Đã đổi `--builtin-tools` thành `on|off|deny|readonly`
-  (mặc định `on`) và thêm cơ chế giết opencode khi gặp lỗi provider; `deny`/`readonly` chưa chạy thật.
+  (mặc định `on`) và thêm cơ chế giết opencode khi gặp lỗi provider; probe lần 2: `deny`, `readonly`, `on` đều gọi được `chipyard_bash` → dùng `--builtin-tools readonly`.
 - `project/rocket-fmax` (`projects/rocket-fmax/`): loop agent tối ưu Fmax của RocketTile, giữ
   nguyên cycle (gate: riscv-tests + mcycle của benchmark phải khớp baseline; đo bằng Yosys +
   OpenSTA sky130hd, worker `eda` tự build). **Mốc 1 xong (25/10/2026)**: chốt luồng `v2`,

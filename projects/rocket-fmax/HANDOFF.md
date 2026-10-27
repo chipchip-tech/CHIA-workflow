@@ -96,7 +96,7 @@ máy họ trùng sha256 với `results/m4/best.patch`.
 ```bash
 chia job submit --no-wait --submission-id fmax-<tên> --working-dir . -- python rocket_fmax.py \
     --period-ns 21.2 --iters 5 --exclude-isa rv64ui-p-ma_data --equiv \
-    --ab-tool --llm-timeout 2700 --model opencode/<model> \
+    --ab-tool --builtin-tools readonly --llm-timeout 2700 --model opencode/<model> \
     --fragments "new testchipip.soc.WithNoScratchpads" "new chipyard.config.WithNoBusErrorDevices" \
     --start-patch ~/rocket-fmax-out/m4/patches/best.patch --run-name <tên>
 chia job logs -f fmax-<tên>        # dừng: chia job stop fmax-<tên>
