@@ -328,6 +328,8 @@ runs/baseline/         timing_paths.rpt, timing_endpoints.rpt, timing_families.t
 runs/iter<N>/          prompt.md, agent_response.md, agent_transcript.txt, diff_files.txt, build.log,
                        gate.json, gate_compare.txt, sim_fail.log, timing_*.rpt, decision.json
                        (--ab-tool) ab_experiments.jsonl: mỗi lần rebuild/A-B của agent; ab_cleanup.txt
+                       agent hết --llm-timeout: agent_transcript.txt vẫn có (SalvageOpenCodeLLM export
+                       session trước khi CHIA bỏ kết quả); agent_response.md rỗng
 profile/               ChiaProfileCollector.log + timeline html
 ```
 

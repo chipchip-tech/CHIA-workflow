@@ -47,7 +47,6 @@ from chia.base.bypass import Bypass
 from chia.base.cache import start_cache, stop_cache
 from chia.base.tools.BashTool import BashTool
 from chia.chipyard.chisel_build_node import BuildTarget, ChiselBuildNode
-from chia.models.opencode import OpenCodeLLM
 from chia.trace.profiler import start_collector, stop_collector
 
 HERE = Path(__file__).resolve().parent
@@ -406,6 +405,8 @@ def run_round(a, i: int, out: Path, llm, elfs, snap, base, best, history) -> dic
 
     tag = f"m2_iter{i}_llm" if a.bypass_llm else f"agent_{a.run_name}_iter{i}_llm"
     t_agent = time.time()
+    if not a.bypass_llm:
+        get(N.read_text_opencode.chia_remote(N.LLM_PARTIAL_FILE, True))   # stale from an earlier round
     if a.bypass_llm:
         resp = get(llm.prompt.chia_remote(llm, prompt, tools=[], _chia_tag=tag))
         patch_in = Path(a.patch_file).read_text() if a.patch_file else None
@@ -439,6 +440,10 @@ def run_round(a, i: int, out: Path, llm, elfs, snap, base, best, history) -> dic
         write(d / "agent_transcript.txt", resp.stream_result)
         if not resp.success and not r["reason"]:
             r["reason"] = f"LLM không thành công (returncode {resp.returncode})"
+        if not resp.success and not a.bypass_llm:
+            partial = get(N.read_text_opencode.chia_remote(N.LLM_PARTIAL_FILE, True))
+            if partial:
+                write(d / "agent_transcript.txt", partial)
 
     diff = get(N.collect_diff.chia_remote(head, outside))
     r["patch"] = diff["patch"]
@@ -527,7 +532,7 @@ def run(a, out: Path):
     if a.baseline_only:
         return
 
-    llm = OpenCodeLLM(model=a.model, system_message=SYSTEM_MESSAGE_AB if a.ab_tool else SYSTEM_MESSAGE,
+    llm = N.SalvageOpenCodeLLM(model=a.model, system_message=SYSTEM_MESSAGE_AB if a.ab_tool else SYSTEM_MESSAGE,
                       timeout_seconds=a.llm_timeout, retries=1)
     best = {"name": "baseline", "patch": "", "synth": base["synth"], "rtl": base["rtl"]}
     if a.start_patch or a.fragments:

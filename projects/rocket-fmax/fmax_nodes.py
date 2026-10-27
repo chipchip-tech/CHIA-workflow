@@ -25,7 +25,10 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 
+from types import SimpleNamespace
+
 from chia.base.ChiaFunction import ChiaFunction, get
+from chia.models.opencode import OpenCodeLLM, parse_session_id
 
 import equiv as E
 
@@ -41,6 +44,7 @@ AUDIT_STAGE_DIR = "/home/ray/config_audit"   # on chipyard: inputs/outputs of th
 # Written by the loop scripts and the A/B tool (never by an agent), removed after use.
 AUDIT_CONFIG_FILE = f"{CHIPYARD}/generators/chipyard/src/main/scala/config/RocketFmaxAudit.scala"
 AB_PGID_FILE = "/home/ray/rocket_fmax_ab.pgid"   # process group of the A/B tool's make verilog
+LLM_PARTIAL_FILE = "/home/ray/rocket_fmax_llm_partial.txt"  # on opencode: transcript of a timed-out run
 
 ISA_SUITES = ("rv64ui", "rv64um", "rv64ua", "rv64uf", "rv64ud")
 BENCHMARKS = ("dhrystone", "median", "multiply", "qsort", "towers", "vvadd")
@@ -227,6 +231,47 @@ def read_text_opencode(path: str, remove: bool = False) -> str | None:
     if remove:
         os.remove(path)
     return text
+
+
+class SalvageOpenCodeLLM(OpenCodeLLM):
+    """OpenCodeLLM that keeps the transcript of a run cut off by timeout_seconds.
+
+    The stock prompt() turns a timeout into an empty result, so nothing shows what the
+    agent did. Here a timed-out `opencode run` is exported (or its raw event stream kept)
+    to LLM_PARTIAL_FILE on the opencode worker; the loop reads it with read_text_opencode."""
+
+    def _capture(self, cmd, env):
+        if cmd[1:2] != ["run"]:
+            return super()._capture(cmd, env)
+        fd, out_path = tempfile.mkstemp(prefix="opencode_out_", suffix=".out")
+        try:
+            with os.fdopen(fd, "w") as out_fh:
+                try:
+                    proc = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=out_fh,
+                                          stderr=subprocess.PIPE, text=True,
+                                          timeout=self.timeout_seconds, env=env)
+                except subprocess.TimeoutExpired:
+                    self._salvage(out_path, env)
+                    raise
+            with open(out_path) as f:
+                stdout = f.read()
+            return SimpleNamespace(returncode=proc.returncode, stdout=stdout, stderr=proc.stderr or "")
+        finally:
+            try:
+                os.unlink(out_path)
+            except OSError:
+                pass
+
+    def _salvage(self, out_path: str, env: dict) -> None:
+        try:
+            with open(out_path, errors="replace") as f:
+                raw = f.read()
+            sid = parse_session_id(raw)
+            stream = self._extract_from_export(self._run_export(sid, env))[2] if sid else ""
+            with open(LLM_PARTIAL_FILE, "w") as f:
+                f.write(f"[opencode run hết {self.timeout_seconds} s, session {sid}]\n\n{stream or raw}")
+        except Exception as e:                                       # noqa: BLE001
+            self.logger.warning("could not salvage timed-out run: %s", e)
 
 
 @ChiaFunction(resources={"chipyard": 1}, max_retries=0)
