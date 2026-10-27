@@ -266,6 +266,24 @@ fragment, `--llm-timeout 2700`. **Không vòng nào được nhận**; `best.pat
   của mỗi vòng giảm dần. Các vòng 2, 4, 5 làm xấu đi 0,8–1,4 ns.
 - Agent vẫn hết giờ ở một vòng dù đã tăng lên 45 phút.
 
+**Đo lại ở chu kỳ chặt 12 ns (`measure_soc.py --period-ns 12`, chạy thật 27/10/2026, `~/rocket-fmax-out/p12`)**,
+để xem `abc -D 21200` có làm ABC bỏ phí delay khi mạch đã nhanh hơn 21,2 ns nhiều không (ví dụ `timing_opt` của
+CHIA cho BOOM cố ý siết chu kỳ):
+
+| Điểm | Đường găng ở 21,2 ns | Đường găng ở 12 ns | Fmax ở 12 ns (MHz) | Đường găng (12 ns) |
+|---|---|---|---|---|
+| base | 22,20 | 21,216 | 47,13 | `core.div` |
+| cfg | | 21,096 | 47,40 | `core.div` |
+| best (m4, không fragment) | | 12,605 | 79,34 | `fpuOpt.dfma` |
+| best_cfg (m4 best.patch + audit) | 12,455 | 12,438 | 80,40 | `dcache.s2_req_addr` → `core.mem_reg_wdata` |
+
+- Bản tốt nhất gần như không đổi (−0,017 ns, trong nhiễu): siết chu kỳ **không** đem thêm Fmax cho bản tốt nhất.
+- Baseline thì nhanh thêm ~1 ns (22,2 → 21,2 ns) khi ABC bị ép mạnh hơn. So công bằng ở cùng 12 ns: 47,1 → 80,4 MHz
+  (+71 %), không phải 45,0 → 80,3 (+78 %) như khi baseline đo ở 21,2 ns (lúc đó baseline vi phạm và ABC dừng ở
+  mức "gần đủ").
+- Đường găng của `best_cfg` lại về họ store data của DCache; `best` không fragment thì ở FMA: các họ sát nhau trong
+  ~0,2 ns. Gate `best_cfg` pass, mcycle giữ nguyên.
+
 ## Đầu ra: `~/rocket-fmax-out/<run>/`
 
 ```
