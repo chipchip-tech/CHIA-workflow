@@ -94,12 +94,14 @@ def parse_args():
                         "e.g. tests that already fail on the unmodified baseline)")
     p.add_argument("--repeat-seed", type=int, default=7, help="baseline: rerun benchmarks with this seed")
     p.add_argument("--model", default="opencode/big-pickle")
-    p.add_argument("--builtin-tools", action="store_true",
-                   help="keep opencode's own bash/read/edit tools (they run in the opencode container, "
-                        "which has no Chipyard; off by default so the agent only uses chipyard_bash/synth_ab)")
+    p.add_argument("--builtin-tools", nargs="?", const="on", default="on",
+                   choices=["on", "off", "deny", "readonly"],
+                   help="opencode's own tools (they run in the opencode container, which has no Chipyard): "
+                        "on = all (m3/m4), off = none (free models then fail with 'Free usage limit "
+                        "reached'), deny = all but bash/edit/webfetch denied, readonly = read/grep/glob/list/lsp")
     p.add_argument("--opencode-logs", default=None, metavar="LEVEL",
-                   help="pass --print-logs --log-level LEVEL to opencode run; on timeout the stderr tail goes "
-                        "into <prefix>_transcript.txt")
+                   help="opencode --log-level (default INFO, always printed); on timeout or provider error "
+                        "the stderr tail goes into <prefix>_transcript.txt")
     p.add_argument("--llm-timeout", type=int, default=1800)
     p.add_argument("--build-fixes", type=int, default=2,
                    help="when a round's build fails, let an agent fix the compile errors and rebuild, "

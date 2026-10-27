@@ -1,9 +1,10 @@
-"""Probe: can an opencode model call the MCP tool chipyard_bash, with opencode's own tools on/off?
+"""Probe: can an opencode model call the MCP tool chipyard_bash, per builtin_tools mode?
 
 fmax-ab-t1 (--ab-tool, builtin tools off): opencode printed no event in 45 min and the MCP
 servers saw no tool call. This runs the same setup (SalvageOpenCodeLLM + BashTool "chipyard_bash")
-with a tiny prompt and a short timeout, once per model and per builtin setting, with opencode's
-logs on stderr, so a hang shows where it stops.
+with a tiny prompt and a short timeout, once per model and per builtin_tools mode (see
+SalvageOpenCodeLLM), with opencode's logs on stderr, so a hang shows where it stops.
+probe-tools (27/10/2026): "off" -> "Free usage limit reached" then a hang; "on" works.
 
     chia job submit --working-dir . -- python probe_tools.py --models opencode/big-pickle
 """
@@ -25,7 +26,8 @@ PROMPT = ("Use the tool chipyard_bash_chipyard_bash_run_command to run exactly t
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--models", nargs="+", default=["opencode/big-pickle"])
-    p.add_argument("--builtin", choices=["off", "on", "both"], default="both")
+    p.add_argument("--builtin", nargs="+", choices=N.SalvageOpenCodeLLM.MODES,
+                   default=["deny", "readonly", "on"])
     p.add_argument("--timeout", type=int, default=300)
     p.add_argument("--log-level", default="INFO", help="opencode --log-level (DEBUG/INFO/WARN)")
     p.add_argument("--out", default=str(Path.home() / "rocket-fmax-out" / "probe-tools"))
@@ -33,11 +35,10 @@ def main():
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     ray.init(address="auto", namespace="rocket_fmax", ignore_reinit_error=True)
-    settings = {"off": [False], "on": [True], "both": [False, True]}[a.builtin]
     rows = []
     for model in a.models:
-        for builtin in settings:
-            name = f"{model.split('/')[-1]}_builtin-{'on' if builtin else 'off'}"
+        for builtin in a.builtin:
+            name = f"{model.split('/')[-1]}_builtin-{builtin}"
             llm = N.SalvageOpenCodeLLM(model=model, system_message="You are a test agent.",
                                        timeout_seconds=a.timeout, retries=1, builtin_tools=builtin,
                                        extra_cli_args=["--print-logs", "--log-level", a.log_level])

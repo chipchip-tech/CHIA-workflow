@@ -272,17 +272,25 @@ hai tool, gọi `ab_cleanup` (giết `make verilog` còn chạy, xoá file confi
 nhận vòng không đổi (build, gate, synth đầy đủ của loop).
 
 opencode ghép tên server vào trước tên hàm, nên agent thấy `synth_ab_rebuild_verilog`, ... và
-`chipyard_bash_chipyard_bash_run_command`. Mặc định loop **tắt các tool sẵn có của opencode** (`bash`, `read`,
-`edit`, ...; class `SalvageOpenCodeLLM` trong `fmax_nodes.py`): chúng chạy trong container opencode, nơi
-không có Chipyard. Lần `fmax-ab1` agent gọi 142 lần `bash` sẵn có này để tìm workspace, không gọi `synth_ab`
-lần nào và hết 45 phút. `--builtin-tools` bật lại chúng. Khi agent hết `--llm-timeout`, `SalvageOpenCodeLLM`
-vẫn giữ transcript (`agent_transcript.txt`).
+`chipyard_bash_chipyard_bash_run_command`. Các tool sẵn có của opencode (`bash`, `read`, `edit`, ...) chạy trong
+container opencode, nơi không có Chipyard: lần `fmax-ab1` agent gọi 142 lần `bash` sẵn có này để tìm workspace,
+không gọi `synth_ab` lần nào và hết 45 phút. Cờ `--builtin-tools` chọn phần còn lại của chúng (class
+`SalvageOpenCodeLLM` trong `fmax_nodes.py`): `on` (tất cả, như m3/m4; mặc định), `off` (không còn gì), `deny` (vẫn
+khai báo nhưng quyền `bash`/`edit`/`webfetch` là deny), `readonly` (chỉ `read`/`grep`/`glob`/`list`/`lsp`). Prompt
+dặn agent chỉ dùng `chipyard_bash`. Khi agent hết `--llm-timeout`, `SalvageOpenCodeLLM` vẫn giữ transcript
+(`agent_transcript.txt`).
 
 **Lần chạy thật `fmax-ab-t1` (27/10/2026, `--ab-tool`, tool sẵn có tắt, big-pickle): hỏng.** opencode không in
 event nào trong 45 phút (`session None`, transcript rỗng); hai server MCP chỉ nhận lượt khởi tạo và
-`tools/list`, không có lời gọi tool nào. Chưa rõ nguyên nhân. Để chẩn đoán: `probe_tools.py` (một prompt nhỏ gọi
-`chipyard_bash`, chạy với tool sẵn có tắt và bật, log opencode ra stderr) và `--opencode-logs INFO` cho loop;
-khi hết giờ, đuôi stderr của opencode được ghi vào `agent_transcript.txt`.
+`tools/list`, không có lời gọi tool nào. **Nguyên nhân (`probe_tools.py`, chạy thật 27/10/2026):** khi tắt hết
+tool sẵn có, server opencode trả ngay `AI_APICallError: Free usage limit reached` cho cả big-pickle và
+deepseek-v4.1-flash-free, còn khi bật thì cùng model đó, chạy xen kẽ cách vài phút, gọi `chipyard_bash` đúng sau
+8–9 s. Tức là không phải hết hạn mức thật: các model free dường như chỉ nhận request trông giống opencode
+mặc định. Sau lỗi đó `opencode run` không thoát mà treo tới hết giờ. Đã sửa: bỏ mặc định `off`; log opencode
+(INFO) luôn ra stderr, và khi dòng log cuối là `stream error` rồi im 60 s thì `SalvageOpenCodeLLM` giết
+opencode, ghi đuôi stderr vào `agent_transcript.txt` và trả lượt hỏng thay vì chờ hết giờ. Chế độ `deny` và
+`readonly` chưa chạy thật: chạy `probe_tools.py` (mặc định thử `deny`, `readonly`, `on`) để biết chế độ nào
+model free chấp nhận.
 
 Chưa kiểm chứng trên lần chạy thật nào: tắt tool sẵn có (mới kiểm cấu hình sinh ra trên mock), và một vòng
 agent dùng `synth_ab` từ đầu đến cuối. Dự kiến synth một sub-block mất 1–2 phút, `RocketTile` 3–4 phút

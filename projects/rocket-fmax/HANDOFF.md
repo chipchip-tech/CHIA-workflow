@@ -84,8 +84,9 @@ kiểm bằng mock:
   module so với bản tốt nhất. Code lấy lại từ commit `69f8ba0`.
 - `--build-fixes N` (mặc định 2, `prompts/fix_build.md`): khi build lỗi, một agent sửa lỗi rồi loop build lại.
 - `--fix-model`, `--fix-timeout`. Cờ `--model` có từ trước; cách xem model free nằm trong README.
-- **Đổi mặc định:** tắt các tool sẵn có của opencode (`SalvageOpenCodeLLM`). Muốn chạy y như m4 thì thêm
-  `--builtin-tools --build-fixes 0`.
+- `--builtin-tools on|off|deny|readonly` (mặc định `on`, như m4). Từng để mặc định tắt hết, nhưng khi đó model
+  free của opencode trả `Free usage limit reached` rồi opencode treo (`fmax-ab-t1`, xem README). Muốn chạy y như
+  m4 thì thêm `--build-fixes 0`.
 
 ## Chạy tiếp từ m4
 

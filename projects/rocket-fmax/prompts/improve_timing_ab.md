@@ -30,8 +30,8 @@ You have exactly two tool groups, both running on the chipyard worker:
 - `synth_ab_rebuild_verilog`, `synth_ab_list_modules`, `synth_ab_start_ab`,
   `synth_ab_ab_result`: elaborate and synthesize (see below).
 
-There is no other shell or file editor: opencode's own bash/read/edit tools are switched off
-because they run on a machine without Chipyard.
+Do not use any other shell or file tool. opencode's own `bash`, `read`, `edit`, `glob`, ... (if you
+see them) run in another container that has no Chipyard: nothing they read or write is the design.
 
 ## Rules
 

@@ -21,8 +21,9 @@ the compile errors so the edit builds, while keeping what the edit does.
 
 ## Tool
 
-`chipyard_bash_chipyard_bash_run_command`: a shell in `/home/ray/chipyard`. opencode's own
-bash/read/edit tools are switched off (they run on a machine without Chipyard).$AB_NOTE
+`chipyard_bash_chipyard_bash_run_command`: a shell in `/home/ray/chipyard`. Use only this tool:
+opencode's own `bash`, `read`, `edit`, ... (if you see them) run in another container that has no
+Chipyard.$AB_NOTE
 
 ## What the edit was meant to do (the editing agent's summary)
 

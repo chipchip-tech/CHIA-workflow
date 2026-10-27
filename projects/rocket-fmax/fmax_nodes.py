@@ -240,23 +240,45 @@ class SalvageOpenCodeLLM(OpenCodeLLM):
     agent did. Here a timed-out `opencode run` is exported (or its raw event stream kept)
     to LLM_PARTIAL_FILE on the opencode worker; the loop reads it with read_text_opencode.
 
-    With builtin_tools=False it also switches off opencode's own tools (bash, read, edit, ...):
-    they run in the opencode container, which has no Chipyard (fmax-ab1: 142 such bash calls
-    hunting for the workspace), so the agent only has the MCP tools on the chipyard worker."""
+    builtin_tools picks what is left of opencode's own tools (bash, read, edit, ...). They run in
+    the opencode container, which has no Chipyard (fmax-ab1: 142 such bash calls hunting for the
+    workspace), but switching them all off ("off") makes opencode's free models answer "Free usage
+    limit reached" at once (probe-tools, 27/10/2026: off failed, on worked, same model, minutes
+    apart). So:
+      "on"       all of them (m3/m4);
+      "off"      none, only the MCP tools;
+      "deny"     all listed, but permission bash/edit/webfetch = deny;
+      "readonly" only read/grep/glob/list/lsp (no bash, edit, write, web, subagents).
+
+    A provider error ("stream error" in opencode's log) does not end `opencode run`: it hung
+    until the timeout (fmax-ab-t1: 45 min). Its log (INFO, which also logs every agent step)
+    therefore always goes to stderr, and a run whose last log line is that error, with nothing
+    after it for ERROR_GRACE s, is killed and returned as failed."""
 
     BUILTIN_TOOLS = ("bash", "read", "edit", "write", "patch", "multiedit", "grep", "glob", "list",
                      "lsp", "task", "webfetch", "websearch", "codesearch")
+    READONLY_TOOLS = ("read", "grep", "glob", "list", "lsp")
+    MODES = ("on", "off", "deny", "readonly")
+    ERROR_GRACE = 60
 
-    def __init__(self, *args, builtin_tools: bool = True, **kwargs):
+    def __init__(self, *args, builtin_tools: bool | str = True, **kwargs):
         super().__init__(*args, **kwargs)
-        self.builtin_tools = builtin_tools
+        mode = {True: "on", False: "off"}.get(builtin_tools, builtin_tools)
+        if mode not in self.MODES:
+            raise ValueError(f"builtin_tools must be one of {self.MODES}, not {builtin_tools!r}")
+        self.builtin_tools = mode
+        if "--print-logs" not in (self.extra_cli_args or []):
+            self.extra_cli_args = list(self.extra_cli_args or []) + ["--print-logs", "--log-level", "INFO"]
 
     def _build_config(self, tools):
         cfg = super()._build_config(tools)
-        if not self.builtin_tools:
-            off = {t: False for t in self.BUILTIN_TOOLS}
-            cfg["tools"] = off
-            cfg["agent"][self.agent_name]["tools"] = dict(off)
+        mode = self.builtin_tools
+        if mode in ("off", "readonly"):
+            keep = self.READONLY_TOOLS if mode == "readonly" else ()
+            sel = {t: t in keep for t in self.BUILTIN_TOOLS}
+            cfg["tools"] = sel
+            cfg["agent"][self.agent_name]["tools"] = dict(sel)
+        if mode != "on":
             cfg["permission"] = {**cfg.get("permission", {}), "bash": "deny", "edit": "deny", "webfetch": "deny"}
         return cfg
 
@@ -264,32 +286,78 @@ class SalvageOpenCodeLLM(OpenCodeLLM):
         if cmd[1:2] != ["run"]:
             return super()._capture(cmd, env)
         fd, out_path = tempfile.mkstemp(prefix="opencode_out_", suffix=".out")
+        efd, err_path = tempfile.mkstemp(prefix="opencode_err_", suffix=".log")
         try:
-            with os.fdopen(fd, "w") as out_fh:
-                try:
-                    proc = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=out_fh,
-                                          stderr=subprocess.PIPE, text=True,
-                                          timeout=self.timeout_seconds, env=env)
-                except subprocess.TimeoutExpired as e:
-                    self._salvage(out_path, env, e.stderr)
-                    raise
+            with os.fdopen(fd, "w") as out_fh, os.fdopen(efd, "w") as err_fh:
+                proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=out_fh, stderr=err_fh,
+                                        text=True, env=env, start_new_session=True)
+                rc, t0, last_size, last_change = None, time.time(), -1, time.time()
+                while rc is None:
+                    try:
+                        rc = proc.wait(timeout=5)
+                        break
+                    except subprocess.TimeoutExpired:
+                        pass
+                    now = time.time()
+                    size = os.path.getsize(err_path)
+                    if size != last_size:
+                        last_size, last_change = size, now
+                    if now - t0 > self.timeout_seconds:
+                        self._kill(proc)
+                        self._salvage(out_path, env, self._read(err_path))
+                        raise subprocess.TimeoutExpired(cmd, self.timeout_seconds)
+                    if now - last_change > self.ERROR_GRACE:
+                        err = self._read(err_path)
+                        tail = err.rstrip().rsplit("\n", 1)[-1]
+                        if "level=ERROR" in tail and "stream error" in tail:
+                            self._kill(proc)
+                            self.logger.warning("opencode: provider error, killed after %d s silence: %s",
+                                                self.ERROR_GRACE, self._last_error(err))
+                            self._salvage(out_path, env, err, why="lỗi provider")
+                            rc = -9
             with open(out_path) as f:
                 stdout = f.read()
-            return SimpleNamespace(returncode=proc.returncode, stdout=stdout, stderr=proc.stderr or "")
+            return SimpleNamespace(returncode=rc, stdout=stdout, stderr=self._read(err_path))
         finally:
-            try:
-                os.unlink(out_path)
-            except OSError:
-                pass
+            for path in (out_path, err_path):
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
 
-    def _salvage(self, out_path: str, env: dict, stderr=None) -> None:
+    @staticmethod
+    def _kill(proc):
+        try:
+            os.killpg(proc.pid, 9)
+        except (ProcessLookupError, PermissionError):
+            proc.kill()
+        proc.wait()
+
+    @staticmethod
+    def _read(path: str) -> str:
+        with open(path, errors="replace") as f:
+            return f.read()
+
+    @staticmethod
+    def _last_error(err: str) -> str:
+        lines = [ln for ln in err.splitlines() if "level=ERROR" in ln]
+        m = re.search(r'error\.error="([^"]*)"', lines[-1]) if lines else None
+        return m.group(1) if m else (lines[-1][-300:] if lines else "")
+
+    def _salvage(self, out_path: str, env: dict, stderr=None, why: str | None = None) -> None:
         try:
             with open(out_path, errors="replace") as f:
                 raw = f.read()
             sid = parse_session_id(raw)
-            stream = self._extract_from_export(self._run_export(sid, env))[2] if sid else ""
+            stream = ""
+            if sid:
+                try:
+                    stream = self._extract_from_export(self._run_export(sid, env))[2]
+                except Exception as e:                               # noqa: BLE001
+                    self.logger.warning("export of %s failed: %s", sid, e)
             with open(LLM_PARTIAL_FILE, "w") as f:
-                f.write(f"[opencode run hết {self.timeout_seconds} s, session {sid}]\n\n{stream or raw}")
+                head = why or f"hết {self.timeout_seconds} s"
+                f.write(f"[opencode run {head}, session {sid}]\n\n{stream or raw}")
                 if stderr:   # empty stdout (fmax-ab-t1: no event in 45 min) -> stderr is all there is
                     err = stderr.decode(errors="replace") if isinstance(stderr, bytes) else stderr
                     f.write(f"\n\n----- stderr (cuối) -----\n{err[-20000:]}")
