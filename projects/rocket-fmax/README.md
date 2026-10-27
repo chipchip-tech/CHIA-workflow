@@ -248,6 +248,24 @@ chia job submit --no-wait --submission-id fmax-m4 --working-dir . -- \
   đầu log sbt vì `build_errors` lọc `[error]` mà không bỏ mã màu ANSI; tiêu đề báo cáo equiv ghi "so với
   baseline" dù so với điểm xuất phát.
 
+**Chạy thật (`fmax-m5`, 27/10/2026, `~/rocket-fmax-out/m5`)**, xuất phát từ `m4/patches/best.patch`, cùng
+fragment, `--llm-timeout 2700`. **Không vòng nào được nhận**; `best.patch` vẫn là của m4, không có báo cáo equiv
+(loop chỉ chạy equiv khi bản tốt nhất khác điểm xuất phát).
+
+| Vòng | Worst slack (ns) | Fmax (MHz) | Area tile (µm²) | Đường găng | Ghi chú |
+|---|---|---|---|---|---|
+| start | +8,745 | 80,29 | 1 082 577 | `fpuOpt.dfma` (FMA) | m4 best.patch + config audit (khớp m4 iter5) |
+| 1 | +8,581 | 79,24 | 1 084 870 | `core.div` | gate pass; kém start 0,16 ns |
+| 2 | +7,382 | 72,37 | 1 082 344 | `fpuOpt.dfma` | gate pass |
+| 3 | | | | | agent hết 45 phút (returncode −1) |
+| 4 | +7,913 | 75,26 | 1 078 391 | `fpuOpt.ifpu` | gate pass |
+| 5 | +7,850 | 74,91 | 1 090 238 | `fpuOpt.divSqrt` | gate pass |
+
+- Vòng 1 đưa đường găng về `core.div` với slack chỉ thấp hơn start 0,16 ns, cỡ nhiễu synth (~0,1 ns). Tức ở
+  ~80 MHz có nhiều họ đường sát nhau (FMA, `div`, `ifpu`, `divSqrt`): sửa một họ thì họ khác lộ ra, lợi biên
+  của mỗi vòng giảm dần. Các vòng 2, 4, 5 làm xấu đi 0,8–1,4 ns.
+- Agent vẫn hết giờ ở một vòng dù đã tăng lên 45 phút.
+
 ## Đầu ra: `~/rocket-fmax-out/<run>/`
 
 ```
