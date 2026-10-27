@@ -46,9 +46,10 @@ synthesis đang chạy bị huỷ.
 | `area_check.py` | Kiểm luồng area `ChipTop` ngay trong container `eda`, ngoài CHIA (parse từng file, rồi `synth_area`) |
 | `config_audit.py` | Mốc phụ: agent tìm khối thừa trong `RocketConfig`, loop build và kiểm từng ứng viên |
 | `measure_soc.py` | Đo lại Fmax `RocketTile` với config sau audit, có/không `best.patch` (4 điểm) |
-| `ab_tool.py` | Tool MCP `synth_ab` (`--ab-tool`): agent elaborate bản sửa rồi synth A/B một module so với bản tốt nhất |
+| `ab_tool.py` | Tool MCP `synth_ab` (`--ab-tool`): agent elaborate bản sửa rồi synth A/B một module so với bản tốt nhất; `loop_ab`: cùng phép A/B do loop gọi (`--loop-ab`) |
 | `prompts/improve_timing.md` | Prompt của agent (IPC-neutral, không build) |
 | `prompts/improve_timing_ab.md` | Như trên, kèm hướng dẫn dùng `synth_ab` (dùng khi `--ab-tool`) |
+| `prompts/improve_timing_target.md` | Prompt của phiên sửa ngắn (`--loop-ab`): mục tiêu do loop chọn, kết quả A/B của phiên trước |
 | `prompts/fix_build.md` | Prompt của agent sửa lỗi build (`--build-fixes`) |
 | `prompts/audit_config.md` | Prompt của agent kiểm config (chỉ đọc, ghi `candidates.json`) |
 | `exp.yaml` | Cache và bypass |
@@ -298,6 +299,57 @@ agent dùng `synth_ab` từ đầu đến cuối. Dự kiến synth một sub-bl
 input/output delay 0, nên chỉ đo các đường nằm trong module. Synth của agent còn chạy khi agent kết thúc
 sẽ chạy nốt, nên synth của vòng có thể phải chờ vài phút.
 
+### Loop điều khiển A/B (`--loop-ab`)
+
+**Lần chạy thật `fmax-ab-t2` (27/10/2026, `--ab-tool --builtin-tools readonly`, big-pickle, 1 vòng): bị loại vì
+agent hết `--llm-timeout` 45 phút.** Lần này không có lỗi provider; agent chạy khoảng 123 bước, gần như toàn
+`chipyard_bash` để đọc và sửa rải rác 4 file (`ALU`, `AMOALU`, `Multiplier`, `FPU`) trong khi đường găng ở
+`fpuOpt.dfma`. Nó gọi `synth_ab_start_ab` khi chưa rebuild (bị từ chối), có lần gõ `synth_ab_list_modules` như
+lệnh shell, và chỉ gọi `synth_ab_rebuild_verilog` khi còn khoảng 1 phút. `agent_ab_experiments.jsonl` rỗng: không
+lần A/B nào xong. Diff của agent bị bỏ vì loop loại vòng ngay khi agent hết giờ (m4 vòng 4 cũng mất theo cách
+này). Kết luận: model free không tự làm được phần thủ tục (chọn mục tiêu, rebuild, A/B, canh giờ).
+
+`--loop-ab` chuyển phần thủ tục sang loop; agent chỉ sửa Chisel. Mỗi vòng:
+
+1. **Loop chọn mục tiêu** (`pick_target` trong `fmax_nodes.py`): lấy hai đầu đường găng của bản tốt nhất, lần
+   theo tên instance trong Verilog (`fpuOpt.dfma.in_in2[53]_reg` → instance `fpuOpt.dfma`), lấy instance nhỏ
+   nhất chứa cả hai đầu và module của nó (vd. `FPUFMAPipe`), rồi tìm file Scala định nghĩa từng module trên
+   đường xuống (`find_scala_classes`). Ghi vào `runs/iter<i>/target.json`.
+2. **Phiên sửa ngắn** (`prompts/improve_timing_target.md`, `--edit-timeout` 900 s): chỉ có `chipyard_bash`, chỉ
+   sửa cho mục tiêu, không build.
+3. **Loop build** (lỗi compile thì agent sửa lỗi build như `--build-fixes`).
+4. **Loop A/B** (`loop_ab` trong `ab_tool.py`): so module text với bản tốt nhất, lấy instance nhỏ nhất chứa mục
+   tiêu và mọi module bị đổi (so theo đường dẫn instance, vì tên module có thể lệch hậu tố `_<n>` giữa hai bản),
+   synth module đó của bản sửa và của bản tốt nhất (song song trên `eda`, kết quả bản tốt nhất nhớ trong vòng).
+   Nếu instance đó là cả `RocketTile` thì synth cả tile, so với kết quả đầy đủ của bản tốt nhất, và dùng luôn
+   kết quả này cho bước 6.
+5. A/B không tốt hơn `--ab-min-gain` (0,1 ns, cỡ nhiễu synth) → loop đưa báo cáo A/B (đường găng mới, Verilog
+   của module, diff của vòng) vào một phiên sửa mới, tối đa `--ab-refines` (2) lần; hết lượt thì loại vòng mà
+   **không chạy gate** (tiết kiệm ~13 phút). Bản sửa không làm Verilog đổi gì cũng được báo lại cho phiên sau.
+6. A/B tốt hơn → gate và synth cả tile như cũ; tiêu chí nhận vòng không đổi.
+
+Diff của riêng vòng (không gồm bản tốt nhất, `round_diff`, dùng index git tạm nên không đụng index thật) được
+đưa vào prompt phiên sau và `history.md`, và đặt ở `/home/ray/rocket_fmax/ab<k>/round.diff` để agent tự
+`git apply -R` khi muốn bỏ. Prompt cấm `git checkout`/`git restore`/`git stash` vì bản tốt nhất nằm trong working
+tree, chưa commit.
+
+**Áp dụng cho mọi chế độ:** agent hết giờ hoặc lỗi mà diff vẫn khác bản tốt nhất thì loop vẫn build, gate và
+synth như bình thường. Lý do hỏng của agent được ghi thêm trong ngoặc vuông ở cột `reason` của `results.csv`.
+
+`results.csv` có thêm cột `target`, `ab_delta_ns`, `ab_sessions`. Câu trả lời agent cache theo
+`agent_<run-name>_iter<i>_edit<k>_llm`. `--loop-ab` không dùng chung với `--ab-tool`/`--bypass-llm`, và không dùng
+`--llm-timeout`.
+
+Đã kiểm trên mock (sandbox, 27/10/2026):
+- chọn mục tiêu trên Verilog giả dạng FPU/`FPUFMAPipe`/`MulAddRecFNPipe`, gồm cả trường hợp module dùng chung
+  và SRAM black box;
+- 6 tình huống của vòng: thua A/B rồi thắng ở phiên 2 thì đi gate; thua hết lượt; sửa cả core thì A/B cả tile
+  và dùng lại kết quả; agent hết giờ nhưng đã sửa; Verilog không đổi; chế độ cũ khi agent hết giờ có/không có
+  diff;
+- `round_diff` và `find_scala_classes` trên một repo git thật.
+
+**Chưa chạy thật.**
+
 ### Agent sửa lỗi build (`--build-fixes`)
 
 Theo `build_with_debug_retry` / `debug_failure` của ví dụ `timing_opt`: khi build của vòng lỗi (ví dụ m4 vòng 3,
@@ -332,7 +384,8 @@ còn loop này hiện chỉ dùng opencode.
 
 ```
 results.csv            iter, accepted, wns_ns, tns_ns, worst_slack_ns, fmax_mhz, critical_path,
-                       isa_pass, bench_cycles_match, reason, area_um2, elapsed_min
+                       isa_pass, bench_cycles_match, reason, area_um2, elapsed_min,
+                       target, ab_delta_ns, ab_sessions (--loop-ab)
 patches/iter<N>.patch  git diff trong generators/rocket-chip so với commit gốc (gộp cả bản tốt nhất trước đó)
 patches/best.patch     bản tốt nhất (rỗng nếu không vòng nào được nhận)
 runs/baseline/         timing_paths.rpt, timing_endpoints.rpt, timing_families.txt, sta.log, yosys.log, gate.json, cycles.csv, build.log
@@ -341,6 +394,8 @@ runs/iter<N>/          prompt.md, agent_response.md, agent_transcript.txt, diff_
                        (--ab-tool) agent_ab_experiments.jsonl: mỗi lần rebuild/A-B của agent; agent_ab_cleanup.txt
                        (build lỗi) fix<k>_prompt.md, fix<k>_response.md, fix<k>_transcript.txt, build_fix<k>.log
                        agent hết --llm-timeout: agent_transcript.txt vẫn có; agent_response.md rỗng
+                       (--loop-ab) target.json; edit<k>_{prompt.md,response.md,transcript.txt,round.diff};
+                       build_e<k>.log; ab<k>.txt (kết quả A/B); lỗi build: e<k>fix<j>_*, build_e<k>fix<j>.log
 profile/               ChiaProfileCollector.log + timeline html
 ```
 

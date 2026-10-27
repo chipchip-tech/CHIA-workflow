@@ -15,6 +15,9 @@ Milestones (run from this directory on the head):
   M3  chia job submit --working-dir . -- python rocket_fmax.py --period-ns <P> --iters 5
   --ab-tool: the agent also gets synth_ab (ab_tool.py) to elaborate its edit and
       synthesize one module of it next to the best (A/B), prompts/improve_timing_ab.md
+  --loop-ab: the loop drives it instead: it picks the target module, the agent only edits
+      in short sessions (prompts/improve_timing_target.md), the loop builds and runs the
+      A/B, and only an edit that wins the A/B goes on to gate + full synth
   equivalence of a finished run's best patch vs the baseline (no loop):
       chia job submit --working-dir . -- python rocket_fmax.py --equiv-only --patch-file <best.patch>
 
@@ -54,8 +57,10 @@ EXP_YAML = HERE / "exp.yaml"
 PROMPT = HERE / "prompts" / "improve_timing.md"
 PROMPT_AB = HERE / "prompts" / "improve_timing_ab.md"
 PROMPT_FIX = HERE / "prompts" / "fix_build.md"
+PROMPT_TARGET = HERE / "prompts" / "improve_timing_target.md"
 CSV_FIELDS = ["iter", "accepted", "wns_ns", "tns_ns", "worst_slack_ns", "fmax_mhz", "critical_path",
-              "isa_pass", "bench_cycles_match", "reason", "area_um2", "elapsed_min"]
+              "isa_pass", "bench_cycles_match", "reason", "area_um2", "elapsed_min",
+              "target", "ab_delta_ns", "ab_sessions"]
 SYSTEM_MESSAGE = ("You are a hardware timing engineer working on the Rocket core in Chipyard. "
                   "You only edit Chisel sources through the chipyard_bash tool and never build, "
                   "simulate or synthesize: the surrounding loop does that after you finish.")
@@ -111,6 +116,18 @@ def parse_args():
     p.add_argument("--ab-tool", action="store_true",
                    help="give the agent the synth_ab tool (ab_tool.py: make verilog + Yosys/OpenSTA "
                         "A/B of one module) and use prompts/improve_timing_ab.md")
+    p.add_argument("--loop-ab", action="store_true",
+                   help="loop-driven rounds: the loop picks the target module from the worst path, the "
+                        "agent only edits it in short sessions (prompts/improve_timing_target.md), the loop "
+                        "builds and synthesizes that module A/B against the best; a losing A/B goes back to "
+                        "the agent (--ab-refines), a winning one goes on to gate + full synth")
+    p.add_argument("--edit-timeout", type=int, default=900,
+                   help="--loop-ab: time limit of one edit session (s); --llm-timeout is not used")
+    p.add_argument("--ab-refines", type=int, default=2,
+                   help="--loop-ab: extra edit sessions after a losing A/B (0 = one session per round)")
+    p.add_argument("--ab-min-gain", type=float, default=0.1,
+                   help="--loop-ab: the A/B must improve the module's worst slack by more than this (ns; "
+                        "synthesis noise is about 0.1 ns) before the round goes on to gate + full synth")
     p.add_argument("--fragments", nargs="*", default=[],
                    help="config fragments put in front of RocketConfig for every round build "
                         "(e.g. the audit result); the loop writes them to RocketFmaxAudit.scala")
@@ -131,6 +148,8 @@ def parse_args():
         p.error("--equiv-only cần --patch-file")
     if not a.equiv_only and a.period_ns is None:
         p.error("--period-ns là bắt buộc")
+    if a.loop_ab and (a.ab_tool or a.bypass_llm):
+        p.error("--loop-ab không dùng chung với --ab-tool hay --bypass-llm")
     if a.run_name is None:
         mode = ("equiv" if a.equiv_only else "baseline" if a.baseline_only
                 else "m2" if a.bypass_llm else "agent")
@@ -477,82 +496,82 @@ def render_fix_prompt(a, i: int, k: int, errors: str, patch: str, best: dict, no
         NOTES=notes[-4000:].strip() or "(no summary)")
 
 
-def run_round(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best, history) -> dict:
-    """One round. Returns {"accepted", "reason", "synth", "rtl", "patch", ...}."""
-    d = out / "runs" / f"iter{i}"
-    r = {"accepted": False, "reason": "", "synth": None, "rtl": None, "patch": "",
-         "isa_pass": "", "bench_cycles_match": ""}
-
-    get(N.reset_rocket.chia_remote(snap["rocket_head"], best["patch"]))
-    get(N.stage_for_agent.chia_remote(stage_files(best, history)))
-    prompt = render_prompt(a, i, best, history)
-    write(d / "prompt.md", prompt)
-
-    tag = f"m2_iter{i}_llm" if a.bypass_llm else f"agent_{a.run_name}_iter{i}_llm"
-    t_agent = time.time()
-    if a.bypass_llm:
-        resp = get(llm.prompt.chia_remote(llm, prompt, tools=[], _chia_tag=tag))
-        patch_in = Path(a.patch_file).read_text() if a.patch_file else None
-        get(N.apply_edit.chia_remote(patch_in, a.marker_file, f"rocket-fmax milestone-2 bypass, iter{i}"))
-        write(d / "agent_response.md", resp.result)
-        r["reason"] = "" if resp.success else f"LLM không thành công (returncode {resp.returncode})"
-    else:
-        r["reason"] = call_agent(a, llm, prompt, tag, d, "agent", best, a.ab_tool)
-    r["agent_min"] = (time.time() - t_agent) / 60
-
+def after_agent(out: Path, d: Path, i: int, snap: dict, best: dict, r: dict, agent_reason: str,
+                label: str = "") -> dict | None:
+    """Diff after an agent call. An agent that timed out or failed still leaves its
+    edits in the tree: they go on to the build like any other (the gate keeps them
+    honest) and the failure is kept as a note. Returns the diff, or None with
+    r["reason"] set when the round stops (scope violation, nothing changed)."""
     diff, why = collect_and_check(out, d, i, snap, best)
     r["patch"] = diff["patch"]
-    if r["reason"] or why:
-        r["reason"] = r["reason"] or why
-        return r
+    if why:
+        r["reason"] = "; ".join(x for x in (label, agent_reason, why) if x)
+        return None
+    if agent_reason:
+        r.setdefault("notes", []).append(f"{label or 'agent'}: {agent_reason}, vẫn đánh giá phần đã sửa")
+        print(f"round {i}: {agent_reason}; agent đã sửa {len(diff['files'])} file, vẫn build và đánh giá",
+              flush=True)
+    return diff
 
+
+def build_with_fixes(a, i: int, out: Path, d: Path, fix_llm, snap: dict, best: dict, r: dict, diff: dict,
+                     suffix: str = "") -> tuple:
+    """Build of the round's edits. On a compile error the build-fix agent (as
+    build_with_debug_retry in CHIA's timing_opt example) fixes it, at most
+    --build-fixes times, with the same scope check and diff. Returns (artifact,
+    diff); the artifact is None (r["reason"] set) when the round stops."""
     t_build = time.time()
-    art = build_loop(a, f"iter{i}")       # values only, see ensure_baseline
-    save_build(d, art)
-    r["build_fixes"] = 0
-    # Build-fix agent (as build_with_debug_retry in CHIA's timing_opt example): a
-    # compile error no longer costs the whole round. Same scope check and diff.
-    while not art.success and not a.bypass_llm and r["build_fixes"] < a.build_fixes:
-        k = r["build_fixes"] = r["build_fixes"] + 1
+    art = build_loop(a, f"iter{i}{suffix}")       # values only, see ensure_baseline
+    save_build(d, art, f"build{suffix}.log")
+    k = 0
+    while not art.success and not a.bypass_llm and k < a.build_fixes:
+        k += 1
+        r["build_fixes"] = r.get("build_fixes", 0) + 1
+        tag = f"{suffix.lstrip('_')}fix{k}"
         errors = build_errors(art)
         print(f"round {i}: build lỗi, gọi agent sửa (lần {k}/{a.build_fixes})", flush=True)
-        notes = (d / "agent_response.md").read_text() if (d / "agent_response.md").exists() else ""
-        fprompt = render_fix_prompt(a, i, k, errors, diff["patch"], best, notes)
-        write(d / f"fix{k}_prompt.md", fprompt)
-        r["reason"] = call_agent(a, fix_llm, fprompt, f"agent_{a.run_name}_iter{i}_fix{k}_llm", d, f"fix{k}",
-                                 best, a.ab_tool)
-        diff, why = collect_and_check(out, d, i, snap, best)
-        r["patch"] = diff["patch"]
-        if r["reason"] or why:
-            r["reason"] = f"build lỗi, agent sửa lần {k}: " + (r["reason"] or why)
-            return r
-        art = build_loop(a, f"iter{i}_fix{k}")
-        save_build(d, art, f"build_fix{k}.log")
-    r["build_min"] = (time.time() - t_build) / 60
+        fprompt = render_fix_prompt(a, i, k, errors, diff["patch"], best, last_response(d))
+        write(d / f"{tag}_prompt.md", fprompt)
+        reason = call_agent(a, fix_llm, fprompt, f"agent_{a.run_name}_iter{i}_{tag}_llm", d, tag,
+                            best, a.ab_tool)
+        diff = after_agent(out, d, i, snap, best, r, reason, f"build lỗi, agent sửa lần {k}")
+        if diff is None:
+            return None, None
+        art = build_loop(a, f"iter{i}_{tag}")
+        save_build(d, art, f"build_{tag}.log")
+    r["build_min"] = r.get("build_min", 0) + (time.time() - t_build) / 60
     if not art.success:
-        r["reason"] = (f"build lỗi (sau {r['build_fixes']} lần agent sửa):\n" if r["build_fixes"]
-                       else "build lỗi:\n") + build_errors(art)
-        return r
+        r["reason"] = (f"build lỗi (sau {k} lần agent sửa):\n" if k else "build lỗi:\n") + build_errors(art)
+        return None, diff
+    return art, diff
 
+
+def tile_rtl(art, r: dict):
     try:
-        rtl = get(N.extract_tile_rtl.chia_remote(art))
+        return get(N.extract_tile_rtl.chia_remote(art))
     except Exception as e:                                           # noqa: BLE001
         r["reason"] = f"không lấy được Verilog {N.TOP}: {e}"[:1000]
-        return r
+        return None
+
+
+def gate_and_judge(a, d: Path, art, rtl, elfs, base: dict, best: dict, r: dict, synth=None) -> dict:
+    """Gate and full synth of a built round (in parallel), then the decision. `synth`:
+    a full RocketTile result already in hand (a whole-tile A/B), not synthesized again."""
     r["rtl"] = rtl
     gate_ref = N.run_gate.chia_remote(art, elfs)
-    synth_ref = N.synth_sta.chia_remote(rtl, a.period_ns, a.synth_flow)
+    synth_ref = None if synth is not None else N.synth_sta.chia_remote(rtl, a.period_ns, a.synth_flow)
     gate = get(gate_ref)
     save_gate(d, gate)
     isa_ok, cyc_ok, why = compare_gate(base["gate"], gate, a.exclude_isa)
     r["isa_pass"], r["bench_cycles_match"] = isa_ok, cyc_ok
     write(d / "gate_compare.txt", "\n".join(why) or "khớp baseline")
     if not (isa_ok and cyc_ok):
-        chia_cancel(synth_ref, force=True)
+        if synth_ref is not None:
+            chia_cancel(synth_ref, force=True)
         r["reason"] = "gate không đạt: " + "; ".join(why)
         return r
 
-    synth = get(synth_ref)
+    synth = synth if synth is not None else get(synth_ref)
     save_synth(d, synth)
     r["synth"] = synth
     if not synth.success:
@@ -568,18 +587,200 @@ def run_round(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best, histor
     return r
 
 
+def new_round(i: int) -> dict:
+    return {"accepted": False, "reason": "", "synth": None, "rtl": None, "patch": "",
+            "isa_pass": "", "bench_cycles_match": "", "build_fixes": 0}
+
+
+def run_round(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best, history) -> dict:
+    """One round (one agent call). Returns {"accepted", "reason", "synth", "rtl", "patch", ...}."""
+    d = out / "runs" / f"iter{i}"
+    r = new_round(i)
+
+    get(N.reset_rocket.chia_remote(snap["rocket_head"], best["patch"]))
+    get(N.stage_for_agent.chia_remote(stage_files(best, history)))
+    prompt = render_prompt(a, i, best, history)
+    write(d / "prompt.md", prompt)
+
+    tag = f"m2_iter{i}_llm" if a.bypass_llm else f"agent_{a.run_name}_iter{i}_llm"
+    t_agent = time.time()
+    if a.bypass_llm:
+        resp = get(llm.prompt.chia_remote(llm, prompt, tools=[], _chia_tag=tag))
+        patch_in = Path(a.patch_file).read_text() if a.patch_file else None
+        get(N.apply_edit.chia_remote(patch_in, a.marker_file, f"rocket-fmax milestone-2 bypass, iter{i}"))
+        write(d / "agent_response.md", resp.result)
+        reason = "" if resp.success else f"LLM không thành công (returncode {resp.returncode})"
+    else:
+        reason = call_agent(a, llm, prompt, tag, d, "agent", best, a.ab_tool)
+    r["agent_min"] = (time.time() - t_agent) / 60
+
+    diff = after_agent(out, d, i, snap, best, r, reason)
+    if diff is None:
+        return r
+    art, diff = build_with_fixes(a, i, out, d, fix_llm, snap, best, r, diff)
+    if art is None:
+        return r
+    rtl = tile_rtl(art, r)
+    return r if rtl is None else gate_and_judge(a, d, art, rtl, elfs, base, best, r)
+
+
+# ---------------------------------------------------------------------------
+# --loop-ab rounds: the loop picks the target and runs the A/B, the agent edits
+# ---------------------------------------------------------------------------
+
+def target_text(target: dict, classes: dict) -> str:
+    lines = [f"- Worst path of the current best: `{target['crit']}`",
+             f"- It starts in instance `{target['start_path'] or N.TOP}` and ends in "
+             f"`{target['end_path'] or N.TOP}`.",
+             f"- **Target: instance `{target['path'] or N.TOP}` = module `{target['module']}`** "
+             "(the smallest instance holding both ends).",
+             "- Instances from the top down (instance -> Verilog module -> Scala files that define it):"]
+    for path, mod in target["chain"]:
+        files = classes.get(mod) or []
+        where = (", ".join(f"`{f}`" for f in files) if files else
+                 "not found under rocket-chip/src/main/scala (e.g. hardfloat, which you must not edit: "
+                 "change how the parent instantiates or feeds it instead)")
+        lines.append(f"  - `{path or N.TOP}` -> `{mod}` -> {where}")
+    lines.append("- Work on the logic between those two ends. If it cannot be shortened inside the target, "
+                 "you may move logic in the module that instantiates it.")
+    return "\n".join(lines)
+
+
+def render_target_prompt(a, i: int, k: int, best: dict, history: list[str], target: dict, classes: dict,
+                         note: str) -> str:
+    s = best["synth"]
+    return string.Template(PROMPT_TARGET.read_text()).safe_substitute(
+        ITER=i, MAX_ITERS=a.iters, SESSION=k + 1, MAX_SESSIONS=a.ab_refines + 1,
+        EDIT_MIN=round(a.edit_timeout / 60), AB_MIN_GAIN=a.ab_min_gain,
+        CONFIG_DESC=loop_config(a), PERIOD_NS=a.period_ns, BEST_NAME=best["name"],
+        BEST_SLACK=fmt(s.worst_slack_ns, 4), BEST_FMAX=fmt(s.fmax_mhz, 2),
+        CRIT=f"{s.crit_start} -> {s.crit_end}", ENDPOINTS=s.families, STAGE_DIR=N.STAGE_DIR,
+        TARGET=target_text(target, classes), SESSION_NOTE=note,
+        HISTORY="\n\n".join(history) or "(chưa có vòng nào trước)")
+
+
+def session_note(k: int, ab_text: str, ab_dir: str, rdiff: str) -> str:
+    if k == 0:
+        return ("## This session\n\nFirst session of the round: the tree holds the current best, "
+                "with no edit of this round yet.")
+    return "\n".join([
+        f"## This session: improve your edit (session {k + 1})",
+        "",
+        "Your edit from the previous session is still in the tree. It built, but its A/B was not good enough:",
+        "", "```", ab_text, "```", "",
+        f"- `{ab_dir}/child_paths.rpt`, `{ab_dir}/parent_paths.rpt`: worst paths of the module with your "
+        "edit (child) and in the best (parent); `child_families.txt` the endpoint families.",
+        f"- `{ab_dir}/child_verilog.sv`: the module's Verilog generated from your edit.",
+        f"- `{ab_dir}/round.diff`: your edits of this round (undo them all with "
+        f"`git -C {N.ROCKET} apply -R {ab_dir}/round.diff`).",
+        "",
+        "Read where the child's worst path goes now. Then improve the edit, or undo it and try a different "
+        "restructuring of the same target.",
+        "", "Your edits of this round so far:", "", "```diff", rdiff[-8000:], "```"])
+
+
+def run_round_loop_ab(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best, history) -> dict:
+    """One --loop-ab round: the loop picks the target from the best's worst path; an
+    agent session edits; the loop builds (build-fix agent on a compile error) and
+    synthesizes the smallest instance holding the target and all changed modules,
+    from the edit and from the best. A win > --ab-min-gain goes on to gate + full
+    synth; otherwise the A/B report goes to a new session (at most --ab-refines)."""
+    d = out / "runs" / f"iter{i}"
+    r = new_round(i)
+    get(N.reset_rocket.chia_remote(snap["rocket_head"], best["patch"]))
+    get(N.stage_for_agent.chia_remote(stage_files(best, history)))
+
+    target = N.pick_target(best["rtl"], best["synth"])
+    classes = get(N.find_scala_classes.chia_remote([m for _, m in target["chain"]]))
+    r["target"] = f"{target['path'] or N.TOP} ({target['module']})"
+    write(d / "target.json", json.dumps({**target, "scala": classes}, indent=2))
+    print(f"round {i}: mục tiêu {r['target']}, đường găng {target['crit']}", flush=True)
+
+    parent_cache: dict = {}
+    note, last = session_note(0, "", "", ""), "chưa có A/B"
+    t_agent = 0.0
+    for k in range(a.ab_refines + 1):
+        r["ab_sessions"] = k + 1
+        prompt = render_target_prompt(a, i, k, best, history, target, classes, note)
+        write(d / f"edit{k}_prompt.md", prompt)
+        t0 = time.time()
+        reason = call_agent(a, llm, prompt, f"agent_{a.run_name}_iter{i}_edit{k}_llm", d, f"edit{k}",
+                            best, False)
+        t_agent += time.time() - t0
+        r["agent_min"] = t_agent / 60
+        before = r["patch"]
+        diff = after_agent(out, d, i, snap, best, r, reason, f"phiên sửa {k + 1}")
+        if diff is None:
+            if k:
+                r["reason"] += f" (A/B trước đó: {last})"
+            return r
+        if k and diff["patch"] == before:
+            r["reason"] = f"phiên sửa {k + 1} không sửa thêm gì; A/B trước đó: {last}"
+            return r
+        art, diff = build_with_fixes(a, i, out, d, fix_llm, snap, best, r, diff, f"_e{k}")
+        if art is None:
+            return r
+        rtl = tile_rtl(art, r)
+        if rtl is None:
+            return r
+        rdiff = get(N.round_diff.chia_remote(snap["rocket_head"], best["patch"]))
+        r["round_diff"] = rdiff
+        write(d / f"edit{k}_round.diff", rdiff)
+
+        ch = AB.changed_modules(AB.module_texts(best["rtl"]), AB.module_texts(rtl))
+        mods = set(ch["changed"]) | set(ch["added"])
+        ab_dir = f"{N.STAGE_DIR}/ab{k}"
+        if not mods:
+            last = f"Verilog của {N.TOP} không đổi"
+            ab_text = ("Your edit did not change the generated Verilog of RocketTile at all "
+                       "(only comments, dead code, or code that elaborates to the same logic).")
+            stage = {"round.diff": rdiff}
+        else:
+            path = N.common_path([target["path"]] + N.changed_paths(rtl, mods))
+            ab = AB.loop_ab(best["rtl"], best["synth"], best["name"], rtl, path, a.period_ns, a.synth_flow,
+                            parent_cache)
+            write(d / f"ab{k}.txt", ab["text"])
+            print(f"round {i}, phiên {k + 1}: {ab['text']}", flush=True)
+            r["ab_delta_ns"] = "" if ab["delta"] is None else ab["delta"]
+            last = (f"{ab['module']}: delta {ab['delta']:+.3f} ns" if ab["delta"] is not None
+                    else f"{ab['module']}: synth lỗi ({ab['c'].get('error') or ab['p'].get('error')})")
+            if ab["delta"] is not None and ab["delta"] > a.ab_min_gain:
+                r["ab_result"] = last
+                return gate_and_judge(a, d, art, rtl, elfs, base, best, r,
+                                      synth=ab["child"] if ab["whole"] else None)
+            ab_text = ab["text"]
+            stage = {**ab["files"], "round.diff": rdiff,
+                     "child_verilog.sv": AB.module_texts(rtl).get(ab["module"], "")}
+        if k < a.ab_refines:
+            get(N.stage_for_agent.chia_remote(stage, ab_dir))
+            note = session_note(k + 1, ab_text, ab_dir, rdiff)
+    r["reason"] = f"A/B không tốt hơn {a.ab_min_gain} ns sau {a.ab_refines + 1} phiên sửa (lần cuối: {last})"
+    return r
+
+
+def last_response(d: Path) -> str:
+    """Summary of the round's last agent answer (agent_response.md or editN_response.md)."""
+    files = sorted(d.glob("edit*_response.md"), key=lambda p: int(re.sub(r"\D", "", p.stem) or 0))
+    files = files or [d / "agent_response.md"]
+    return files[-1].read_text()[-1500:] if files[-1].exists() else ""
+
+
 def history_entry(i: int, r: dict, resp_summary: str) -> str:
     s = r.get("synth")
     lines = [f"### Vòng {i}: {'NHẬN' if r['accepted'] else 'LOẠI'}",
              f"Lý do: {r['reason'][:3000]}"]
+    if r.get("target"):
+        lines.append(f"Mục tiêu: {r['target']}; số phiên sửa: {r.get('ab_sessions', '')}"
+                     + (f"; A/B: {r['ab_result']}" if r.get("ab_result") else ""))
     if s is not None and s.success:
         lines.append(f"Kết quả: worst slack {s.worst_slack_ns:.4f} ns, đường găng {s.crit_start} -> {s.crit_end}")
     if r.get("build_fixes"):
         lines.append(f"Build lỗi, agent sửa lỗi build {r['build_fixes']} lần.")
     if resp_summary:
         lines.append(f"Tóm tắt của agent: {resp_summary[:800]}")
-    if not r["accepted"] and r["patch"]:
-        lines.append("Patch đã bị loại (đã revert, đừng lặp lại y nguyên):\n```diff\n" + r["patch"][:4000] + "\n```")
+    patch = r.get("round_diff") or r["patch"]
+    if not r["accepted"] and patch:
+        lines.append("Patch đã bị loại (đã revert, đừng lặp lại y nguyên):\n```diff\n" + patch[:4000] + "\n```")
     return "\n".join(lines)
 
 
@@ -597,8 +798,8 @@ def run(a, out: Path):
 
     oc_args = ["--print-logs", "--log-level", a.opencode_logs] if a.opencode_logs else None
     llm = N.SalvageOpenCodeLLM(model=a.model, system_message=SYSTEM_MESSAGE_AB if a.ab_tool else SYSTEM_MESSAGE,
-                      timeout_seconds=a.llm_timeout, retries=1, builtin_tools=a.builtin_tools,
-                      extra_cli_args=oc_args)
+                               timeout_seconds=a.edit_timeout if a.loop_ab else a.llm_timeout, retries=1,
+                               builtin_tools=a.builtin_tools, extra_cli_args=oc_args)
     fix_llm = N.SalvageOpenCodeLLM(model=a.fix_model or a.model, system_message=SYSTEM_MESSAGE_FIX,
                                    timeout_seconds=a.fix_timeout, retries=1, builtin_tools=a.builtin_tools,
                                    extra_cli_args=oc_args)
@@ -611,7 +812,8 @@ def run(a, out: Path):
         t0 = time.time()
         print(f"\n######## round {i}/{a.iters}", flush=True)
         try:
-            r = run_round(a, i, out, llm, fix_llm, elfs, snap, base, best, history)
+            rnd = run_round_loop_ab if a.loop_ab else run_round
+            r = rnd(a, i, out, llm, fix_llm, elfs, snap, base, best, history)
         except SystemExit:
             raise
         except Exception as e:                                       # noqa: BLE001
@@ -619,15 +821,17 @@ def run(a, out: Path):
             r = {"accepted": False, "reason": f"lỗi hạ tầng: {type(e).__name__}: {e}"[:1000],
                  "synth": None, "patch": "", "isa_pass": "", "bench_cycles_match": ""}
         r["minutes"] = (time.time() - t0) / 60
-        resp_path = out / "runs" / f"iter{i}" / "agent_response.md"
-        resp_summary = resp_path.read_text()[-1500:] if resp_path.exists() else ""
+        if r.get("notes"):
+            r["reason"] = r["reason"] + " [" + "; ".join(r["notes"]) + "]"
+        resp_summary = last_response(out / "runs" / f"iter{i}")
         write(out / "runs" / f"iter{i}" / "decision.json",
-              json.dumps({k: v for k, v in r.items() if k not in ("synth", "rtl", "patch")},
+              json.dumps({k: v for k, v in r.items() if k not in ("synth", "rtl", "patch", "round_diff")},
                          indent=2, ensure_ascii=False, default=str))
         append_row(csv_path, {"iter": i, "accepted": r["accepted"], **synth_row(r.get("synth")),
                               "isa_pass": r["isa_pass"], "bench_cycles_match": r["bench_cycles_match"],
                               "reason": r["reason"].replace("\n", " | ")[:1000],
-                              "elapsed_min": f"{r['minutes']:.1f}"})
+                              "elapsed_min": f"{r['minutes']:.1f}", "target": r.get("target", ""),
+                              "ab_delta_ns": r.get("ab_delta_ns", ""), "ab_sessions": r.get("ab_sessions", "")})
         print(f"round {i}: {'ACCEPT' if r['accepted'] else 'REJECT'} ({r['minutes']:.1f} min) - "
               f"{r['reason'][:400]}", flush=True)
         if r["accepted"]:

@@ -23,6 +23,9 @@ the "chipyard" slot, 0.5 each), so `make verilog` sees the agent's edits and the
 reports land where chipyard_bash can read them. The loop calls ab_cleanup
 (fmax_nodes) after stopping the tool: it kills a `make verilog` still running and
 removes the config file written for it.
+
+loop_ab is the same A/B driven by the loop instead of the agent (`--loop-ab`): the
+loop builds the round, picks the module and passes the report to the agent.
 """
 
 from __future__ import annotations
@@ -93,6 +96,66 @@ def summary(s) -> dict:
         return {"ok": False, "error": s.error or "synth failed"}
     return {"ok": True, "slack_ns": round(s.worst_slack_ns, 4), "path_ns": round(s.period_ns - s.worst_slack_ns, 4),
             "area_um2": round(s.area_um2 or 0), "crit": f"{s.crit_start} -> {s.crit_end}"}
+
+
+def report_files(child, parent) -> dict:
+    """{name: text} of the path reports and endpoint families of both sides."""
+    out = {}
+    for side, s in (("child", child), ("parent", parent)):
+        if s is not None and s.success:
+            out[f"{side}_paths.rpt"] = s.paths
+            out[f"{side}_families.txt"] = s.families
+    return out
+
+
+def ab_lines(parent_name: str, p: dict, c: dict, child) -> tuple[list, Optional[float]]:
+    """Report lines of one A/B (summaries `p`, `c`) and the delta child - parent in ns."""
+    lines = [f"parent ({parent_name}): " + (f"worst slack {p['slack_ns']:+.3f} ns, path {p['path_ns']:.3f} ns, "
+                                            f"area {p['area_um2']}, {p['crit']}" if p["ok"] else p["error"]),
+             "child (your edit):   " + (f"worst slack {c['slack_ns']:+.3f} ns, path {c['path_ns']:.3f} ns, "
+                                        f"area {c['area_um2']}, {c['crit']}" if c["ok"] else c["error"])]
+    delta = round(c["slack_ns"] - p["slack_ns"], 4) if c["ok"] and p["ok"] else None
+    if delta is not None:
+        verdict = ("better" if delta > NOISE_NS else "worse" if delta < -NOISE_NS
+                   else f"no clear change (|delta| <= {NOISE_NS} ns is synthesis noise)")
+        lines.append(f"delta (child - parent): {delta:+.3f} ns -> {verdict}")
+    if c["ok"]:
+        lines += ["child worst endpoint families:", "\n".join(child.families.splitlines()[:9])]
+    return lines, delta
+
+
+def loop_ab(parent_rtl: N.TileRTL, parent_synth, parent_name: str, child_rtl: N.TileRTL, path: str,
+            period_ns: float, flow: str, parent_cache: dict) -> dict:
+    """A/B run by the loop (--loop-ab), not by the agent: synthesize the module at
+    instance `path` of the round's build (child) and of the best (parent). Module
+    names may differ on both sides (firtool dedup suffixes), the instance path does
+    not. path "" (or a path missing on one side) = the whole tile, compared with the
+    best's full result; the child's result is then the round's full synth.
+    `parent_cache` ({parent module: SynthResult}) lives for one round."""
+    pp, cp = N.instance_paths(parent_rtl), N.instance_paths(child_rtl)
+    whole = path == "" or path not in pp or path not in cp
+    if whole:
+        path, pm, cm = "", N.TOP, N.TOP
+    else:
+        pm, cm = pp[path], cp[path]
+    t0 = time.time()
+    res = {"resources": {"eda": 1 if whole else SUB_BLOCK_EDA}}
+    child_ref = N.synth_sta.options(**res).chia_remote(
+        child_rtl if whole else N.tile_rtl_from_sources(tile_sources(child_rtl), cm), period_ns, flow)
+    parent = None
+    if not whole:
+        parent = parent_cache.get(pm)
+        if parent is None:
+            parent = parent_cache[pm] = get(N.synth_sta.options(**res).chia_remote(
+                N.tile_rtl_from_sources(tile_sources(parent_rtl), pm), period_ns, flow))
+    child = get(child_ref)
+    c, p = summary(child), summary(parent_synth if whole else parent)
+    lines, delta = ab_lines(parent_name, p, c, child)
+    where = "whole tile, parent = full result of the best" if whole else f"instance {path}"
+    lines.insert(0, f"A/B of module {cm} ({where}; parent module {pm}), {time.time() - t0:.0f} s")
+    return {"path": path, "module": cm, "parent_module": pm, "whole": whole, "child": child,
+            "parent": parent_synth if whole else parent, "c": c, "p": p, "delta": delta,
+            "text": "\n".join(lines), "files": report_files(child, None if whole else parent)}
 
 
 class SynthABTool(ChiaTool):
@@ -321,26 +384,14 @@ class SynthABTool(ChiaTool):
         p = self._parent_tile if job["whole"] else summary(parent)
         d = os.path.join(AB_DIR, handle)
         os.makedirs(d, exist_ok=True)
-        for side, s in (("child", child), ("parent", parent)):
-            if s is not None and s.success:
-                with open(os.path.join(d, f"{side}_paths.rpt"), "w") as f:
-                    f.write(s.paths)
-                with open(os.path.join(d, f"{side}_families.txt"), "w") as f:
-                    f.write(s.families)
-        lines = [f"status: done ({time.time() - job['started']:.0f} s), module {job['module']}"
-                 + (" (whole tile, parent = full result of the best)" if job["whole"] else ""),
-                 f"parent ({self._parent_name}): " + (f"worst slack {p['slack_ns']:+.3f} ns, path {p['path_ns']:.3f} ns, "
-                                                      f"area {p['area_um2']}, {p['crit']}" if p["ok"] else p["error"]),
-                 "child (your edit):   " + (f"worst slack {c['slack_ns']:+.3f} ns, path {c['path_ns']:.3f} ns, "
-                                            f"area {c['area_um2']}, {c['crit']}" if c["ok"] else c["error"])]
-        delta = round(c["slack_ns"] - p["slack_ns"], 4) if c["ok"] and p["ok"] else None
-        if delta is not None:
-            verdict = ("better" if delta > NOISE_NS else "worse" if delta < -NOISE_NS
-                       else f"no clear change (|delta| <= {NOISE_NS} ns is synthesis noise)")
-            lines.append(f"delta (child - parent): {delta:+.3f} ns -> {verdict}")
+        for rel, text in report_files(child, parent).items():
+            with open(os.path.join(d, rel), "w") as f:
+                f.write(text)
+        lines, delta = ab_lines(self._parent_name, p, c, child)
+        lines.insert(0, f"status: done ({time.time() - job['started']:.0f} s), module {job['module']}"
+                     + (" (whole tile, parent = full result of the best)" if job["whole"] else ""))
         if c["ok"]:
-            lines += ["child worst endpoint families:", "\n".join(child.families.splitlines()[:9]),
-                      f"full reports: {d}/child_paths.rpt, {d}/parent_paths.rpt (read with chipyard_bash)"]
+            lines.append(f"full reports: {d}/child_paths.rpt, {d}/parent_paths.rpt (read with chipyard_bash)")
         job["text"] = "\n".join(lines)
         self._log({"event": "ab", "handle": handle, "module": job["module"], "child": c, "parent": p, "delta_ns": delta})
         return job["text"]

@@ -5,7 +5,8 @@ verilator, eda and opencode containers do not share a filesystem.
 
   chipyard (resource "chipyard"):  load_test_elfs, tree_snapshot, reset_rocket,
                                    collect_diff, restore_outside, apply_edit,
-                                   stage_for_agent, ab_cleanup
+                                   stage_for_agent, ab_cleanup,
+                                   find_scala_classes, round_diff
   any node (no resource):          extract_tile_rtl, run_gate (fans out to
                                    VerilatorRunNode on "verilator_run")
   eda (resource "eda"):            synth_sta (Yosys + OpenSTA, sky130hd tt),
@@ -496,6 +497,128 @@ def extract_tile_rtl(artifact) -> TileRTL:
 def extract_soc_rtl(artifact) -> TileRTL:
     """ChipTop hierarchy with RocketTile and the SRAMs as black boxes (config audit)."""
     return tile_rtl_from_sources(artifact.generated_src_files, SOC_TOP, stub_modules=(TOP,))
+
+
+# ---------------------------------------------------------------------------
+# instance paths: which module a flattened name like fpuOpt.dfma.fma.x_reg is in
+# (--loop-ab picks the target module and the A/B module from them)
+# ---------------------------------------------------------------------------
+
+_INST_PATH_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s+(?:#\s*\(.*?\)\s*)?([A-Za-z_]\w*)\s*\(", re.M | re.S)
+
+
+def instance_paths(rtl: TileRTL) -> dict[str, str]:
+    """{instance path below rtl.top: module}; "" is rtl.top itself, "fpuOpt.dfma" the
+    instance dfma inside instance fpuOpt. Black boxes are leaves."""
+    mods = E.modules_of(rtl.files)
+    known = set(mods) | set(rtl.blackboxes)
+    kids = {m: [(i, c) for c, i in _INST_PATH_RE.findall(t) if c in known] for m, t in mods.items()}
+    out: dict[str, str] = {}
+
+    def walk(m, path):
+        out[path] = m
+        for inst, c in kids.get(m, []):
+            walk(c, f"{path}.{inst}" if path else inst)
+
+    walk(rtl.top, "")
+    return out
+
+
+def inst_prefix(name: str, paths: dict) -> str:
+    """Longest instance path that a flattened cell/pin name starts with
+    ("fpuOpt.dfma.in_in2[53]_reg" -> "fpuOpt.dfma"; a top-level register -> "")."""
+    parts = name.lstrip("\\").split(".")
+    best = ""
+    for k in range(1, len(parts)):
+        p = ".".join(parts[:k])
+        if p not in paths:
+            break
+        best = p
+    return best
+
+
+def common_path(paths: list[str]) -> str:
+    """Deepest instance path containing all of `paths` ("" = the top)."""
+    if not paths:
+        return ""
+    split = [p.split(".") if p else [] for p in paths]
+    out = []
+    for parts in zip(*split):
+        if any(x != parts[0] for x in parts):
+            break
+        out.append(parts[0])
+    return ".".join(out)
+
+
+def path_chain(path: str) -> list[str]:
+    """"a.b.c" -> ["", "a", "a.b", "a.b.c"]."""
+    parts = path.split(".") if path else []
+    return [""] + [".".join(parts[:k]) for k in range(1, len(parts) + 1)]
+
+
+def pick_target(rtl: TileRTL, synth) -> dict:
+    """Target of a --loop-ab round: the smallest instance holding both ends of the
+    worst path of `synth`, with its module and the chain of modules above it."""
+    paths = instance_paths(rtl)
+    start, end = inst_prefix(synth.crit_start, paths), inst_prefix(synth.crit_end, paths)
+    path = common_path([start, end])
+    while path and paths[path] in rtl.blackboxes:
+        path = path.rpartition(".")[0]
+    return {"path": path, "module": paths[path], "start_path": start, "end_path": end,
+            "chain": [(p, paths[p]) for p in path_chain(path)],
+            "crit": f"{synth.crit_start} -> {synth.crit_end}"}
+
+
+def changed_paths(rtl: TileRTL, modules: set) -> list[str]:
+    """Instance paths of `rtl` whose module is in `modules`."""
+    return sorted(p for p, m in instance_paths(rtl).items() if m in modules)
+
+
+@ChiaFunction(resources={"chipyard": 1}, max_retries=0)
+def find_scala_classes(modules: list[str]) -> dict:
+    """{Verilog module: rocket-chip files under src/main/scala that define a class or
+    object of that name (a dedup suffix _<n> removed)}."""
+    out = {}
+    for m in modules:
+        cls = re.sub(r"_\d+$", "", m)
+        r = subprocess.run(["grep", "-rlE", rf"\b(class|object)\s+{cls}\b", EDITABLE_PREFIX],
+                           cwd=ROCKET, capture_output=True, text=True)
+        out[m] = sorted(r.stdout.split())[:5]
+    return out
+
+
+@ChiaFunction(resources={"chipyard": 1}, max_retries=0)
+def round_diff(rocket_head: str, base_patch: str) -> str:
+    """Diff of the rocket-chip working tree against `rocket_head` + `base_patch`: the
+    edits of this round only. Uses a temporary index, so the tree and its index are
+    left as they are."""
+    fd, idx = tempfile.mkstemp(prefix="rocket_fmax_idx_")
+    os.close(fd)
+    os.remove(idx)
+    env = {**os.environ, "GIT_INDEX_FILE": idx}
+
+    def git(*args, check=True):
+        r = subprocess.run(["git", "-C", ROCKET, *args], env=env, capture_output=True, text=True)
+        if check and r.returncode != 0:
+            raise RuntimeError(f"git {' '.join(args)}: {r.stderr[-2000:]}")
+        return r.stdout
+
+    try:
+        git("read-tree", rocket_head)
+        if base_patch.strip():
+            with tempfile.NamedTemporaryFile("w", suffix=".patch", delete=False) as f:
+                f.write(base_patch)
+            try:
+                git("apply", "--cached", "--whitespace=nowarn", f.name)
+            finally:
+                os.unlink(f.name)
+        new = git("ls-files", "--others", "--exclude-standard", "--", EDITABLE_PREFIX).split()
+        if new:
+            git("add", "-N", "--", *new)
+        return git("diff")
+    finally:
+        if os.path.exists(idx):
+            os.remove(idx)
 
 
 def sram_bits(mems_conf: str) -> dict:
