@@ -577,13 +577,18 @@ def changed_paths(rtl: TileRTL, modules: set) -> list[str]:
 @ChiaFunction(resources={"chipyard": 1}, max_retries=0)
 def find_scala_classes(modules: list[str]) -> dict:
     """{Verilog module: rocket-chip files under src/main/scala that define a class or
-    object of that name (a dedup suffix _<n> removed)}."""
+    object of that name}. Trailing _<part> pieces are dropped until one is found: a
+    dedup suffix (_1) or a desiredName suffix (FPUFMAPipe_l4_f64 -> FPUFMAPipe)."""
     out = {}
     for m in modules:
-        cls = re.sub(r"_\d+$", "", m)
-        r = subprocess.run(["grep", "-rlE", rf"\b(class|object)\s+{cls}\b", EDITABLE_PREFIX],
-                           cwd=ROCKET, capture_output=True, text=True)
-        out[m] = sorted(r.stdout.split())[:5]
+        parts, files = m.split("_"), []
+        while parts and not files:
+            cls = "_".join(parts)
+            r = subprocess.run(["grep", "-rlE", rf"\b(class|object)\s+{cls}\b", EDITABLE_PREFIX],
+                               cwd=ROCKET, capture_output=True, text=True)
+            files = sorted(r.stdout.split())[:5]
+            parts.pop()
+        out[m] = files
     return out
 
 

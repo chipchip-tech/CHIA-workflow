@@ -643,7 +643,20 @@ def target_text(target: dict, classes: dict) -> str:
         lines.append(f"  - `{path or N.TOP}` -> `{mod}` -> {where}")
     lines.append("- Work on the logic between those two ends. If it cannot be shortened inside the target, "
                  "you may move logic in the module that instantiates it.")
+    if target.get("report"):
+        lines += ["", "Worst path report (OpenSTA, from timing_paths.rpt):", "", "```", target["report"], "```"]
     return "\n".join(lines)
+
+
+def first_path(paths: str, limit: int = 8000) -> str:
+    """The first `Startpoint ... slack` block of an OpenSTA report_checks output."""
+    i = paths.find("Startpoint")
+    if i < 0:
+        return ""
+    j = paths.find("slack", i)
+    j = paths.find("\n", j) if j >= 0 else -1
+    block = paths[i:j if j >= 0 else len(paths)]
+    return block if len(block) <= limit else block[:limit] + "\n... (truncated, see timing_paths.rpt)"
 
 
 def render_target_prompt(a, i: int, k: int, best: dict, history: list[str], target: dict, classes: dict,
@@ -691,6 +704,7 @@ def run_round_loop_ab(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best
     get(N.stage_for_agent.chia_remote(stage_files(best, history)))
 
     target = N.pick_target(best["rtl"], best["synth"])
+    target["report"] = first_path(best["synth"].paths)
     classes = get(N.find_scala_classes.chia_remote([m for _, m in target["chain"]]))
     r["target"] = f"{target['path'] or N.TOP} ({target['module']})"
     write(d / "target.json", json.dumps({**target, "scala": classes}, indent=2))

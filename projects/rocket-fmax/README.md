@@ -348,7 +348,11 @@ synth như bình thường. Lý do hỏng của agent được ghi thêm trong n
   diff;
 - `round_diff` và `find_scala_classes` trên một repo git thật.
 
-**Chưa chạy thật.**
+**Lần chạy thật `fmax-lab-t1` (27/10/2026, 1 vòng, big-pickle, readonly): bị loại.** Chọn mục tiêu đúng trên
+Verilog thật (`fpuOpt.dfma` = `FPUFMAPipe_l4_f64`, chuỗi `RocketTile` → `FPU` → `FPUFMAPipe_l4_f64`), nhưng
+không tìm ra file Scala của `FPUFMAPipe_l4_f64` (tên do `desiredName` đặt). Agent hết 15 phút mà chưa sửa gì nên
+vòng bị loại ngay, không build. Đã sửa: `find_scala_classes` bỏ dần từng đoạn `_xxx` ở cuối tên cho tới khi tìm
+thấy class (`FPUFMAPipe_l4_f64` → `FPUFMAPipe`); prompt có sẵn báo cáo OpenSTA của đường găng nhất.
 
 ### Agent sửa lỗi build (`--build-fixes`)
 
