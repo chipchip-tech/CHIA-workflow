@@ -46,7 +46,9 @@ synthesis đang chạy bị huỷ.
 | `area_check.py` | Kiểm luồng area `ChipTop` ngay trong container `eda`, ngoài CHIA (parse từng file, rồi `synth_area`) |
 | `config_audit.py` | Mốc phụ: agent tìm khối thừa trong `RocketConfig`, loop build và kiểm từng ứng viên |
 | `measure_soc.py` | Đo lại Fmax `RocketTile` với config sau audit, có/không `best.patch` (4 điểm) |
+| `ab_tool.py` | Tool MCP `synth_ab` (`--ab-tool`): agent elaborate bản sửa rồi synth A/B một module so với bản tốt nhất |
 | `prompts/improve_timing.md` | Prompt của agent (IPC-neutral, không build) |
+| `prompts/improve_timing_ab.md` | Như trên, kèm hướng dẫn dùng `synth_ab` (dùng khi `--ab-tool`) |
 | `prompts/audit_config.md` | Prompt của agent kiểm config (chỉ đọc, ghi `candidates.json`) |
 | `exp.yaml` | Cache và bypass |
 | `cluster.yaml` | `configs/cluster-local.yaml` + 4 slot `verilator_run` + worker `eda` |
@@ -284,6 +286,37 @@ CHIA cho BOOM cố ý siết chu kỳ):
 - Đường găng của `best_cfg` lại về họ store data của DCache; `best` không fragment thì ở FMA: các họ sát nhau trong
   ~0,2 ns. Gate `best_cfg` pass, mcycle giữ nguyên.
 
+### Tool A/B synth cho agent (`--ab-tool`)
+
+Theo `TimingExperimentTool` của ví dụ `timing_opt` (BOOM) trong CHIA: thay vì sửa "mù" rồi chờ loop
+build + gate + synth, agent tự kiểm từng ý tưởng. Tool `synth_ab` (`ab_tool.py`) chạy trên worker
+chipyard cạnh `chipyard_bash` (hai tool chia slot `chipyard` 0,5 mỗi cái, nên build của loop chờ tới khi
+cả hai dừng) và có 4 hàm:
+
+| Hàm | Việc |
+|---|---|
+| `rebuild_verilog(max_wait_seconds)` | `make verilog CONFIG=<config của vòng>` trên bản sửa hiện tại (chạy nền; với `--fragments` tool tự ghi rồi xoá `RocketFmaxAudit.scala`); báo module nào đổi so với bản tốt nhất (bỏ qua comment `@[...]`) |
+| `list_modules(pattern, only_changed)` | Module dưới `RocketTile`, số dòng, đánh dấu module bị đổi |
+| `start_ab(module)` | `synth_sta` (cùng flow, cùng chu kỳ với loop) cho `module` của bản sửa và của bản tốt nhất, song song trên `eda` (0,5 slot mỗi cái; kết quả bản tốt nhất được nhớ theo module). `module=RocketTile`: synth cả tile (1 slot) và so với kết quả đầy đủ của bản tốt nhất, đúng con số loop dùng để nhận/loại |
+| `ab_result(handle, max_wait_seconds)` | Slack hai bên, delta (dương = tốt hơn; ≤ 0,1 ns coi là nhiễu), họ endpoint xấu nhất; báo cáo đầy đủ ở `/home/ray/rocket_fmax/ab/<handle>/` |
+
+Mọi lời gọi trả về trong ≤ 60 s (việc dài chạy nền, agent gọi lại để chờ). Tool từ chối synth khi mã nguồn
+đã đổi sau lần `rebuild_verilog` cuối. Prompt `improve_timing_ab.md` yêu cầu chỉ nộp bản sửa có kết quả
+`start_ab("RocketTile")` tốt hơn bản tốt nhất, và revert nếu không cải thiện được. Sau lượt agent, loop dừng
+hai tool, gọi `ab_cleanup` (giết `make verilog` còn chạy, xoá file config) rồi mới `collect_diff`. Tiêu chí
+nhận vòng không đổi (build, gate, synth đầy đủ của loop).
+
+```bash
+chia job submit --no-wait --submission-id fmax-m6 --working-dir . -- python rocket_fmax.py \
+    --period-ns 12 --iters 5 --ab-tool --llm-timeout 2700 --exclude-isa rv64ui-p-ma_data \
+    --fragments "new testchipip.soc.WithNoScratchpads" "new chipyard.config.WithNoBusErrorDevices" \
+    --start-patch ~/rocket-fmax-out/m4/patches/best.patch --equiv --run-name m6
+```
+
+Một synth sub-block chưa chạy thật: dự kiến 1–2 phút, `RocketTile` 3–4 phút. Sub-block dùng input/output delay
+0 nên chỉ đo đường nằm trong module. Synth của agent còn đang chạy khi agent kết thúc vẫn chạy nốt và có thể
+làm synth của vòng chờ vài phút.
+
 ## Đầu ra: `~/rocket-fmax-out/<run>/`
 
 ```
@@ -294,6 +327,7 @@ patches/best.patch     bản tốt nhất (rỗng nếu không vòng nào đư�
 runs/baseline/         timing_paths.rpt, timing_endpoints.rpt, timing_families.txt, sta.log, yosys.log, gate.json, cycles.csv, build.log
 runs/iter<N>/          prompt.md, agent_response.md, agent_transcript.txt, diff_files.txt, build.log,
                        gate.json, gate_compare.txt, sim_fail.log, timing_*.rpt, decision.json
+                       (--ab-tool) ab_experiments.jsonl: mỗi lần rebuild/A-B của agent; ab_cleanup.txt
 profile/               ChiaProfileCollector.log + timeline html
 ```
 
@@ -325,6 +359,7 @@ Cuối mỗi lần chạy, loop cũng để sẵn bản tốt nhất trong conta
   - Script Yosys chạy với yosys 0.70 trên một thiết kế thử kiểu firtool (blackbox SRAM, EICG, tên `_reg`).
   - Bộ lọc liberty bỏ 36 cell.
   - Driver chạy hết với CHIA/Ray giả và một chipyard giả: baseline, đọc lại từ cache, Mốc 2 bypass, và các trường hợp loại (lệch cycle, sửa config, sửa ngoài rocket-chip, build lỗi, không đổi gì, không nhanh hơn).
+  - `ab_tool.py` (27/10/2026) với `make` giả, Yosys thật (yowasp) và STA giả: rebuild lỗi/ok, module đổi, từ chối module lạ, SRAM, Verilog cũ; A/B sub-block và `RocketTile`; ghi/xoá file config với `--fragments`; `ab_cleanup` giết `make` đang chạy; tool được pickle như khi Ray gửi sang actor. Loop chạy 2 vòng với `--ab-tool` (dừng tool, cleanup, lưu log). Chưa kiểm: MCP thật qua opencode, Ray thật (actor, `ray.wait`, slot 0,5).
 - **Chạy thật lần 1 (25/10/2026):**
   - Image eda build được: Yosys 0.38+92, `sta` có, liberty đúng sha256.
   - Cluster lên đủ 4 worker, `verilator_run` 4 slot.

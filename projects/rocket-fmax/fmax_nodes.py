@@ -5,7 +5,7 @@ verilator, eda and opencode containers do not share a filesystem.
 
   chipyard (resource "chipyard"):  load_test_elfs, tree_snapshot, reset_rocket,
                                    collect_diff, restore_outside, apply_edit,
-                                   stage_for_agent
+                                   stage_for_agent, ab_cleanup
   any node (no resource):          extract_tile_rtl, run_gate (fans out to
                                    VerilatorRunNode on "verilator_run")
   eda (resource "eda"):            synth_sta (Yosys + OpenSTA, sky130hd tt),
@@ -38,8 +38,9 @@ SOC_TOP = "ChipTop"
 STAGE_DIR = "/home/ray/rocket_fmax"          # on chipyard: what the agent may read
 SIM_WORK_DIR = "/home/ray/rocket_fmax_sim"   # on verilator_run
 AUDIT_STAGE_DIR = "/home/ray/config_audit"   # on chipyard: inputs/outputs of the audit agent
-# Written by config_audit.py only (never by an agent), removed at the end of the run.
+# Written by the loop scripts and the A/B tool (never by an agent), removed after use.
 AUDIT_CONFIG_FILE = f"{CHIPYARD}/generators/chipyard/src/main/scala/config/RocketFmaxAudit.scala"
+AB_PGID_FILE = "/home/ray/rocket_fmax_ab.pgid"   # process group of the A/B tool's make verilog
 
 ISA_SUITES = ("rv64ui", "rv64um", "rv64ua", "rv64uf", "rv64ud")
 BENCHMARKS = ("dhrystone", "median", "multiply", "qsort", "towers", "vvadd")
@@ -226,6 +227,26 @@ def read_text_opencode(path: str, remove: bool = False) -> str | None:
     if remove:
         os.remove(path)
     return text
+
+
+@ChiaFunction(resources={"chipyard": 1}, max_retries=0)
+def ab_cleanup() -> str:
+    """After the A/B tool (ab_tool.py) is stopped: kill a `make verilog` it left
+    running (its process group) and remove the config file written for it."""
+    out = []
+    if os.path.exists(AB_PGID_FILE):
+        pgid = open(AB_PGID_FILE).read().strip()
+        try:
+            if pgid.isdigit() and int(pgid) > 1:
+                os.killpg(int(pgid), 9)
+                out.append(f"killed make verilog (pgid {pgid})")
+        except (ProcessLookupError, PermissionError):
+            pass
+        os.remove(AB_PGID_FILE)
+    if os.path.exists(AUDIT_CONFIG_FILE):
+        os.remove(AUDIT_CONFIG_FILE)
+        out.append(f"removed {AUDIT_CONFIG_FILE}")
+    return "; ".join(out) or "nothing to clean"
 
 
 @ChiaFunction(resources={"chipyard": 1}, max_retries=0)
