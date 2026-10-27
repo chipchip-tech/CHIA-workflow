@@ -353,6 +353,10 @@ Verilog thật (`fpuOpt.dfma` = `FPUFMAPipe_l4_f64`, chuỗi `RocketTile` → `F
 không tìm ra file Scala của `FPUFMAPipe_l4_f64` (tên do `desiredName` đặt). Agent hết 15 phút mà chưa sửa gì nên
 vòng bị loại ngay, không build. Đã sửa: `find_scala_classes` bỏ dần từng đoạn `_xxx` ở cuối tên cho tới khi tìm
 thấy class (`FPUFMAPipe_l4_f64` → `FPUFMAPipe`); prompt có sẵn báo cáo OpenSTA của đường găng nhất.
+Transcript: agent đi đúng chỗ (`MulAddRecFNPipe_l2_e11_s53` trong `tile/FPU.scala`, `postmul_regs`, cách chia các
+tầng prefix quanh thanh ghi), nhưng 40 lần gọi tool vẫn chưa sửa, trong đó vài lần là heredoc rỗng/script nháp. Đã
+thêm vào prompt: đọc tối đa khoảng 15 lần gọi tool rồi sửa; bản sửa chưa hoàn hảo vẫn được A/B và phản hồi; không
+dùng tool làm nháp. Lần sau chạy với `--edit-timeout 1500`.
 
 ### Agent sửa lỗi build (`--build-fixes`)
 

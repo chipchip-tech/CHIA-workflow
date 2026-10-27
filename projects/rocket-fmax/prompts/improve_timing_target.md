@@ -5,6 +5,11 @@ edit session $SESSION of at most $MAX_SESSIONS in this round.
 This session is short (about $EDIT_MIN minutes). Do one thing: **edit the Chisel for the target
 below**, check the edit by reading it, and finish. Do not explore the rest of the core.
 
+**Budget: read for at most about 15 tool calls, then edit.** The session is cut off at the time limit,
+and a session that ends with no edit ends the round. An imperfect edit that compiles is fine: the loop
+measures it and, if it is not better, gives you the A/B report in the next session to improve it. Do
+not use tool calls as a notepad (no empty heredocs or scratch scripts); think in your reply instead.
+
 ## Target (chosen by the loop)
 
 $TARGET
