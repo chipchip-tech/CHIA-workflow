@@ -33,8 +33,9 @@ Fmax ≈ 1000 / (21,2 − slack) MHz. Đây là con số mức synthesis, dùng 
 
 ## File kết quả
 
-Kết quả nằm trên máy người dùng, trong `~/rocket-fmax-out/<run>/`. Người dùng được đề nghị upload một bản
-vào `projects/rocket-fmax/results/` (nhánh `project/rocket-fmax`). Nếu thư mục đó đã có, đối chiếu sha256:
+Bản sao các kết quả cần giữ nằm trong **`results/`** (người dùng upload qua GitHub web, commit `4782cfb`). Bản gốc
+ở máy người dùng, `~/rocket-fmax-out/<run>/`. `results/SHA256SUMS` liệt kê sha256 của mọi file; đã kiểm ngày
+27/10/2026 và khớp toàn bộ (`cd results && sha256sum -c SHA256SUMS`):
 
 | File | sha256 |
 |---|---|
@@ -45,12 +46,32 @@ vào `projects/rocket-fmax/results/` (nhánh `project/rocket-fmax`). Nếu thư 
 | `m4/equiv_report.md` | `5e76c19e7b1fb644431bb36d6605bce8eb79d5048f2498e25cd517406c6aa836` |
 | `m5/results.csv` | `16e153d18fb430d7a5539a0b7bd711f3a9e84b88205f9f58c487659ee644c8d0` |
 | `m5/agent_response.md` | `b06e90a73111e9dc316219e42c97604c033de890f7997e13bf81a1992d8f5ac5` |
+| `m5/iter1.patch` | `9fe6fd7476692b92f040e6190c2bb6295c994617bb81c4e0ab4bea3d548133e1` |
+| `m5/iter2.patch` | `d1f8331c9ebae516c6ffb88701b7fbcd18eaa18526c7c27b724bf380bdd541cf` |
+| `m5/iter3.patch` | `8e1789a206e67d12071c4090ab1c79c2a802ab14ecb5fe9cab41a0e8561dbb28` (trùng `m4/best.patch`) |
 | `soc-fmax/soc_fmax.md` | `2321e027d0e2650c2bd67d9a3da3e973faf9a2f301d36e6296420177d763e7f0` |
 | `soc-fmax/args.json` | `57712bb6c7dbe9428035f002dc94982e8c5630a7d1988dcee25d5e4b4e3551a3` |
 | `audit2/chipyard-config.patch` | `fb6a8b9e1ec793e8594eeec8463d3ddb305a32370d2ae84b07cb041f0086a4d8` |
 | `audit2/audit.md` | `9ef7e29788ac25ab857ced5ffa2fabf13cedf14e8a673d41711250af39c220d3` |
 
-Các patch từng vòng của m5 (`~/rocket-fmax-out/m5/patches/iter*.patch`) chỉ có trên máy người dùng.
+**Lưu ý về `results/m5/`: đây không phải lần m5 ghi trong `README.md`.** Có hai lần chạy cùng `--run-name m5`,
+và lần sau đã ghi đè thư mục `~/rocket-fmax-out/m5` của lần đầu.
+
+- **Lần 1:** 5 vòng, kết quả người dùng dán lúc 03:04 UTC ngày 27/10/2026. Các số này được ghi trong
+  `README.md` và ở bảng m5 dưới đây. Không còn file nào của lần này: `results.csv` và các patch từng vòng đều
+  đã mất.
+- **Lần 2:** chỉ có 3 vòng; chưa rõ vì sao người dùng chạy lại. Đây chính là `results/m5/`:
+
+  | Vòng | Slack | Đường găng |
+  |---|---|---|
+  | 1 | +8,161 (76,69 MHz) | `core.div` |
+  | 2 | +8,547 (79,03 MHz) | `fpuOpt.divSqrt` |
+  | 3 | — | agent hết 45 phút; `iter3.patch` trùng `m4/best.patch`, tức không thay đổi gì |
+
+  `agent_response.md` lấy từ `runs/iter1` của lần này.
+
+Cả hai lần đều không nhận vòng nào, nên bản tốt nhất vẫn là m4 (+8,745 ns). `iter1.patch` và `iter2.patch` là
+patch tích luỹ (m4 best cộng sửa của vòng đó) của lần 2, **không phải** vòng 1 +8,58 ns của lần 1.
 
 ## Lịch sử ngắn
 
@@ -84,7 +105,8 @@ Số liệu chi tiết ở `README.md`; tóm tắt các mốc ở `CLAUDE.md`.
 
 ## Chạy tiếp từ m5
 
-Lệnh cùng dạng m5, xuất phát từ m4 best (người dùng chạy, từ `~/CHIA-workflow/projects/rocket-fmax`):
+Lệnh cùng dạng m5, xuất phát từ m4 best (người dùng chạy, từ `~/CHIA-workflow/projects/rocket-fmax`).
+Bản `best.patch` ở máy người dùng trùng với `results/m4/best.patch` (cùng sha256):
 
 ```bash
 chia job submit --no-wait --submission-id fmax-m6 --working-dir . -- python rocket_fmax.py \
@@ -99,7 +121,7 @@ agent được cache theo `agent_<run-name>_iter<i>_llm`.
 
 **Các hướng còn mở**, chưa làm và cần người dùng chọn:
 
-1. Xuất phát từ `m5/patches/iter1.patch`. Bản này đưa đường găng về `core.div` và chỉ kém 0,16 ns, có thể ghép thêm một sửa FMA.
+1. Xem lại các vòng bị loại nhưng sát bản tốt nhất. Vòng 1 của lần m5 đầu (+8,58 ns, `core.div`) đã mất patch; vòng 2 của lần m5 sau (+8,547 ns, `divSqrt`) còn trong `results/m5/iter2.patch`. Có thể dùng làm điểm xuất phát rồi ghép thêm một sửa FMA.
 2. Đổi model của agent. Hiện dùng `opencode/big-pickle`; ví dụ `timing_opt` (BOOM) của CHIA dùng Claude với effort cao.
 3. Cho agent tự synth thử trước khi nộp (kiểu `timing_experiment` của ví dụ BOOM). Có code `--ab-tool` nhưng chưa chạy được thật.
 4. "Iron-law": nới gate mcycle, chấp nhận mất ít IPC. **Cần người dùng đồng ý trước.**
