@@ -1,0 +1,468 @@
+diff --git a/src/main/scala/rocket/ALU.scala b/src/main/scala/rocket/ALU.scala
+index ca8a11067..de4a041f2 100644
+--- a/src/main/scala/rocket/ALU.scala
++++ b/src/main/scala/rocket/ALU.scala
+@@ -83,11 +83,34 @@ abstract class AbstractALU(implicit p: Parameters) extends CoreModule()(p) {
+ class ALU(implicit p: Parameters) extends AbstractALU()(p) {
+   override def desiredName = "RocketALU"
+ 
++  // Parallel-prefix (Kogge-Stone) adder.  Chisel's `+` elaborates to a
++  // ripple-carry chain; this computes the same sum modulo 2^n with
++  // logarithmic carry depth, keeping the carry chain off the critical path.
++  private def fastAdd(a: UInt, b: UInt, cin: Bool): UInt = {
++    val n = a.getWidth
++    val p0 = (0 until n).map(i => a(i) ^ b(i))
++    val g0 = (0 until n).map(i => a(i) & b(i))
++    var p = p0
++    var g = g0
++    var step = 1
++    while (step < n) {
++      val pNext = (0 until n).map(i => if (i >= step) p(i) & p(i - step) else p(i))
++      val gNext = (0 until n).map(i => if (i >= step) g(i) | (p(i) & g(i - step)) else g(i))
++      p = pNext
++      g = gNext
++      step = step << 1
++    }
++    Cat((n - 1 to 0 by -1).map { i =>
++      val carry = if (i == 0) cin else g(i - 1) | (p(i - 1) & cin)
++      p0(i) ^ carry
++    })
++  }
++
+   // ADD, SUB
+   val in2_inv = Mux(isSub(io.fn), ~io.in2, io.in2)
+   val in1_xor_in2 = io.in1 ^ in2_inv
+   val in1_and_in2 = io.in1 & in2_inv
+-  io.adder_out := io.in1 + in2_inv + isSub(io.fn)
++  io.adder_out := fastAdd(io.in1, in2_inv, isSub(io.fn))
+ 
+   // SLT, SLTU
+   val slt =
+@@ -151,7 +174,14 @@ class ALU(implicit p: Parameters) extends AbstractALU()(p) {
+   ))
+ 
+   // MAX, MIN, MAXU, MINU
+-  val maxmin_out = Mux(io.cmp_out, io.in2, io.in1)
++  // These functions all have cmpEq(io.fn) == false, so io.cmp_out reduces to
++  // cmpInverted(io.fn) ^ slt.  Folding that inversion into the branches of the
++  // sign mux leaves the same result but removes the equality-mux and the xor
++  // from the load-use path (adder -> slt -> cmp -> result mux).
++  val maxmin_sel = Mux(io.in1(xLen-1) === io.in2(xLen-1),
++    io.adder_out(xLen-1) ^ cmpInverted(io.fn),
++    Mux(cmpUnsigned(io.fn), io.in2(xLen-1) ^ cmpInverted(io.fn), io.in1(xLen-1) ^ cmpInverted(io.fn)))
++  val maxmin_out = Mux(maxmin_sel, io.in2, io.in1)
+ 
+   // ROL, ROR
+   val rot_shamt = Mux(io.dw === DW_32, 32.U, xLen.U) - shamt
+@@ -160,19 +190,23 @@ class ALU(implicit p: Parameters) extends AbstractALU()(p) {
+   val rotout_l = Reverse(rotout_r)
+   val rotout = Mux(io.fn(0), rotout_r, rotout_l) | Mux(io.fn(0), shout_l, shout_r)
+ 
+-  val out = MuxLookup(io.fn, shift_logic_cond)(Seq(
++  val out0 = MuxLookup(io.fn, shift_logic_cond)(Seq(
+     FN_ADD -> io.adder_out,
+     FN_SUB -> io.adder_out
+   ) ++ (if (coreParams.useZbb) Seq(
+     FN_UNARY -> unary,
+-    FN_MAX -> maxmin_out,
+-    FN_MIN -> maxmin_out,
+-    FN_MAXU -> maxmin_out,
+-    FN_MINU -> maxmin_out,
+     FN_ROL -> rotout,
+     FN_ROR -> rotout,
+   ) else Nil))
+ 
++  // The MAX/MIN family is the deepest ALU cone: it waits for the full adder
++  // before selecting the result.  Peel it out of the priority chain shared by
++  // the other functions and select it one mux after it becomes valid.  Values
++  // are unchanged; only the shape of the final mux tree moves.
++  val out = if (coreParams.useZbb)
++    Mux(isMaxMin(io.fn), maxmin_out, out0)
++  else out0
++
+ 
+   io.out := out
+   if (xLen > 32) {
+diff --git a/src/main/scala/rocket/AMOALU.scala b/src/main/scala/rocket/AMOALU.scala
+index 47295d18d..d562b36f6 100644
+--- a/src/main/scala/rocket/AMOALU.scala
++++ b/src/main/scala/rocket/AMOALU.scala
+@@ -70,10 +70,28 @@ class AMOALU(operandBits: Int)(implicit p: Parameters) extends Module {
+   val logic_and = io.cmd === M_XA_OR || io.cmd === M_XA_AND
+   val logic_xor = io.cmd === M_XA_XOR || io.cmd === M_XA_OR
+ 
++  private def prefixAdd(x: UInt, y: UInt): UInt = {
++    // Kogge-Stone parallel-prefix carry tree.  Same modulo-2^N sum as "+",
++    // but O(log N) carry depth instead of a ripple chain.
++    val n = x.getWidth
++    val p0 = x ^ y
++    var g = x & y
++    var p = p0
++    var d = 1
++    while (d < n) {
++      val gs = (g << d)(n-1, 0)
++      val ps = (p << d)(n-1, 0)
++      g = g | (p & gs)
++      p = p & ps
++      d = d << 1
++    }
++    p0 ^ ((g << 1)(n-1, 0))
++  }
++
+   val adder_out = {
+     // partition the carry chain to support sub-xLen addition
+     val mask = ~(0.U(operandBits.W) +: widths.init.map(w => !io.mask(w/8-1) << (w-1))).reduce(_|_)
+-    (io.lhs & mask) + (io.rhs & mask)
++    prefixAdd(io.lhs & mask, io.rhs & mask)
+   }
+ 
+   val less = {
+diff --git a/src/main/scala/rocket/Multiplier.scala b/src/main/scala/rocket/Multiplier.scala
+index a4882bd1a..513afc617 100644
+--- a/src/main/scala/rocket/Multiplier.scala
++++ b/src/main/scala/rocket/Multiplier.scala
+@@ -75,6 +75,37 @@ class MulDiv(cfg: MulDivParams, width: Int, nXpr: Int = 32) extends Module {
+       (if (cfg.divUnroll != 0) divDecode else Nil) ++ (if (cfg.mulUnroll != 0) mulDecode else Nil)).map(_.asBool)
+ 
+   require(w == 32 || w == 64)
++
++  // Parallel-prefix (Kogge-Stone) adder/subtractor.  The plain Chisel `-`
++  // operator elaborates to a ripple-borrow chain, which is the critical path
++  // of the integer divider.  Building the same operation as a prefix network
++  // produces bit-identical results but with logarithmic carry depth.
++  private def prefixAdd(a: UInt, b: UInt, cin: Bool): UInt = {
++    val n = a.getWidth
++    val p0 = (0 until n).map(i => a(i) ^ b(i))
++    val g0 = (0 until n).map(i => a(i) & b(i))
++    var p = p0
++    var g = g0
++    var step = 1
++    while (step < n) {
++      val pNext = (0 until n).map(i => if (i >= step) p(i) & p(i - step) else p(i))
++      val gNext = (0 until n).map(i => if (i >= step) g(i) | (p(i) & g(i - step)) else g(i))
++      p = pNext
++      g = gNext
++      step = step << 1
++    }
++    Cat((n - 1 to 0 by -1).map { i =>
++      val carry = if (i == 0) cin else g(i - 1) | (p(i - 1) & cin)
++      p0(i) ^ carry
++    })
++  }
++
++  private def fastSub(a: Bits, b: Bits): UInt = {
++    val n = a.getWidth
++    val au = a.asUInt
++    val bu = if (b.getWidth == n) b.asUInt else Cat(0.U((n - b.getWidth).W), b.asUInt)
++    prefixAdd(au, ~bu, true.B)
++  }
+   def halfWidth(req: MultiplierReq) = (w > 32).B && req.dw === DW_32
+ 
+   def sext(x: Bits, halfW: Bool, signed: Bool) = {
+@@ -85,7 +116,7 @@ class MulDiv(cfg: MulDivParams, width: Int, nXpr: Int = 32) extends Module {
+   val (lhs_in, lhs_sign) = sext(io.req.bits.in1, halfWidth(io.req.bits), lhsSigned)
+   val (rhs_in, rhs_sign) = sext(io.req.bits.in2, halfWidth(io.req.bits), rhsSigned)
+   
+-  val subtractor = remainder(2*w,w) - divisor
++  val subtractor = fastSub(remainder(2*w,w), divisor)
+   val result = Mux(resHi, remainder(2*w, w+1), remainder(w-1, 0))
+   val negated_remainder = -result
+ 
+@@ -129,7 +160,7 @@ class MulDiv(cfg: MulDivParams, width: Int, nXpr: Int = 32) extends Module {
+   if (cfg.divUnroll != 0) when (state === s_div) {
+     val unrolls = ((0 until cfg.divUnroll) scanLeft remainder) { case (rem, i) =>
+       // the special case for iteration 0 is to save HW, not for correctness
+-      val difference = if (i == 0) subtractor else rem(2*w,w) - divisor(w-1,0)
++      val difference = if (i == 0) subtractor else fastSub(rem(2*w,w), divisor(w-1,0))
+       val less = difference(w)
+       Cat(Mux(less, rem(2*w-1,w), difference(w-1,0)), rem(w-1,0), !less)
+     }.tail
+diff --git a/src/main/scala/tile/FPU.scala b/src/main/scala/tile/FPU.scala
+index 5fdb35c14..8ad024994 100644
+--- a/src/main/scala/tile/FPU.scala
++++ b/src/main/scala/tile/FPU.scala
+@@ -295,7 +295,68 @@ case class FType(exp: Int, sig: Int) {
+ 
+   def unpackIEEE(x: UInt) = x.asTypeOf(ieeeBundle)
+ 
+-  def recode(x: UInt) = hardfloat.recFNFromFN(exp, sig, x)
++  // Balanced leading-zero counter.  The hardfloat implementation uses a
++  // linear PriorityEncoder; this produces the same count (including its
++  // all-zero default of width-1) with a logarithmic-depth OR/mux tree.
++  private def countLeadingZerosFast(x: UInt): UInt = {
++    val n = x.getWidth
++    val w = math.max(1, log2Ceil(n))
++    def rec(lo: Int, hi: Int): (Bool, UInt) = {
++      val len = hi - lo + 1
++      if (len == 1) {
++        (x(lo), 0.U(w.W))
++      } else {
++        // Split off a power-of-two high part, so the offset can be ORed
++        // into the low count instead of going through an adder.  For a
++        // power-of-two length the two halves are equal.
++        val highLen =
++          if ((len & (len - 1)) == 0) len / 2
++          else {
++            var p = 1
++            while (p * 2 < len) { p = p * 2 }
++            p
++          }
++        val lowLen = len - highLen
++        val mid = lo + lowLen
++        val (hiNZ, hiCount) = rec(mid, hi)
++        val (loNZ, loCount) = rec(lo, mid - 1)
++        (hiNZ || loNZ, Mux(hiNZ, hiCount, highLen.U(w.W) | loCount))
++      }
++    }
++    rec(0, n - 1)._2
++  }
++
++  // Same recoding as hardfloat.recFNFromFN, but with the balanced
++  // leading-zero counter above.  Used for the widest type, which is the
++  // one on the IntToFP critical path.
++  private def recodeFast(x: UInt): UInt = {
++    val expWidth = exp
++    val sigWidth = sig
++    val sign = x(expWidth + sigWidth - 1)
++    val expIn = x(expWidth + sigWidth - 2, sigWidth - 1)
++    val fractIn = x(sigWidth - 2, 0)
++    val isZeroExpIn = expIn === 0.U
++    val isZeroFractIn = fractIn === 0.U
++    val normDist = countLeadingZerosFast(fractIn)
++    val subnormFract = (fractIn << normDist)(sigWidth - 3, 0) << 1
++    val adjustedExp =
++      Mux(isZeroExpIn,
++        normDist ^ ((BigInt(1) << (expWidth + 1)) - 1).U,
++        expIn) +
++      ((BigInt(1) << (expWidth - 1)).U | Mux(isZeroExpIn, 2.U, 1.U))
++    val isZero = isZeroExpIn && isZeroFractIn
++    val isSpecial = adjustedExp(expWidth, expWidth - 1) === 3.U
++    val isNaN = isSpecial && !isZeroFractIn
++    val sigOut = 0.U(1.W) ## !isZero ## Mux(isZeroExpIn, subnormFract, fractIn)
++    Cat(sign,
++      Mux(isZero, 0.U(3.W), adjustedExp(expWidth, expWidth - 2)) | Mux(isNaN, 1.U, 0.U),
++      adjustedExp(expWidth - 3, 0),
++      sigOut(sigWidth - 2, 0))
++  }
++
++  def recode(x: UInt) =
++    if (exp == 11 && sig == 53) recodeFast(x)
++    else hardfloat.recFNFromFN(exp, sig, x)
+   def ieee(x: UInt) = hardfloat.fNFromRecFN(exp, sig, x)
+ }
+ 
+@@ -331,7 +392,13 @@ trait HasFPUParameters {
+ 
+   private def isBox(x: UInt, t: FType): Bool = x(t.sig + t.exp, t.sig + t.exp - 4).andR
+ 
+-  private def box(x: UInt, xt: FType, y: UInt, yt: FType): UInt = {
++  // NaN-ness of the raw input is the same as NaN-ness of the recoded value,
++  // but it is available much earlier (it does not wait for the leading-zero
++  // count and exponent adjustment in recode).
++  private def rawIsNaN(x: UInt, t: FType): Bool =
++    x(t.sig + t.exp - 2, t.sig - 1).andR && x(t.sig - 2, 0).orR
++
++  private def box(x: UInt, xt: FType, y: UInt, yt: FType, isNaNx: Bool): UInt = {
+     require(xt.ieeeWidth == 2 * yt.ieeeWidth)
+     val swizzledNaN = Cat(
+       x(xt.sig + xt.exp, xt.sig + xt.exp - 3),
+@@ -341,9 +408,12 @@ trait HasFPUParameters {
+       x(xt.sig - 2, yt.recodedWidth - 1),
+       y(yt.recodedWidth - 1),
+       y(yt.recodedWidth - 3, 0))
+-    Mux(xt.isNaN(x), swizzledNaN, x)
++    Mux(isNaNx, swizzledNaN, x)
+   }
+ 
++  private def box(x: UInt, xt: FType, y: UInt, yt: FType): UInt =
++    box(x, xt, y, yt, xt.isNaN(x))
++
+   // implement NaN unboxing for FU inputs
+   def unbox(x: UInt, tag: UInt, exactType: Option[FType]): UInt = {
+     val outType = exactType.getOrElse(maxType)
+@@ -422,7 +492,7 @@ trait HasFPUParameters {
+         t.recode(x)
+       } else {
+         val prevT = prevType(t)
+-        box(t.recode(x), t, helper(x, prevT), prevT)
++        box(t.recode(x), t, helper(x, prevT), prevT, rawIsNaN(x, t))
+       }
+     }
+ 
+@@ -635,6 +705,81 @@ class MulAddRecFNPipe(latency: Int, expWidth: Int, sigWidth: Int) extends Module
+     override def desiredName = s"MulAddRecFNPipe_l${latency}_e${expWidth}_s${sigWidth}"
+     require(latency<=2)
+ 
++    // Parallel-prefix (Kogge-Stone) adder.  The same sum as `a + b`, but with
++    // logarithmic rather than linear carry depth.
++    private def fastAdd(a: UInt, b: UInt): UInt = {
++      val n = a.getWidth max b.getWidth
++      val aa = a.pad(n)
++      val bb = b.pad(n)
++      val p0 = (0 until n).map(i => aa(i) ^ bb(i))
++      val g0 = (0 until n).map(i => aa(i) & bb(i))
++      var p = p0
++      var g = g0
++      var step = 1
++      while (step < n) {
++        val pNext = (0 until n).map(i => if (i >= step) p(i) & p(i - step) else p(i))
++        val gNext = (0 until n).map(i => if (i >= step) g(i) | (p(i) & g(i - step)) else g(i))
++        p = pNext
++        g = gNext
++        step = step << 1
++      }
++      Cat((n - 1 to 0 by -1).map { i =>
++        val carry = if (i == 0) false.B else g(i - 1)
++        p0(i) ^ carry
++      })
++    }
++
++    // Fused unsigned multiply-add: a*b + c, with the same width and value as
++    // `(a * b) +& c`.  The partial products and c are reduced together with a
++    // balanced 3:2 carry-save tree, and only the final two rows go through a
++    // carry-propagate adder.  This removes the extra full-width carry chain
++    // that a separate multiplier followed by an adder would have.
++    //
++    // `reduceMulAdd` returns the two carry-save rows; the carry-propagate step
++    // is kept separate so that its top slice can be placed in the next stage.
++    private def reduceMulAdd(a: UInt, b: UInt, c: UInt): (UInt, UInt) = {
++      val aw = a.getWidth
++      val bw = b.getWidth
++      val w = aw + bw + 1
++      def carrySave(x: UInt, y: UInt, z: UInt): (UInt, UInt) = {
++        val sum = x ^ y ^ z
++        val maj = (x & y) | (x & z) | (y & z)
++        val carry = Cat((w - 1 to 0 by -1).map(k => if (k == 0) false.B else maj(k - 1)))
++        (sum, carry)
++      }
++      val rows = scala.collection.mutable.ArrayBuffer[UInt]()
++      for (i <- 0 until bw) {
++        rows += Cat((w - 1 to 0 by -1).map { k =>
++          if (k >= i && k < i + aw) b(i) & a(k - i) else false.B
++        })
++      }
++      rows += c.pad(w)
++      var cur = rows.toSeq
++      while (cur.length > 2) {
++        val next = scala.collection.mutable.ArrayBuffer[UInt]()
++        var k = 0
++        while (k + 2 < cur.length) {
++          val (sum, carry) = carrySave(cur(k), cur(k + 1), cur(k + 2))
++          next += sum
++          next += carry
++          k += 3
++        }
++        while (k < cur.length) {
++          next += cur(k)
++          k += 1
++        }
++        cur = next.toSeq
++      }
++      val row0 = cur(0)
++      val row1 = if (cur.length > 1) cur(1) else 0.U(w.W)
++      (row0, row1)
++    }
++
++    private def fusedMulAdd(a: UInt, b: UInt, c: UInt): UInt = {
++      val (row0, row1) = reduceMulAdd(a, b, c)
++      fastAdd(row0, row1)
++    }
++
+     val io = IO(new Bundle {
+         val validin = Input(Bool())
+         val op = Input(Bits(2.W))
+@@ -659,18 +804,88 @@ class MulAddRecFNPipe(latency: Int, expWidth: Int, sigWidth: Int) extends Module
+     mulAddRecFNToRaw_preMul.io.b  := io.b
+     mulAddRecFNToRaw_preMul.io.c  := io.c
+ 
+-    val mulAddResult =
+-        (mulAddRecFNToRaw_preMul.io.mulAddA *
+-             mulAddRecFNToRaw_preMul.io.mulAddB) +&
+-            mulAddRecFNToRaw_preMul.io.mulAddC
+-
+     val valid_stage0 = Wire(Bool())
+     val roundingMode_stage0 = Wire(UInt(3.W))
+     val detectTininess_stage0 = Wire(UInt(1.W))
+ 
+     val postmul_regs = if(latency>0) 1 else 0
++
++    // Final carry-propagate step of the fused multiply-add.  The stage after
++    // the mulAddResult register has spare slack while this one does not, so the
++    // last level of the carry prefix network is evaluated after the register
++    // instead of before it.  The latency is unchanged, and the value handed to
++    // postMul is bit-identical: the low sum bits and the carry prefix state for
++    // the upper bits are registered at the very same boundary where the plain
++    // sum used to be registered, and the following stage only resolves the
++    // final prefix level and the upper sum bits.
++    val (mulRow0, mulRow1) = reduceMulAdd(mulAddRecFNToRaw_preMul.io.mulAddA,
++                                          mulAddRecFNToRaw_preMul.io.mulAddB,
++                                          mulAddRecFNToRaw_preMul.io.mulAddC)
++    val mulAddW = mulRow0.getWidth
++    val mulAddResult =
++      if (postmul_regs == 0) {
++        fastAdd(mulRow0, mulRow1)
++      } else {
++        // The lower `loCut`-bit group needs the complete prefix before the
++        // register, so its sum is formed here.  The upper group only needs the
++        // prefix state one level short of complete: the last combine level and
++        // the upper sum XORs move into the following stage, which has spare
++        // slack.  Both groups are resolved with exactly the same prefix tree as
++        // fastAdd(mulRow0, mulRow1), so the registered value is bit-identical
++        // and latency/enables are unchanged.
++        var loCut = 1
++        while (loCut * 2 < mulAddW) { loCut = loCut * 2 }
++        var levels = 0
++        var span = 1
++        while (span < loCut) { span = span * 2; levels = levels + 1 }
++        val hiCut = mulAddW - loCut
++        require(hiCut <= loCut)
++        val p0 = (0 until mulAddW).map(i => mulRow0(i) ^ mulRow1(i))
++        val g0 = (0 until mulAddW).map(i => mulRow0(i) & mulRow1(i))
++        def prefixStep(pp: Seq[Bool], gg: Seq[Bool], st: Int): (Seq[Bool], Seq[Bool]) = (
++          (0 until mulAddW).map(i => if (i >= st) pp(i) & pp(i - st) else pp(i)),
++          (0 until mulAddW).map(i => if (i >= st) gg(i) | (pp(i) & gg(i - st)) else gg(i))
++        )
++        var p: Seq[Bool] = p0
++        var g: Seq[Bool] = g0
++        var step = 1
++        var lv = 0
++        // One level short of the final prefix: this is what the upper group
++        // registers.
++        while (lv < levels - 1) {
++          val np = prefixStep(p, g, step)
++          p = np._1
++          g = np._2
++          step = step * 2
++          lv = lv + 1
++        }
++        val pShort = p
++        val gShort = g
++        // Complete the prefix; only the lower-group carries are still needed.
++        val (_, gFull) = prefixStep(p, g, step)
++        val loSum = RegEnable(Cat((loCut - 1 to 0 by -1).map(i =>
++                      p0(i) ^ (if (i == 0) false.B else gFull(i - 1)))), io.validin)
++        // Upper group: four slices of the short prefix state and the completed
++        // lower-group carry bits.  The next stage finishes with
++        //   carry(j) = gA | pA & gB | pA & pB & gLow
++        //             = G([0, loCut-1+j])
++        // written as an OR of AND terms so it stays shallow.
++        val gA    = (0 until hiCut).map(j => RegEnable(gShort(loCut - 1 + j), io.validin))
++        val pA    = (0 until hiCut).map(j => RegEnable(pShort(loCut - 1 + j), io.validin))
++        val gB    = (0 until hiCut).map(j => RegEnable(gShort(loCut / 2 - 1 + j), io.validin))
++        val pB    = (0 until hiCut).map(j => RegEnable(pShort(loCut / 2 - 1 + j), io.validin))
++        val gC    = (1 until hiCut).map(j => RegEnable(gFull(j - 1), io.validin))
++        val p0HiR = (0 until hiCut).map(j => RegEnable(p0(loCut + j), io.validin))
++        val hiSum = Cat((hiCut - 1 to 0 by -1).map { j =>
++                      val gLow = if (j == 0) false.B else gC(j - 1)
++                      val carry = gA(j) | (pA(j) & gB(j)) | (pA(j) & pB(j) & gLow)
++                      p0HiR(j) ^ carry
++                    })
++        Cat(hiSum, loSum)
++      }
++
+     mulAddRecFNToRaw_postMul.io.fromPreMul   := Pipe(io.validin, mulAddRecFNToRaw_preMul.io.toPostMul, postmul_regs).bits
+-    mulAddRecFNToRaw_postMul.io.mulAddResult := Pipe(io.validin, mulAddResult, postmul_regs).bits
++    mulAddRecFNToRaw_postMul.io.mulAddResult := mulAddResult
+     mulAddRecFNToRaw_postMul.io.roundingMode := Pipe(io.validin, io.roundingMode, postmul_regs).bits
+     roundingMode_stage0                      := Pipe(io.validin, io.roundingMode, postmul_regs).bits
+     detectTininess_stage0                    := Pipe(io.validin, io.detectTininess, postmul_regs).bits

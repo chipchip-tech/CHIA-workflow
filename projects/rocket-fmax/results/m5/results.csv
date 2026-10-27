@@ -1,0 +1,6 @@
+iter,accepted,wns_ns,tns_ns,worst_slack_ns,fmax_mhz,critical_path,isa_pass,bench_cycles_match,reason,area_um2,elapsed_min
+baseline,True,-1.0012,-106.5294,-1.0012,45.04,core.div.divisor[1]_reg -> core.div.remainder[63]_reg,True,True,baseline,1069069,16.5
+start,True,0.0000,0.0000,8.7454,80.29,fpuOpt.dfma.in_in2[53]_reg -> fpuOpt.dfma.fma.mulAddResult_pHiR_15_reg,,,"start: RocketConfig + new testchipip.soc.WithNoScratchpads ++ new chipyard.config.WithNoBusErrorDevices, patch /home/dingus/rocket-fmax-out/m4/patches/best.patch",1082577,
+1,False,0.0000,0.0000,8.1612,76.69,core.div.divisor[2]_reg -> core.div.remainder[129]_reg,True,True,slack không tốt hơn: 8.1612 ns so với 8.7454 ns của start (đường găng core.div.divisor[2]_reg -> core.div.remainder[129]_reg),1085318,27.1
+2,False,0.0000,0.0000,8.5471,79.03,fpuOpt.divSqrt_2.divSqrtRecFNToRaw.divSqrtRawFN.inReady_reg -> fpuOpt.divSqrt_2.divSqrtRecFNToRaw.divSqrtRawFN.sigX_Z[53]_reg,True,True,slack không tốt hơn: 8.5471 ns so với 8.7454 ns của start (đường găng fpuOpt.divSqrt_2.divSqrtRecFNToRaw.divSqrtRawFN.inReady_reg -> fpuOpt.divSqrt_2.divSqrtRecFNToRaw.divSqrtRawFN.sigX_Z[53]_reg),1088310,29.0
+3,False,,,,,,,,LLM không thành công (returncode -1),,45.0
