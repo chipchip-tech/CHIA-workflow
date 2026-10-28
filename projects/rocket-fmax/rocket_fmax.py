@@ -279,9 +279,17 @@ def ensure_start(a, out: Path, snap: dict, base: dict) -> dict:
 def build_errors(art) -> str:
     # sbt is run with -Dsbt.color=always: "[\x1b[31merror\x1b[0m]" would not match "[error]".
     text = re.sub(r"\x1b\[[0-9;]*m", "", (art.stdout or "") + "\n" + (art.stderr or ""))
-    lines = [l for l in text.splitlines()
-             if re.search(r"\[error\]|error:|%Error|Exception|FAILED", l)]
-    return "\n".join(lines[:80]) if lines else "\n".join(text.splitlines()[-60:])
+    # An elaboration exception (lab-t4: IndexOutOfBoundsException) names its Scala line only in
+    # the stack frames: keep those of rocket-chip/chipyard code, at most 12 after each exception.
+    lines, frames = [], 0
+    for l in text.splitlines():
+        if re.search(r"\[error\]|error:|%Error|Exception|FAILED", l):
+            lines.append(l)
+            frames = 12
+        elif frames and re.search(r"\bat (freechips|chipyard|testchipip)\.\S*\(\w+\.scala:\d+\)", l):
+            lines.append(l)
+            frames -= 1
+    return "\n".join(lines[:120]) if lines else "\n".join(text.splitlines()[-60:])
 
 
 def save_build(d: Path, art, name: str = "build.log"):

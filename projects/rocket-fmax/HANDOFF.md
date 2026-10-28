@@ -101,6 +101,9 @@ kiểm bằng mock:
   `FPU.scala`) đến sau mốc 35 nên bị chặn. Đã sửa: lệnh định ghi file Scala (`edit_command`) luôn được chạy;
   sửa mà file không đổi thì được báo và thêm 5 lệnh; phiên sau nhận toàn văn lần thử sửa cuối. Chỉ mới kiểm bằng
   mock.
+- `lab-t4` (28/10/2026): agent sửa được `FPU.scala` (lệnh 36) nhưng elaborate lỗi `IndexOutOfBoundsException: -1`;
+  2 lần agent sửa build trả returncode −1 sau 1–2 phút. `build_errors` giờ giữ stack frame `(X.scala:N)` để agent sửa
+  build biết dòng lỗi. Lý do returncode −1 chưa rõ.
 
 ## Chạy tiếp từ m4
 

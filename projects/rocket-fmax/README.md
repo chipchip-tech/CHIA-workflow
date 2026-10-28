@@ -427,6 +427,15 @@ dùng tool làm nháp. Lần sau chạy với `--edit-timeout 1500`.
 - Đã kiểm trên mock: thử sửa sau mốc 35 vẫn chạy; sửa hỏng thì được thêm 5 lệnh rồi mới dừng; note có toàn văn
   lệnh. Mock của các mục trên vẫn pass.
 
+**Lần chạy thật `fmax-lab-t4` (28/10/2026, 1 vòng): agent đã sửa được file nhưng build lỗi, bị loại sau 28 phút.**
+- Lệnh 36 của phiên 0 (heredoc python) ghi `FPU.scala` và có `EDITED`; các lệnh 37–45 kiểm `git diff`. Bản sửa
+  của agent lần đầu tiên đi đến bước build trong `--loop-ab`.
+- Build lỗi lúc elaborate: `IndexOutOfBoundsException: -1 is out of bounds (min 0, max 48)`. Cả 2 lần gọi agent sửa
+  build đều trả returncode −1 sau khoảng 1–2 phút (chưa rõ lý do, đang chờ transcript).
+- **Lỗi của loop:** `build_errors` chỉ giữ dòng có `Exception`/`[error]`, nên bỏ mất các stack frame `at ...(FPU.scala:N)`.
+  Agent sửa build vì thế không biết lỗi nằm ở dòng nào. Đã sửa: giữ tối đa 12 frame của mã `freechips`/`chipyard`/`testchipip`
+  sau mỗi dòng exception.
+
 ### Agent sửa lỗi build (`--build-fixes`)
 
 Theo `build_with_debug_retry` / `debug_failure` của ví dụ `timing_opt`: khi build của vòng lỗi (ví dụ m4 vòng 3,
