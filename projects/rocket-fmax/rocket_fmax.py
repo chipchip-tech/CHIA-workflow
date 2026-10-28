@@ -156,6 +156,12 @@ def parse_args():
                         "instead of the unmodified rocket-chip")
     p.add_argument("--min-gain-ns", type=float, default=0.0,
                    help="accept only if worst slack improves by more than this")
+    p.add_argument("--tns-min-gain", type=float, default=0.0,
+                   help="also accept a round whose worst slack did not improve if TNS (< 0, i.e. a period "
+                        "below the critical path) improves by more than this fraction of the best one's "
+                        "(0.05 = 5 %%) and worst slack stays within --wns-tol of the best seen; 0 = off")
+    p.add_argument("--wns-tol", type=float, default=0.1,
+                   help="--tns-min-gain: how far (ns) worst slack may fall below the best accepted so far")
     p.add_argument("--equiv", action="store_true",
                    help="after the loop: equivalence check of the best patch vs the baseline")
     p.add_argument("--equiv-only", action="store_true",
@@ -671,14 +677,35 @@ def gate_and_judge(a, d: Path, art, rtl, elfs, base: dict, best: dict, r: dict, 
     if not synth.success:
         r["reason"] = f"synth/STA lỗi: {synth.error}"
         return r
-    old = best["synth"].worst_slack_ns
-    if synth.worst_slack_ns <= old + a.min_gain_ns:
-        r["reason"] = (f"slack không tốt hơn: {synth.worst_slack_ns:.4f} ns so với {old:.4f} ns "
-                       f"của {best['name']} (đường găng {synth.crit_start} -> {synth.crit_end})")
+    old, new = best["synth"].worst_slack_ns, synth.worst_slack_ns
+    if new > old + a.min_gain_ns:
+        r["accepted"] = True
+        r["reason"] = f"slack {old:.4f} -> {new:.4f} ns"
         return r
-    r["accepted"] = True
-    r["reason"] = f"slack {old:.4f} -> {synth.worst_slack_ns:.4f} ns"
+    tns = tns_gain(a, best, synth)
+    if tns is not None:
+        gain, floor, text = tns
+        if gain > a.tns_min_gain and new >= floor:
+            r["accepted"] = True
+            r["reason"] = f"{text}; slack {old:.4f} -> {new:.4f} ns (sàn {floor:.4f})"
+            return r
+    r["reason"] = (f"slack không tốt hơn: {new:.4f} ns so với {old:.4f} ns "
+                   f"của {best['name']} (đường găng {synth.crit_start} -> {synth.crit_end})")
+    if tns is not None:
+        r["reason"] += f"; {tns[2]} (cần > {a.tns_min_gain:.0%}, slack >= {tns[1]:.4f})"
     return r
+
+
+def tns_gain(a, best: dict, synth):
+    """--tns-min-gain: (relative TNS gain vs best, worst-slack floor, text), or None when off
+    or TNS is not negative. The floor is the best worst slack accepted so far minus --wns-tol,
+    so rounds accepted on TNS cannot let worst slack drift down step by step."""
+    old, new = best["synth"].tns_ns, synth.tns_ns
+    if a.tns_min_gain <= 0 or old is None or new is None or old >= 0:
+        return None
+    gain = (new - old) / -old
+    floor = best.get("peak_wns", best["synth"].worst_slack_ns) - a.wns_tol
+    return gain, floor, f"TNS {old:.2f} -> {new:.2f} ns ({gain:+.1%})"
 
 
 def new_round(i: int) -> dict:
@@ -1060,7 +1087,9 @@ def run(a, out: Path):
         print(f"round {i}: {'ACCEPT' if r['accepted'] else 'REJECT'} ({r['minutes']:.1f} min) - "
               f"{r['reason'][:400]}", flush=True)
         if r["accepted"]:
-            best = {"name": f"iter{i}", "patch": r["patch"], "synth": r["synth"], "rtl": r["rtl"]}
+            peak = max(best.get("peak_wns", best["synth"].worst_slack_ns), r["synth"].worst_slack_ns)
+            best = {"name": f"iter{i}", "patch": r["patch"], "synth": r["synth"], "rtl": r["rtl"],
+                    "peak_wns": peak}
             print_synth(f"new best iter{i}", r["synth"])
         history.append(history_entry(i, r, resp_summary))
 

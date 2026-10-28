@@ -30,6 +30,10 @@ synthesis đang chạy bị huỷ.
 - OpenSTA: `create_clock` trên cổng `clock`, I/O có delay 0, `report_worst_slack`, `report_wns`,
   `report_tns`, `report_checks -group_count 10`.
 - Fmax ≈ 1000 / (period − worst slack) MHz. Chu kỳ clock cố định cho mọi vòng.
+- **Chu kỳ phải đặt gần mục tiêu.** `abc -D` là mục tiêu delay của ABC: khi mạch đã nhanh hơn nhiều so với
+  chu kỳ, ABC không ép đường găng ngắn thêm và `dnsize` thu nhỏ cell để giảm area. Đo lại ở 10 ns (`p10`) cho Fmax
+  cao hơn rõ so với ở 21,2 ns (bản `lab-c2`: 80,3 → 88,4 MHz). Từ `lab-c2` trở đi, chạy với `--period-ns 10`
+  (mục tiêu 100 MHz) và chỉ so các số đo cùng chu kỳ.
 - SRAM (`rockettile_{d,i}cache_{data,tag}_array*_ext`) là blackbox, chân của chúng **không
   được ràng buộc**. Vì vậy các đường SRAM→reg và reg→SRAM không được tính. `EICG_wrapper`
   (nếu có trong cây module) được thay bằng một dây nối thẳng.
@@ -89,7 +93,8 @@ chia job logs -f fmax-m3          # dừng: chia job stop fmax-m3 --kill-tracked
 ```
 
 Các tuỳ chọn khác: `--make-jobs 16`, `--build-timeout 3600`, `--llm-timeout 1800`,
-`--min-gain-ns 0`, `--repeat-seed 7`, `--flush-cache`, `--out-dir ~/rocket-fmax-out`,
+`--min-gain-ns 0`, `--tns-min-gain 0` (> 0: nhận cả vòng mà worst slack không tăng nhưng TNS âm giảm hơn tỉ lệ
+này, miễn worst slack không thấp hơn mức tốt nhất đã nhận quá `--wns-tol 0.1` ns), `--repeat-seed 7`, `--flush-cache`, `--out-dir ~/rocket-fmax-out`,
 `--cache-dir ~/chia_cache`.
 
 ## Kiểm tương đương bản tốt nhất
@@ -446,6 +451,26 @@ dùng tool làm nháp. Lần sau chạy với `--edit-timeout 1500`.
   loại với lý do "không thay đổi gì so với start" dù còn 1 phiên. Đã sửa: phiên hoàn tác mà không sửa mới thì loop
   chuyển sang phiên sau, kèm note "Session k undid..." và báo cáo A/B của bản đã hoàn tác. Prompt phiên refine dặn
   không kết thúc bằng hoàn tác. Hai sửa này mới kiểm bằng mock (case 9, 9b, 10, 10b).
+
+**Lần chạy thật `fmax-lab-c2` (28/10/2026, Claude, 3 vòng, `--ab-refines 3`, chu kỳ 21,2 ns): nhận vòng 2.**
+- A/B theo endpoint trong mục tiêu và phiên chạy tiếp sau hoàn tác hoạt động đúng trên máy thật. Vòng 1: 4 phiên
+  đều thua A/B (`dfma` −0,65/−0,52/−0,04/−0,99 ns). Vòng 2: phiên 3 thắng (`dfma` +0,600 ns), gate pass, tile
+  8,7454 → 8,7515 ns (80,33 MHz, area −1,7 %). Tile gần như không nhanh hơn vì đường găng chuyển sang `fpuOpt.ifpu`
+  (`IntToFP`), vốn đã ở mức ~8,75 ns. Vòng 3 (mục tiêu `ifpu`): A/B riêng `IntToFP` +0,20 ns nhưng cả tile 8,41 ns → loại.
+  Equiv iter2 so với điểm xuất phát: PASS (`FPU` lockstep 10⁷ cycle, formal timeout).
+- Nhiều đường gần găng ngang nhau (`dfma`, `ifpu`, `divSqrt`): sửa một đường thì đường kế tiếp thành găng, nên
+  worst slack không phản ánh tiến độ → thêm `--tns-min-gain` (đo ở chu kỳ dưới đường găng để TNS âm). Mới kiểm bằng mock.
+
+**Đo lại ở 10 ns (`measure_soc.py --period-ns 10`, run `p10`, 28/10/2026):**
+
+| Điểm | Worst slack (ns) | Đường găng (ns) | Fmax (MHz) | Đường găng |
+|---|---|---|---|---|
+| base | −11,216 | 21,216 | 47,13 | `core.div` |
+| cfg | −11,096 | 21,096 | 47,40 | `core.div` |
+| best (`lab-c2` iter2) | −1,602 | 11,602 | 86,19 | `fpuOpt.ifpu` |
+| best_cfg | −1,307 | 11,307 | 88,44 | `fpuOpt.ifpu.in_pipe_b_in1[6]` → `io_out_pipe_b_data[28]` |
+
+Gate `best_cfg` pass. Ở 21,2 ns cùng bản này chỉ đo được 80,3 MHz (xem mục Đo timing). Còn thiếu ~1,3 ns để đạt 100 MHz.
 
 **Lần chạy thật `fmax-lab-t4` (28/10/2026, 1 vòng): agent đã sửa được file nhưng build lỗi, bị loại sau 28 phút.**
 - Lệnh 36 của phiên 0 (heredoc python) ghi `FPU.scala` và có `EDITED`; các lệnh 37–45 kiểm `git diff`. Bản sửa

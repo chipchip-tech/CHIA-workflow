@@ -113,6 +113,10 @@ kiểm bằng mock:
   dùng chung `sfma`/`dfma`) mà worst path của `FPU` riêng là `divSqrt` (+8,444 < +8,745 của `dfma` trong tile), nên A/B
   theo module không thể thắng. Sửa: A/B quyết định theo endpoint trong instance mục tiêu. Phiên 2 hoàn tác bản sửa
   rồi dừng → giờ loop chạy tiếp phiên sau. Mới kiểm bằng mock.
+- `lab-c2` (28/10/2026, Claude, 3 vòng, 21,2 ns): hai sửa trên chạy đúng thật; nhận vòng 2 (`dfma` +0,6 ns trong A/B,
+  tile 8,7454 → 8,7515 ns vì đường găng chuyển sang `fpuOpt.ifpu`); equiv PASS. Đo lại ở 10 ns (`p10`, `measure_soc.py`):
+  `abc -D` 21,2 ns làm ABC không ép delay, nên cùng bản này ở 10 ns cho 88,44 MHz (11,307 ns) thay vì 80,3; base 47,13 MHz.
+  **Mục tiêu người dùng: > 100 MHz**, chạy tiếp với `--period-ns 10` và `--tns-min-gain` (nhận vòng giảm TNS, mới kiểm bằng mock).
 
 ## Chạy tiếp từ m4
 
