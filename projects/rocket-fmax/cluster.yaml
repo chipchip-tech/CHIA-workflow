@@ -29,6 +29,7 @@ available_node_types:
             run_options:
                 - --shm-size=10.24gb
             pull_timeout: 7200   # chia-chisel-build is large
+            pull_before_run: false   # keep the local image: a new :latest would change the build under the cache
 
     hello_verilator:
         resources: {"verilator_run": 4}
@@ -37,6 +38,7 @@ available_node_types:
         docker:
             image: "ghcr.io/ucb-bar/chia-verilator-run:latest"
             container_name: "chia-verilator-${USER}"
+            pull_before_run: false
             run_options:
                 - --ulimit nofile=65536:65536
                 - --shm-size=10.24gb
@@ -49,6 +51,7 @@ available_node_types:
         docker:
             image: "ghcr.io/ucb-bar/chia-opencode:latest"
             container_name: "chia-opencode-${USER}"
+            pull_before_run: false
 
     rocket_eda:
         resources: {"eda": 1}
