@@ -5,10 +5,14 @@ edit session $SESSION of at most $MAX_SESSIONS in this round.
 This session is short (about $EDIT_MIN minutes). Do one thing: **edit the Chisel for the target
 below**, check the edit by reading it, and finish. Do not explore the rest of the core.
 
-**Budget: read for at most about 15 tool calls, then edit.** The session is cut off at the time limit,
-and a session that ends with no edit ends the round. An imperfect edit that compiles is fine: the loop
+**Budget: read for at most about 15 tool calls, then edit.** The Chisel at both ends of the path is
+quoted below, so little reading is needed. The loop counts your commands while you have not edited:
+after $BUDGET_SOFT each answer carries a budget note, after $BUDGET_READONLY a command that changes no
+file gets no output, and after $BUDGET_HARD nothing runs and the session ends. A session with no edit
+wastes one of the round's $MAX_SESSIONS sessions. An imperfect edit that compiles is fine: the loop
 measures it and, if it is not better, gives you the A/B report in the next session to improve it. Do
-not use tool calls as a notepad (no empty heredocs or scratch scripts); think in your reply instead.
+not use tool calls as a notepad (a command with only `pass`, comments or an empty heredoc is not run);
+think in your reply instead.
 
 ## Target (chosen by the loop)
 
@@ -88,7 +92,7 @@ $SESSION_NOTE
 
 ## What to do
 
-1. Read the worst path report for the target and find its logic in the Verilog, then in Chisel.
+1. Start from the quoted Chisel and the worst path report; read more only where they are not enough.
 2. Make one focused, behaviour-preserving restructuring that shortens that path.
 3. Re-read your edit with `sed -n` (syntax, imports, widths) and check the round's diff.
 4. Finish with a short summary: what you changed (file, lines), which path it should shorten,

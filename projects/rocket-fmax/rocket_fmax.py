@@ -58,6 +58,7 @@ PROMPT = HERE / "prompts" / "improve_timing.md"
 PROMPT_AB = HERE / "prompts" / "improve_timing_ab.md"
 PROMPT_FIX = HERE / "prompts" / "fix_build.md"
 PROMPT_TARGET = HERE / "prompts" / "improve_timing_target.md"
+BUDGET_DIR = "/home/ray/rocket_fmax_budget"   # on chipyard: BudgetBashTool logs (--loop-ab)
 CSV_FIELDS = ["iter", "accepted", "wns_ns", "tns_ns", "worst_slack_ns", "fmax_mhz", "critical_path",
               "isa_pass", "bench_cycles_match", "reason", "area_um2", "elapsed_min",
               "target", "ab_delta_ns", "ab_sessions"]
@@ -123,6 +124,12 @@ def parse_args():
                         "the agent (--ab-refines), a winning one goes on to gate + full synth")
     p.add_argument("--edit-timeout", type=int, default=900,
                    help="--loop-ab: time limit of one edit session (s); --llm-timeout is not used")
+    p.add_argument("--edit-budget", type=int, nargs=3, default=[15, 25, 35], metavar=("SOFT", "READONLY", "HARD"),
+                   help="--loop-ab: tool calls of an edit session with no edit yet: after SOFT every answer "
+                        "carries a budget note, after READONLY a command that changes no file gets no output, "
+                        "after HARD nothing runs and the agent is told to answer with its plan")
+    p.add_argument("--edit-steps", type=int, default=45,
+                   help="--loop-ab: opencode `steps` of an edit session (then a text-only answer; 0 = no limit)")
     p.add_argument("--ab-refines", type=int, default=2,
                    help="--loop-ab: extra edit sessions after a losing A/B (0 = one session per round)")
     p.add_argument("--ab-min-gain", type=float, default=0.1,
@@ -428,16 +435,23 @@ def stage_files(best: dict, history: list[str]) -> dict:
     return files
 
 
-def call_agent(a, llm, prompt: str, tag: str, d: Path, prefix: str, best: dict, ab: bool) -> str:
+def call_agent(a, llm, prompt: str, tag: str, d: Path, prefix: str, best: dict, ab: bool,
+               budget_log: str | None = None) -> str:
     """One agent call with chipyard_bash (and synth_ab with `ab`); writes
-    <prefix>_response.md / <prefix>_transcript.txt into d. Returns "" or why it failed."""
+    <prefix>_response.md / <prefix>_transcript.txt into d. Returns "" or why it failed.
+    With `budget_log`, chipyard_bash is a BudgetBashTool (--edit-budget) logging there;
+    the log is copied to <prefix>_budget.jsonl."""
     reason = ""
     get(N.read_text_opencode.chia_remote(N.LLM_PARTIAL_FILE, True))   # stale from an earlier call
     # With synth_ab the two tools share the single "chipyard" slot, so nothing
     # else runs on chipyard (build, git) until both are stopped.
     slot = 0.5 if ab else 1
-    tools = [BashTool("chipyard_bash", N.CHIPYARD, timeout_seconds=120,
-                      task_options={"resources": {"chipyard": slot}})]
+    if budget_log:
+        tools = [N.BudgetBashTool("chipyard_bash", N.CHIPYARD, *a.edit_budget, budget_log, timeout_seconds=120,
+                                  task_options={"resources": {"chipyard": slot}})]
+    else:
+        tools = [BashTool("chipyard_bash", N.CHIPYARD, timeout_seconds=120,
+                          task_options={"resources": {"chipyard": slot}})]
     resp = None
     try:
         if ab:
@@ -452,6 +466,8 @@ def call_agent(a, llm, prompt: str, tag: str, d: Path, prefix: str, best: dict, 
     finally:
         for t in tools:
             t.stop()              # free the chipyard slot before the build
+    if budget_log:
+        write(d / f"{prefix}_budget.jsonl", get(N.read_text.chia_remote(budget_log)) or "")
     if ab:
         write(d / f"{prefix}_ab_cleanup.txt", get(N.ab_cleanup.chia_remote()))
         write(d / f"{prefix}_ab_experiments.jsonl", get(N.read_text.chia_remote(AB.LOG_FILE)) or "")
@@ -645,6 +661,16 @@ def target_text(target: dict, classes: dict) -> str:
                  "you may move logic in the module that instantiates it.")
     if target.get("report"):
         lines += ["", "Worst path report (OpenSTA, from timing_paths.rpt):", "", "```", target["report"], "```"]
+    ends = target.get("ends") or []
+    if ends:
+        lines += ["", "Registers at the two ends and the Scala lines the Verilog `@[...]` comments point to:"]
+        for e in ends:
+            locs = ", ".join(f"`{f}:{n}`" for f, n in e["locs"]) or "no `@[...]` location found"
+            lines.append(f"- {e['end']}: `{e['reg']}` in `{e['inst'] or N.TOP}` (`{e['module']}`): {locs}")
+    if target.get("sources"):
+        lines += ["", "The Chisel around them, from the tree as it is now (`>` = a line named above, `+` = a line "
+                  f"added by the current best's patch; the numbers are the file's line numbers). Start from this "
+                  "code; read more only where it is not enough:", "", target["sources"]]
     return "\n".join(lines)
 
 
@@ -668,8 +694,38 @@ def render_target_prompt(a, i: int, k: int, best: dict, history: list[str], targ
         CONFIG_DESC=loop_config(a), PERIOD_NS=a.period_ns, BEST_NAME=best["name"],
         BEST_SLACK=fmt(s.worst_slack_ns, 4), BEST_FMAX=fmt(s.fmax_mhz, 2),
         CRIT=f"{s.crit_start} -> {s.crit_end}", ENDPOINTS=s.families, STAGE_DIR=N.STAGE_DIR,
-        TARGET=target_text(target, classes), SESSION_NOTE=note,
+        TARGET=target_text(target, classes), SESSION_NOTE=note, BUDGET_SOFT=a.edit_budget[0],
+        BUDGET_READONLY=a.edit_budget[1], BUDGET_HARD=a.edit_budget[2],
         HISTORY="\n\n".join(history) or "(chưa có vòng nào trước)")
+
+
+def budget_commands(d: Path, prefix: str, limit: int = 60) -> list[str]:
+    """The commands of an edit session, from <prefix>_budget.jsonl (BudgetBashTool)."""
+    f = d / f"{prefix}_budget.jsonl"
+    rows = []
+    for line in (f.read_text().splitlines() if f.exists() else []):
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        cmd = " ".join(e.get("cmd", "").split())
+        rows.append(f"{e.get('n')}. {cmd[:200]}" + (f"  [{e['action']}]" if e.get("action") else ""))
+    return rows[:limit]
+
+
+def noedit_note(k: int, cmds: list[str], response: str, ab_note: str) -> str:
+    """Note of a session that follows one which made no edit."""
+    lines = [f"## This session: make the edit (session {k + 1})", "",
+             f"Session {k} read the code but made **no edit**, and was stopped. Do not read the same things "
+             "again: what it ran is below, and the target's code is quoted above. Your first or second command "
+             "should be the edit."]
+    if cmds:
+        lines += ["", "Commands of that session:", "", "```", *cmds, "```"]
+    if response.strip():
+        lines += ["", "Its last answer (its plan, if it gave one):", "", "```", response.strip()[-3000:], "```"]
+    if ab_note:      # an earlier session's edit is still in the tree, with its losing A/B
+        lines += ["", "Before that:", "", ab_note.split("\n", 1)[1].strip()]
+    return "\n".join(lines)
 
 
 def session_note(k: int, ab_text: str, ab_dir: str, rdiff: str) -> str:
@@ -705,6 +761,7 @@ def run_round_loop_ab(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best
 
     target = N.pick_target(best["rtl"], best["synth"])
     target["report"] = first_path(best["synth"].paths)
+    target["ends"], target["sources"] = N.path_sources(best["rtl"], best["synth"], best["patch"])
     classes = get(N.find_scala_classes.chia_remote([m for _, m in target["chain"]]))
     r["target"] = f"{target['path'] or N.TOP} ({target['module']})"
     write(d / "target.json", json.dumps({**target, "scala": classes}, indent=2))
@@ -712,24 +769,36 @@ def run_round_loop_ab(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best
 
     parent_cache: dict = {}
     note, last = session_note(0, "", "", ""), "chưa có A/B"
-    t_agent = 0.0
+    t_agent, noedit, ab_note = 0.0, 0, ""
     for k in range(a.ab_refines + 1):
         r["ab_sessions"] = k + 1
         prompt = render_target_prompt(a, i, k, best, history, target, classes, note)
         write(d / f"edit{k}_prompt.md", prompt)
         t0 = time.time()
         reason = call_agent(a, llm, prompt, f"agent_{a.run_name}_iter{i}_edit{k}_llm", d, f"edit{k}",
-                            best, False)
+                            best, False, budget_log=f"{BUDGET_DIR}/{a.run_name}_iter{i}_edit{k}.jsonl")
         t_agent += time.time() - t0
         r["agent_min"] = t_agent / 60
-        before = r["patch"]
+        before = r["patch"] if r["patch"] else best["patch"]
         diff = after_agent(out, d, i, snap, best, r, reason, f"phiên sửa {k + 1}")
+        violation = diff is None and "vi phạm phạm vi" in r["reason"]
+        if r["patch"] == before and not violation:
+            # no edit in this session: the next one starts from its commands and answer
+            noedit += 1
+            r["noedit_sessions"] = noedit
+            why = f"phiên sửa {k + 1} không sửa gì" + (f" ({reason})" if reason else "")
+            print(f"round {i}: {why}", flush=True)
+            if k < a.ab_refines:
+                resp = d / f"edit{k}_response.md"
+                note = noedit_note(k + 1, budget_commands(d, f"edit{k}"),
+                                   resp.read_text() if resp.exists() else "", ab_note)
+                r["reason"] = ""
+                continue
+            r["reason"] = f"{why}; hết {a.ab_refines + 1} phiên" + (f"; A/B trước đó: {last}" if k else "")
+            return r
         if diff is None:
             if k:
                 r["reason"] += f" (A/B trước đó: {last})"
-            return r
-        if k and diff["patch"] == before:
-            r["reason"] = f"phiên sửa {k + 1} không sửa thêm gì; A/B trước đó: {last}"
             return r
         art, diff = build_with_fixes(a, i, out, d, fix_llm, snap, best, r, diff, f"_e{k}")
         if art is None:
@@ -767,7 +836,7 @@ def run_round_loop_ab(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best
                      "child_verilog.sv": AB.module_texts(rtl).get(ab["module"], "")}
         if k < a.ab_refines:
             get(N.stage_for_agent.chia_remote(stage, ab_dir))
-            note = session_note(k + 1, ab_text, ab_dir, rdiff)
+            note = ab_note = session_note(k + 1, ab_text, ab_dir, rdiff)
     r["reason"] = f"A/B không tốt hơn {a.ab_min_gain} ns sau {a.ab_refines + 1} phiên sửa (lần cuối: {last})"
     return r
 
@@ -813,7 +882,8 @@ def run(a, out: Path):
     oc_args = ["--print-logs", "--log-level", a.opencode_logs] if a.opencode_logs else None
     llm = N.SalvageOpenCodeLLM(model=a.model, system_message=SYSTEM_MESSAGE_AB if a.ab_tool else SYSTEM_MESSAGE,
                                timeout_seconds=a.edit_timeout if a.loop_ab else a.llm_timeout, retries=1,
-                               builtin_tools=a.builtin_tools, extra_cli_args=oc_args)
+                               builtin_tools=a.builtin_tools, extra_cli_args=oc_args,
+                               max_steps=(a.edit_steps or None) if a.loop_ab else None)
     fix_llm = N.SalvageOpenCodeLLM(model=a.fix_model or a.model, system_message=SYSTEM_MESSAGE_FIX,
                                    timeout_seconds=a.fix_timeout, retries=1, builtin_tools=a.builtin_tools,
                                    extra_cli_args=oc_args)

@@ -92,7 +92,11 @@ kiểm bằng mock:
 - **`--loop-ab`** (người dùng chọn, 27/10/2026): loop chọn mục tiêu từ đường găng, agent chỉ sửa trong phiên ngắn
   (`--edit-timeout` 900 s, `prompts/improve_timing_target.md`), loop build và synth A/B module chứa mục tiêu; thua
   A/B thì đưa báo cáo cho phiên sửa tiếp (`--ab-refines` 2), thắng mới gate + synth cả tile. Cùng lúc: agent hết
-  giờ mà đã sửa thì loop vẫn đánh giá diff (mọi chế độ). Chỉ mới kiểm bằng mock.
+  giờ mà đã sửa thì loop vẫn đánh giá diff (mọi chế độ).
+- `lab-t1`, `lab-t2` (27–28/10/2026, 1 vòng): chọn mục tiêu đúng (`fpuOpt.dfma`, `tile/FPU.scala`) nhưng agent
+  40 lần gọi tool không sửa (lần 2: 16 lệnh cuối là script `pass`/heredoc rỗng). Đã thêm `BudgetBashTool`
+  (`--edit-budget 15 25 35`, `--edit-steps 45`), mã Chisel hai đầu đường găng trong prompt, và phiên không sửa thì
+  chuyển sang phiên sau kèm lệnh/kế hoạch của nó (README). Chỉ mới kiểm bằng mock.
 
 ## Chạy tiếp từ m4
 
@@ -109,8 +113,9 @@ chia job logs -f fmax-<tên>        # dừng: chia job stop fmax-<tên>
 ```
 
 - Mỗi lần chạy phải dùng `--run-name` mới, vì câu trả lời agent được cache theo `agent_<run-name>_iter<i>_llm`.
-- `--loop-ab`: một vòng tối đa 3 phiên sửa × 15 phút, cộng build/A/B mỗi phiên, cộng gate ~13 phút khi A/B thắng.
-  Các cờ chỉnh: `--edit-timeout`, `--ab-refines`, `--ab-min-gain`.
+- `--loop-ab`: một vòng tối đa 3 phiên sửa (`--edit-timeout`, nên dùng 1500 s; ngân sách lệnh thường dừng phiên
+  không sửa sau ~15 phút), cộng build/A/B mỗi phiên, cộng gate ~13 phút khi A/B thắng.
+  Các cờ chỉnh: `--edit-timeout`, `--edit-budget`, `--edit-steps`, `--ab-refines`, `--ab-min-gain`.
 
 ## Quy ước làm việc
 

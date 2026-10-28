@@ -17,18 +17,21 @@ verilator, eda and opencode containers do not share a filesystem.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import shlex
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 
 from types import SimpleNamespace
 
 from chia.base.ChiaFunction import ChiaFunction, get
+from chia.base.tools.BashTool import BashTool
 from chia.models.opencode import OpenCodeLLM, parse_session_id
 
 import equiv as E
@@ -254,7 +257,10 @@ class SalvageOpenCodeLLM(OpenCodeLLM):
     A provider error ("stream error" in opencode's log) does not end `opencode run`: it hung
     until the timeout (fmax-ab-t1: 45 min). Its log (INFO, which also logs every agent step)
     therefore always goes to stderr, and a run whose last log line is that error, with nothing
-    after it for ERROR_GRACE s, is killed and returned as failed."""
+    after it for ERROR_GRACE s, is killed and returned as failed.
+
+    max_steps sets the agent's `steps` in opencode's config: after that many steps the model is
+    told to stop calling tools and answer in text (--loop-ab edit sessions, see BudgetBashTool)."""
 
     BUILTIN_TOOLS = ("bash", "read", "edit", "write", "patch", "multiedit", "grep", "glob", "list",
                      "lsp", "task", "webfetch", "websearch", "codesearch")
@@ -262,12 +268,13 @@ class SalvageOpenCodeLLM(OpenCodeLLM):
     MODES = ("on", "off", "deny", "readonly")
     ERROR_GRACE = 60
 
-    def __init__(self, *args, builtin_tools: bool | str = True, **kwargs):
+    def __init__(self, *args, builtin_tools: bool | str = True, max_steps: int | None = None, **kwargs):
         super().__init__(*args, **kwargs)
         mode = {True: "on", False: "off"}.get(builtin_tools, builtin_tools)
         if mode not in self.MODES:
             raise ValueError(f"builtin_tools must be one of {self.MODES}, not {builtin_tools!r}")
         self.builtin_tools = mode
+        self.max_steps = max_steps     # opencode agent `steps`: after that many, a text-only answer
         if "--print-logs" not in (self.extra_cli_args or []):
             self.extra_cli_args = list(self.extra_cli_args or []) + ["--print-logs", "--log-level", "INFO"]
 
@@ -281,6 +288,8 @@ class SalvageOpenCodeLLM(OpenCodeLLM):
             cfg["agent"][self.agent_name]["tools"] = dict(sel)
         if mode != "on":
             cfg["permission"] = {**cfg.get("permission", {}), "bash": "deny", "edit": "deny", "webfetch": "deny"}
+        if self.max_steps:
+            cfg["agent"][self.agent_name]["steps"] = self.max_steps
         return cfg
 
     def _capture(self, cmd, env):
@@ -590,6 +599,294 @@ def find_scala_classes(modules: list[str]) -> dict:
             parts.pop()
         out[m] = files
     return out
+
+
+# ---------------------------------------------------------------------------
+# --loop-ab: the Chisel at the ends of the worst path, quoted in the prompt
+# (lab-t2: the agent spent 24 of its 40 tool calls finding it)
+# ---------------------------------------------------------------------------
+
+_LOC_RE = re.compile(r"@\[([^\]]*)\]")
+_LOC_ITEM_RE = re.compile(r"([\w./\-]+\.scala)?:(\d+):")
+_HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+
+def source_locs(line: str) -> list[tuple[str, int]]:
+    """Scala locations in the firtool `// @[...]` comments of a Verilog line:
+    "@[a/FPU.scala:10:5, :12:7]" -> [("a/FPU.scala", 10), ("a/FPU.scala", 12)]."""
+    out = []
+    for m in _LOC_RE.finditer(line):
+        cur = None
+        for f, n in _LOC_ITEM_RE.findall(m.group(1)):
+            cur = f or cur
+            if cur:
+                out.append((cur, int(n)))
+    return out
+
+
+def rocket_file(path: str) -> str | None:
+    """A source path of a `@[...]` comment as a rocket-chip path (src/main/scala/...),
+    or None when it is in another generator (hardfloat, ...)."""
+    i = path.find(EDITABLE_PREFIX)
+    if i < 0:
+        return None
+    head = path[:i]
+    if head and not head.rstrip("/").endswith("rocket-chip"):
+        return None
+    return path[i:]
+
+
+def reg_name(flat: str, inst: str) -> str:
+    """Register of a flattened Yosys name: ("fpuOpt.dfma.in_in2[53]_reg", "fpuOpt.dfma") -> "in_in2"."""
+    name = flat.lstrip("\\")
+    if inst and name.startswith(inst + "."):
+        name = name[len(inst) + 1:]
+    name = re.sub(r"_reg$", "", name)
+    return re.sub(r"\[\d+\]", "", name)
+
+
+def reg_statements(module_text: str, reg: str) -> list[str]:
+    """Verilog lines that declare or assign `reg` (an assignment up to its `;` and the
+    comment after it). A Vec element may not exist under its own name: "x_15" -> "x"."""
+    names = [reg] + ([re.sub(r"_\d+$", "", reg)] if re.search(r"_\d+$", reg) else [])
+    for name in names:
+        n = re.escape(name)
+        found = re.findall(rf"^[ \t]*reg\b[^;\n]*\b{n}\b[^;\n]*;[^\n]*", module_text, re.M)
+        found += re.findall(rf"^[ \t]*{n}\b(?:\[[^\]]*\])?\s*<=[^;]*;[^\n]*", module_text, re.M)
+        if found:
+            return found
+    return []
+
+
+def path_end_locs(rtl: TileRTL, synth) -> list[dict]:
+    """The worst path's start and end registers with the Scala lines firtool points to:
+    [{"end": "start"|"end", "inst", "module", "reg", "locs": [(file, line)]}]."""
+    paths = instance_paths(rtl)
+    texts = E.modules_of(rtl.files)
+    out = []
+    for end, flat in (("start", synth.crit_start), ("end", synth.crit_end)):
+        inst = inst_prefix(flat, paths)
+        mod = paths.get(inst, "")
+        reg = reg_name(flat, inst)
+        locs = []
+        for st in reg_statements(texts.get(mod, ""), reg):
+            for f, n in source_locs(st):
+                if (f, n) not in locs:
+                    locs.append((f, n))
+        out.append({"end": end, "inst": inst, "module": mod, "reg": reg, "locs": locs})
+    return out
+
+
+def patch_added_lines(patch: str) -> dict[str, set]:
+    """{file: new-side line numbers of the `+` lines} of a git diff."""
+    out: dict[str, set] = {}
+    cur, n = None, 0
+    for line in patch.splitlines():
+        if line.startswith("+++ "):
+            cur = line[4:].removeprefix("b/") if line[4:] != "/dev/null" else None
+            continue
+        if line.startswith("--- ") or line.startswith("diff "):
+            continue
+        m = _HUNK_RE.match(line)
+        if m:
+            n = int(m.group(1))
+            continue
+        if cur is None:
+            continue
+        if line.startswith("+"):
+            out.setdefault(cur, set()).add(n)
+            n += 1
+        elif line.startswith(" "):
+            n += 1
+    return out
+
+
+def source_spans(lines: list[int], context: int = 25) -> list[tuple[int, int]]:
+    """Windows of +-context lines around `lines`, overlapping ones merged."""
+    spans: list[list[int]] = []
+    for n in sorted(set(lines)):
+        lo, hi = max(1, n - context), n + context
+        if spans and lo <= spans[-1][1] + 1:
+            spans[-1][1] = max(spans[-1][1], hi)
+        else:
+            spans.append([lo, hi])
+    return [tuple(s) for s in spans]
+
+
+@ChiaFunction(resources={"chipyard": 1}, max_retries=0)
+def read_source_lines(spans: dict) -> dict:
+    """{rocket-chip file: [(first, last)]} -> {file: {line number: text}} of the working tree."""
+    out = {}
+    for rel, ranges in spans.items():
+        path = os.path.join(ROCKET, rel)
+        if not os.path.isfile(path):
+            continue
+        with open(path, errors="replace") as f:
+            text = f.read().splitlines()
+        out[rel] = {n: text[n - 1] for lo, hi in ranges for n in range(lo, min(hi, len(text)) + 1)}
+    return out
+
+
+def format_sources(ends: list[dict], lines: dict, added: dict, spans: dict, max_lines: int = 300) -> str:
+    """The quoted Chisel: per file and window, numbered lines, `>` on a line the path's
+    start/end register points to, `+` on a line the current best's patch added."""
+    marks: dict[str, set] = {}
+    for e in ends:
+        for f, n in e["locs"]:
+            rel = rocket_file(f)
+            if rel:
+                marks.setdefault(rel, set()).add(n)
+    out, used = [], 0
+    for rel, ranges in spans.items():
+        got = lines.get(rel) or {}
+        for lo, hi in ranges:
+            nums = [n for n in range(lo, hi + 1) if n in got]
+            if not nums or used >= max_lines:
+                continue
+            nums = nums[:max_lines - used]
+            used += len(nums)
+            out += [f"{rel} lines {nums[0]}-{nums[-1]}:", "", "```scala"]
+            out += [f"{'>' if n in marks.get(rel, ()) else ' '}{n:5d}{'+' if n in added.get(rel, ()) else ' '} "
+                    f"{got[n]}" for n in nums]
+            out += ["```", ""]
+    return "\n".join(out).rstrip()
+
+
+def path_sources(rtl: TileRTL, synth, best_patch: str, context: int = 40) -> tuple[list[dict], str]:
+    """(path_end_locs, the quoted Chisel around them) for the prompt of an edit session."""
+    ends = path_end_locs(rtl, synth)
+    by_file: dict[str, list[int]] = {}
+    for e in ends:
+        for f, n in e["locs"]:
+            rel = rocket_file(f)
+            if rel:
+                by_file.setdefault(rel, []).append(n)
+    if not by_file:
+        return ends, ""
+    spans = {rel: source_spans(ns, context) for rel, ns in by_file.items()}
+    lines = get(read_source_lines.chia_remote(spans))
+    return ends, format_sources(ends, lines, patch_added_lines(best_patch), spans)
+
+
+# ---------------------------------------------------------------------------
+# --loop-ab: chipyard_bash with an edit budget
+# ---------------------------------------------------------------------------
+
+_HEREDOC_RE = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1[^\n]*\n(.*?)^[ \t]*\2[ \t]*$", re.M | re.S)
+_INLINE_RE = re.compile(r"\b(python3?|bash|sh)\s+-c\s+(['\"])(.*?)(?<!\\)\2", re.S)
+_WORK_RE = re.compile(r"\b(sed|grep|rg|git|nl|awk|perl|find|ls|cat|wc|diff|patch|cp|mv|rm|echo|printf|tee|"
+                      r"head|tail|sort|uniq|make|sbt|mill)\b")
+_PY_EFFECT_RE = re.compile(r"\b(print|open|write|subprocess|os|sys|shutil|Path|exec|eval)\b")
+
+
+def _empty_script(body: str, python: bool) -> bool:
+    """Nothing but `pass`, comments and blank lines; for Python also: no output, no file
+    written (lab-t2: "w = 107 / # try ... / pass")."""
+    keep = [ln.strip() for ln in body.replace("\\n", "\n").splitlines()]
+    keep = [ln for ln in keep if ln and ln != "pass" and not ln.startswith(("#", "//"))]
+    return not keep or (python and not _PY_EFFECT_RE.search("\n".join(keep)))
+
+
+def noop_command(cmd: str) -> bool:
+    """A command whose scripts (heredocs, `python3 -c ...`) do nothing (empty_script), and
+    which does nothing else (lab-t2: 16 of its 40 calls were such notes)."""
+    scripts = []
+    for m in _HEREDOC_RE.finditer(cmd):
+        lead = re.split(r"[\n;|&]", cmd[:m.start()])[-1]
+        scripts.append((m.group(3), "python" in lead and ">" not in lead))
+    scripts += [(m.group(3), m.group(1).startswith("python")) for m in _INLINE_RE.finditer(cmd)]
+    if not scripts or not all(_empty_script(b, py) for b, py in scripts):
+        return False
+    rest = _INLINE_RE.sub(" ", _HEREDOC_RE.sub(" ", cmd))
+    rest = re.sub(r"\bcat\s*>>?\s*\S+", " ", rest)                     # writing the empty heredoc
+    rest = re.sub(r"\|\s*(tail|head)\b[^|;&]*", " ", rest)              # and trimming its output
+    rest = re.sub(r"\S*/\S*", " ", rest)                                # paths (".../scala/tile")
+    return not _WORK_RE.search(rest)
+
+
+def tree_hash() -> str:
+    """Hash of the rocket-chip edits (tracked diff + new files under src/main/scala)."""
+    d = subprocess.run(f"cd {ROCKET} && git diff HEAD && git ls-files --others --exclude-standard -z "
+                       f"-- {EDITABLE_PREFIX} | xargs -0 -r sha1sum", shell=True, capture_output=True,
+                       text=True).stdout
+    return hashlib.sha256(d.encode()).hexdigest()[:12]
+
+
+class BudgetBashTool(BashTool):
+    """chipyard_bash for a --loop-ab edit session, which must end with an edit (lab-t1, lab-t2:
+    40 calls, no edit). Calls are counted; while the tree has no edit of this session:
+      - a call with only empty scripts (noop_command) is not run;
+      - after `soft` calls every answer carries a budget note;
+      - after `read_only` calls the output of a command that changed no file is withheld
+        (a script written to /tmp and run in a later call still works);
+      - after `hard` calls nothing is run: the agent is told to stop and answer with its plan.
+    An edit lifts all of it (undoing the edit puts it back). Each call goes to `log_file` (jsonl)."""
+
+    def __init__(self, name: str, work_dir: str, soft: int, read_only: int, hard: int, log_file: str,
+                 timeout_seconds: int = 120, task_options: dict | None = None):
+        # Set before BashTool.__init__: its __post_init__ pickles this object into the actor.
+        self.soft, self.read_only, self.hard, self.log_file = soft, read_only, hard, log_file
+        self._n, self._start, self._edited = 0, None, False
+        self._lock = threading.Lock()
+        super().__init__(name, work_dir, timeout_seconds=timeout_seconds, task_options=task_options)
+
+    def __getstate__(self):
+        state = super().__getstate__()
+        state.pop("_lock", None)
+        return state
+
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        self._lock = threading.Lock()
+
+    def _log(self, entry: dict):
+        try:
+            os.makedirs(os.path.dirname(self.log_file), exist_ok=True)
+            with open(self.log_file, "a") as f:
+                f.write(json.dumps({"t": time.strftime("%H:%M:%S"), **entry}, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+
+    def run_command(self, command: str) -> str:
+        """Run a bash command and return combined stdout/stderr."""
+        with self._lock:
+            if self._start is None:
+                self._start = tree_hash()
+                if os.path.exists(self.log_file):      # left by an earlier run of the same name
+                    os.remove(self.log_file)
+            self._n += 1
+            n = self._n
+            self._edited = tree_hash() != self._start
+            entry = {"n": n, "cmd": command[:400]}
+            if noop_command(command):
+                entry["action"] = "noop"
+                out = ("[loop] Not run: this command only holds an empty script (`pass`, an empty heredoc, "
+                       "comments). Do not use tools as a notepad: think in your reply, then edit the Scala "
+                       "file directly (`sed -i`, or a python3 heredoc that rewrites the lines).")
+            elif not self._edited and n > self.hard:
+                entry["action"] = "stop"
+                out = (f"[loop] Session over: {self.hard} commands without an edit. Do not call any more "
+                       "tools. Reply now with the edit you planned: file, line numbers, the exact new Chisel "
+                       "code, and why it shortens the path and keeps every cycle the same. The next session "
+                       "starts from your answer.")
+            else:
+                out = super().run_command(command)
+                self._edited = tree_hash() != self._start
+                entry["edited"] = self._edited
+                if not self._edited and n > self.read_only:
+                    entry["action"] = "withheld"
+                    err = out[-1500:] if "[exit code:" in out else ""
+                    out = (f"[loop] Output withheld: {n} commands used and this one changed no file under "
+                           f"rocket-chip. Only edits are allowed now (`sed -i`, or a python3 script that "
+                           f"rewrites the Scala file); {self.hard - n} commands left."
+                           + (f"\n\nIt failed:\n{err}" if err else ""))
+                elif not self._edited and n > self.soft:
+                    entry["action"] = "warned"
+                    out += (f"\n\n[loop] Budget: {n} commands used, no edit yet. After command "
+                            f"{self.read_only} only commands that change a Scala file show their output; "
+                            f"after command {self.hard} the session ends. Make your edit now.")
+            self._log(entry)
+            return out
 
 
 @ChiaFunction(resources={"chipyard": 1}, max_retries=0)

@@ -358,6 +358,52 @@ tầng prefix quanh thanh ghi), nhưng 40 lần gọi tool vẫn chưa sửa, tr
 thêm vào prompt: đọc tối đa khoảng 15 lần gọi tool rồi sửa; bản sửa chưa hoàn hảo vẫn được A/B và phản hồi; không
 dùng tool làm nháp. Lần sau chạy với `--edit-timeout 1500`.
 
+**Lần chạy thật `fmax-lab-t2` (28/10/2026, 1 vòng, `--edit-timeout 1500`): bị loại, agent vẫn không sửa.**
+- Đã tìm được file Scala: `FPUFMAPipe_l4_f64` → `tile/FPU.scala`.
+- Agent gọi 40 lần, đều là `chipyard_bash`, mỗi bước khoảng 23–25 s.
+- Lệnh 1–24 đọc đúng chỗ. Đường găng kết thúc ở `mulAddResult_pHiR_15`, tức thanh ghi giữa bộ cộng prefix do
+  chính loop viết ở m3/m4 (`loCut`, `gHiR`, `pHiR` trong `best.patch`). Agent đã tính thử các giá trị `loCut`
+  khác nhau, và đó là hướng đúng.
+- Lệnh 25–40 không làm gì: `python3 -c "# simulate\npass"` và heredoc rỗng.
+- Transcript có 0 mục `[Thinking]`. Có vẻ model dùng tool call làm nháp, và khi định viết bản sửa thì nội dung ra
+  rỗng.
+- Hạn ~15 lần gọi tool ghi trong prompt bị bỏ qua. Hết 25 phút.
+
+Đã sửa (loop ép chứ không chỉ dặn trong prompt):
+
+1. **`BudgetBashTool`** (`fmax_nodes.py`): `chipyard_bash` của phiên sửa đếm số lệnh khi cây chưa có thay đổi
+   nào của phiên. Thay đổi được nhận ra bằng hash của `git diff HEAD` cùng file mới.
+   - Lệnh chỉ chứa script rỗng thì không chạy (`noop_command`). Script rỗng là `pass`, comment hoặc heredoc rỗng;
+     với Python còn tính cả script không in gì và không ghi file nào.
+   - Mặc định `--edit-budget 15 25 35`:
+     - sau lệnh 15, mọi kết quả kèm câu nhắc ngân sách;
+     - sau lệnh 25, lệnh không làm đổi file nào bị giấu output (script ghi ra `/tmp` rồi chạy ở lệnh sau vẫn được);
+     - sau lệnh 35, không chạy gì nữa, agent được bảo trả lời bằng kế hoạch sửa.
+   - Đã sửa thì hết giới hạn. Undo thì giới hạn quay lại.
+   - Mỗi lệnh được ghi vào `edit<k>_budget.jsonl`.
+   - Kèm `--edit-steps 45`: đặt `steps` của agent opencode, quá số bước đó model phải trả lời bằng chữ. Nếu bản
+     opencode trong container không nhận khoá `steps` thì chạy với `--edit-steps 0`.
+2. **Đưa sẵn mã Chisel vào prompt** (`path_sources`):
+   - Lấy chú thích `@[file:line]` của thanh ghi đầu và cuối đường găng trong Verilog của bản tốt nhất, từ dòng khai
+     báo `reg` và các dòng gán `<=`.
+   - Trích ±40 dòng Scala quanh đó từ cây hiện tại, tối đa 300 dòng.
+   - Đánh dấu `>` ở dòng được trỏ tới và `+` ở dòng do `best.patch` thêm vào.
+   - Ghi vào `target.json` (`ends`, `sources`). File ngoài rocket-chip (hardfloat) chỉ được liệt kê.
+3. **Phiên không sửa gì không kết thúc vòng.** Nếu còn lượt `--ab-refines`, phiên sau nhận:
+   - danh sách lệnh của phiên trước, lấy từ `budget.jsonl`;
+   - câu trả lời cuối của phiên trước, tức kế hoạch nếu có;
+   - báo cáo A/B trước đó, nếu có.
+
+   `decision.json` có thêm `noedit_sessions`.
+
+Đã kiểm trên mock (28/10/2026):
+- `noop_command` đúng trên các lệnh thật của `lab-t2`: 7 lệnh rỗng bị chặn, 8 lệnh có việc thật không bị chặn;
+- logic ngân sách của `BudgetBashTool`, kể cả undo và quá giới hạn;
+- trích nguồn có dấu `>`/`+` và gộp cửa sổ;
+- 8 tình huống của vòng, trong đó có "phiên 1 không sửa, phiên 2 sửa và thắng" và "cả 3 phiên không sửa".
+
+Chưa chạy thật.
+
 ### Agent sửa lỗi build (`--build-fixes`)
 
 Theo `build_with_debug_retry` / `debug_failure` của ví dụ `timing_opt`: khi build của vòng lỗi (ví dụ m4 vòng 3,
@@ -402,7 +448,7 @@ runs/iter<N>/          prompt.md, agent_response.md, agent_transcript.txt, diff_
                        (--ab-tool) agent_ab_experiments.jsonl: mỗi lần rebuild/A-B của agent; agent_ab_cleanup.txt
                        (build lỗi) fix<k>_prompt.md, fix<k>_response.md, fix<k>_transcript.txt, build_fix<k>.log
                        agent hết --llm-timeout: agent_transcript.txt vẫn có; agent_response.md rỗng
-                       (--loop-ab) target.json; edit<k>_{prompt.md,response.md,transcript.txt,round.diff};
+                       (--loop-ab) target.json; edit<k>_{prompt.md,response.md,transcript.txt,round.diff,budget.jsonl};
                        build_e<k>.log; ab<k>.txt (kết quả A/B); lỗi build: e<k>fix<j>_*, build_e<k>fix<j>.log
 profile/               ChiaProfileCollector.log + timeline html
 ```
