@@ -431,7 +431,11 @@ dùng tool làm nháp. Lần sau chạy với `--edit-timeout 1500`.
 - Lệnh 36 của phiên 0 (heredoc python) ghi `FPU.scala` và có `EDITED`; các lệnh 37–45 kiểm `git diff`. Bản sửa
   của agent lần đầu tiên đi đến bước build trong `--loop-ab`.
 - Build lỗi lúc elaborate: `IndexOutOfBoundsException: -1 is out of bounds (min 0, max 48)`. Cả 2 lần gọi agent sửa
-  build đều trả returncode −1 sau khoảng 1–2 phút (chưa rõ lý do, đang chờ transcript).
+  build đều trả returncode −1: transcript cho thấy provider báo `Free usage limit reached` (lần 1 sau 7 bước, lần 2
+  gần như ngay). Loop đã giết opencode sau 60 s im lặng như thiết kế. Phiên sửa trước đó đã dùng 45 bước trong khoảng 20 phút.
+- Stack frame chỉ ra `FPU.scala:870` (trong `mulAddResult`, gọi từ dòng 868/826), tức chỗ mạng prefix agent viết.
+- Đã thêm `--quota-wait 900 --quota-retries 3`: khi transcript có `Free usage limit reached`, loop chờ rồi gọi lại agent
+  (phần đã sửa vẫn ở trong cây; file của lần bị cắt giữ dưới tên `<prefix>_quotaN_*`, tag cache mới `_qN`). Mới kiểm bằng mock.
 - **Lỗi của loop:** `build_errors` chỉ giữ dòng có `Exception`/`[error]`, nên bỏ mất các stack frame `at ...(FPU.scala:N)`.
   Agent sửa build vì thế không biết lỗi nằm ở dòng nào. Đã sửa: giữ tối đa 12 frame của mã `freechips`/`chipyard`/`testchipip`
   sau mỗi dòng exception.

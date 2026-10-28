@@ -103,7 +103,8 @@ kiểm bằng mock:
   mock.
 - `lab-t4` (28/10/2026): agent sửa được `FPU.scala` (lệnh 36) nhưng elaborate lỗi `IndexOutOfBoundsException: -1`;
   2 lần agent sửa build trả returncode −1 sau 1–2 phút. `build_errors` giờ giữ stack frame `(X.scala:N)` để agent sửa
-  build biết dòng lỗi. Lý do returncode −1 chưa rõ.
+  build biết dòng lỗi. Returncode −1 là do provider báo `Free usage limit reached`: thêm `--quota-wait`/`--quota-retries`
+  (chờ rồi gọi lại agent). Mới kiểm bằng mock.
 
 ## Chạy tiếp từ m4
 

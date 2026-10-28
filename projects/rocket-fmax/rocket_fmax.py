@@ -114,6 +114,10 @@ def parse_args():
                         "at most this many times (0 = reject the round at once, as before)")
     p.add_argument("--fix-model", default=None, help="model of the build-fix agent (default: --model)")
     p.add_argument("--fix-timeout", type=int, default=900, help="time limit of one build-fix agent call (s)")
+    p.add_argument("--quota-wait", type=int, default=900,
+                   help="when the provider answers 'Free usage limit reached', wait this long (s) and call "
+                        "the agent again (its edits so far stay in the tree)")
+    p.add_argument("--quota-retries", type=int, default=3, help="at most this many such waits per agent call")
     p.add_argument("--ab-tool", action="store_true",
                    help="give the agent the synth_ab tool (ab_tool.py: make verilog + Yosys/OpenSTA "
                         "A/B of one module) and use prompts/improve_timing_ab.md")
@@ -443,8 +447,33 @@ def stage_files(best: dict, history: list[str]) -> dict:
     return files
 
 
+QUOTA_ERROR = "Free usage limit reached"
+
+
 def call_agent(a, llm, prompt: str, tag: str, d: Path, prefix: str, best: dict, ab: bool,
                budget_log: str | None = None) -> str:
+    """_call_agent_once, again after --quota-wait s when the provider said its free usage limit
+    was reached (lab-t4: both build-fix calls after a 45-step edit session), at most
+    --quota-retries times. The edits of the cut-off call stay in the tree; its files are kept
+    as <prefix>_quota<n>_*."""
+    for n in range(a.quota_retries + 1):
+        reason = _call_agent_once(a, llm, prompt, tag if n == 0 else f"{tag}_q{n}", d, prefix, best, ab,
+                                  budget_log)
+        tr = d / f"{prefix}_transcript.txt"
+        if not reason or n == a.quota_retries or QUOTA_ERROR not in (tr.read_text(errors="replace")
+                                                                     if tr.exists() else ""):
+            return reason
+        for f in d.glob(f"{prefix}_*"):
+            if not f.name.startswith(f"{prefix}_quota") and f.name != f"{prefix}_prompt.md":
+                f.rename(d / f.name.replace(f"{prefix}_", f"{prefix}_quota{n + 1}_", 1))
+        print(f"{prefix}: provider báo '{QUOTA_ERROR}', chờ {a.quota_wait} s rồi gọi lại "
+              f"(lần {n + 1}/{a.quota_retries})", flush=True)
+        time.sleep(a.quota_wait)
+    return reason
+
+
+def _call_agent_once(a, llm, prompt: str, tag: str, d: Path, prefix: str, best: dict, ab: bool,
+                     budget_log: str | None = None) -> str:
     """One agent call with chipyard_bash (and synth_ab with `ab`); writes
     <prefix>_response.md / <prefix>_transcript.txt into d. Returns "" or why it failed.
     With `budget_log`, chipyard_bash is a BudgetBashTool (--edit-budget) logging there;
