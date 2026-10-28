@@ -105,6 +105,10 @@ kiểm bằng mock:
   2 lần agent sửa build trả returncode −1 sau 1–2 phút. `build_errors` giờ giữ stack frame `(X.scala:N)` để agent sửa
   build biết dòng lỗi. Returncode −1 là do provider báo `Free usage limit reached`: thêm `--quota-wait`/`--quota-retries`
   (chờ rồi gọi lại agent). Mới kiểm bằng mock.
+- `lab-t5` (28/10/2026): opencode lại báo `Free usage limit reached` (bị giết sau 60 s im lặng). Người dùng chọn
+  **Claude Code** (gói Pro, Sonnet, effort medium), giữ opencode làm phụ. Đã thêm `--agent claude` (`SalvageClaudeLLM`,
+  `--effort`, `--quota-max-wait`, node `hello_claude`) và `probe_tools.py --agent claude`. Chưa chạy thật: host chưa cài
+  `claude` và chưa có `~/.claude/.credentials.json`.
 
 ## Chạy tiếp từ m4
 

@@ -22,8 +22,8 @@ Milestones (run from this directory on the head):
       chia job submit --working-dir . -- python rocket_fmax.py --equiv-only --patch-file <best.patch>
 
 Outputs go to --out-dir/<run-name>/ on the head (results.csv, patches/, runs/,
-profile/). Needs workers advertising chipyard, verilator_run, eda, opencode_creds
-(see cluster.yaml).
+profile/). Needs workers advertising chipyard, verilator_run, eda, and opencode_creds
+(--agent opencode) or claude_creds (--agent claude), see cluster.yaml.
 """
 
 import argparse
@@ -37,7 +37,7 @@ import string
 import subprocess
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import ray
@@ -99,7 +99,12 @@ def parse_args():
                    help="ISA tests left out of the gate (they must be named explicitly, "
                         "e.g. tests that already fail on the unmodified baseline)")
     p.add_argument("--repeat-seed", type=int, default=7, help="baseline: rerun benchmarks with this seed")
-    p.add_argument("--model", default="opencode/big-pickle")
+    p.add_argument("--agent", choices=["opencode", "claude"], default="opencode",
+                   help="agent CLI: opencode (worker opencode_creds) or claude = Claude Code (worker claude_creds, "
+                        "logged in through the mounted ~/.claude)")
+    p.add_argument("--model", default=None, help="default: opencode/big-pickle (opencode), sonnet (claude)")
+    p.add_argument("--effort", default="medium", choices=["low", "medium", "high", "xhigh", "max"],
+                   help="--agent claude: claude --effort")
     p.add_argument("--builtin-tools", nargs="?", const="on", default="on",
                    choices=["on", "off", "deny", "readonly"],
                    help="opencode's own tools (they run in the opencode container, which has no Chipyard): "
@@ -118,6 +123,9 @@ def parse_args():
                    help="when the provider answers 'Free usage limit reached', wait this long (s) and call "
                         "the agent again (its edits so far stay in the tree)")
     p.add_argument("--quota-retries", type=int, default=3, help="at most this many such waits per agent call")
+    p.add_argument("--quota-max-wait", type=int, default=6 * 3600,
+                   help="--agent claude: on 'You've hit your limit', wait until the reset time it gives (+2 min), "
+                        "unless that is further away than this (s; weekly limit), then the call fails")
     p.add_argument("--ab-tool", action="store_true",
                    help="give the agent the synth_ab tool (ab_tool.py: make verilog + Yosys/OpenSTA "
                         "A/B of one module) and use prompts/improve_timing_ab.md")
@@ -133,7 +141,8 @@ def parse_args():
                         "carries a budget note, after READONLY a command that changes no file gets no output, "
                         "after HARD nothing runs and the agent is told to answer with its plan")
     p.add_argument("--edit-steps", type=int, default=45,
-                   help="--loop-ab: opencode `steps` of an edit session (then a text-only answer; 0 = no limit)")
+                   help="--loop-ab: opencode `steps` of an edit session (then a text-only answer; 0 = no limit); "
+                        "claude: --max-turns = this + 10 (claude then stops without an answer)")
     p.add_argument("--ab-refines", type=int, default=2,
                    help="--loop-ab: extra edit sessions after a losing A/B (0 = one session per round)")
     p.add_argument("--ab-min-gain", type=float, default=0.1,
@@ -161,6 +170,10 @@ def parse_args():
         p.error("--period-ns là bắt buộc")
     if a.loop_ab and (a.ab_tool or a.bypass_llm):
         p.error("--loop-ab không dùng chung với --ab-tool hay --bypass-llm")
+    if a.agent == "claude" and (a.ab_tool or a.bypass_llm):
+        p.error("--agent claude chưa hỗ trợ --ab-tool hay --bypass-llm")
+    if a.model is None:
+        a.model = "sonnet" if a.agent == "claude" else "opencode/big-pickle"
     if a.run_name is None:
         mode = ("equiv" if a.equiv_only else "baseline" if a.baseline_only
                 else "m2" if a.bypass_llm else "agent")
@@ -448,27 +461,54 @@ def stage_files(best: dict, history: list[str]) -> dict:
 
 
 QUOTA_ERROR = "Free usage limit reached"
+CLAUDE_LIMIT = re.compile(r"hit your limit|RateLimitError|rate_limit on ")
+
+
+def read_partial(a, remove: bool = True) -> str | None:
+    """LLM_PARTIAL_FILE on the agent's worker (transcript of a cut-off run)."""
+    fn = N.read_text_claude if a.agent == "claude" else N.read_text_opencode
+    return get(fn.chia_remote(N.LLM_PARTIAL_FILE, remove))
+
+
+def quota_wait_seconds(a, d: Path, prefix: str) -> int | None:
+    """Seconds to wait before calling the agent again, or None when the call did not stop on a
+    usage limit (or, for claude, the limit resets later than --quota-max-wait)."""
+    text = "\n".join(f.read_text(errors="replace") for f in (d / f"{prefix}_transcript.txt", d / f"{prefix}_error.txt")
+                     if f.exists())
+    if a.agent != "claude":
+        return a.quota_wait if QUOTA_ERROR in text else None
+    if not CLAUDE_LIMIT.search(text):
+        return None
+    from chia.models.claude import parse_rate_limit_reset
+    reset = parse_rate_limit_reset(text)
+    if reset is None:
+        m = re.search(r'"resetsAt":\s*(\d+)', text)
+        reset = datetime.fromtimestamp(int(m.group(1)), tz=timezone.utc) if m else None
+    if reset is None:
+        return a.quota_wait
+    wait = int((reset - datetime.now(timezone.utc)).total_seconds()) + 120
+    return max(wait, 60) if wait <= a.quota_max_wait else None
 
 
 def call_agent(a, llm, prompt: str, tag: str, d: Path, prefix: str, best: dict, ab: bool,
                budget_log: str | None = None) -> str:
-    """_call_agent_once, again after --quota-wait s when the provider said its free usage limit
-    was reached (lab-t4: both build-fix calls after a 45-step edit session), at most
-    --quota-retries times. The edits of the cut-off call stay in the tree; its files are kept
-    as <prefix>_quota<n>_*."""
+    """_call_agent_once, again after a wait when the call stopped on a usage limit, at most
+    --quota-retries times: opencode's free models ('Free usage limit reached', lab-t4: both
+    build-fix calls after a 45-step edit session) wait --quota-wait s; claude ('You've hit your
+    limit') waits until the reset time it gives. The edits of the cut-off call stay in the tree;
+    its files are kept as <prefix>_quota<n>_*."""
     for n in range(a.quota_retries + 1):
         reason = _call_agent_once(a, llm, prompt, tag if n == 0 else f"{tag}_q{n}", d, prefix, best, ab,
                                   budget_log)
-        tr = d / f"{prefix}_transcript.txt"
-        if not reason or n == a.quota_retries or QUOTA_ERROR not in (tr.read_text(errors="replace")
-                                                                     if tr.exists() else ""):
+        wait = quota_wait_seconds(a, d, prefix) if reason else None
+        if wait is None or n == a.quota_retries:
             return reason
         for f in d.glob(f"{prefix}_*"):
             if not f.name.startswith(f"{prefix}_quota") and f.name != f"{prefix}_prompt.md":
                 f.rename(d / f.name.replace(f"{prefix}_", f"{prefix}_quota{n + 1}_", 1))
-        print(f"{prefix}: provider báo '{QUOTA_ERROR}', chờ {a.quota_wait} s rồi gọi lại "
-              f"(lần {n + 1}/{a.quota_retries})", flush=True)
-        time.sleep(a.quota_wait)
+        print(f"{prefix}: hết hạn mức {a.agent}, chờ {wait} s (tới {datetime.fromtimestamp(time.time() + wait):%H:%M}) "
+              f"rồi gọi lại (lần {n + 1}/{a.quota_retries})", flush=True)
+        time.sleep(wait)
     return reason
 
 
@@ -479,7 +519,7 @@ def _call_agent_once(a, llm, prompt: str, tag: str, d: Path, prefix: str, best: 
     With `budget_log`, chipyard_bash is a BudgetBashTool (--edit-budget) logging there;
     the log is copied to <prefix>_budget.jsonl."""
     reason = ""
-    get(N.read_text_opencode.chia_remote(N.LLM_PARTIAL_FILE, True))   # stale from an earlier call
+    read_partial(a)                                                   # stale from an earlier call
     # With synth_ab the two tools share the single "chipyard" slot, so nothing
     # else runs on chipyard (build, git) until both are stopped.
     slot = 0.5 if ab else 1
@@ -513,9 +553,10 @@ def _call_agent_once(a, llm, prompt: str, tag: str, d: Path, prefix: str, best: 
         write(d / f"{prefix}_transcript.txt", resp.stream_result)
         if not resp.success:
             reason = reason or f"LLM không thành công (returncode {resp.returncode})"
-            partial = get(N.read_text_opencode.chia_remote(N.LLM_PARTIAL_FILE, True))
-            if partial:
-                write(d / f"{prefix}_transcript.txt", partial)
+    if resp is None or not resp.success:
+        partial = read_partial(a)
+        if partial:
+            write(d / f"{prefix}_transcript.txt", partial)
     return reason
 
 
@@ -546,7 +587,7 @@ def render_fix_prompt(a, i: int, k: int, errors: str, patch: str, best: dict, no
     return string.Template(PROMPT_FIX.read_text()).safe_substitute(
         ITER=i, FIX=k, MAX_FIX=a.build_fixes, CONFIG_DESC=loop_config(a), BEST_NAME=best["name"],
         ERRORS=errors[-12000:], PATCH=patch[-30000:], STAGE_DIR=N.STAGE_DIR, AB_NOTE=ab,
-        NOTES=notes[-4000:].strip() or "(no summary)")
+        NOTES=notes[-4000:].strip() or "(no summary)", **tool_text(a))
 
 
 def after_agent(out: Path, d: Path, i: int, snap: dict, best: dict, r: dict, agent_reason: str,
@@ -733,7 +774,7 @@ def render_target_prompt(a, i: int, k: int, best: dict, history: list[str], targ
         CRIT=f"{s.crit_start} -> {s.crit_end}", ENDPOINTS=s.families, STAGE_DIR=N.STAGE_DIR,
         TARGET=target_text(target, classes), SESSION_NOTE=note, BUDGET_SOFT=a.edit_budget[0],
         BUDGET_READONLY=a.edit_budget[1], BUDGET_HARD=a.edit_budget[2],
-        HISTORY="\n\n".join(history) or "(chưa có vòng nào trước)")
+        HISTORY="\n\n".join(history) or "(chưa có vòng nào trước)", **tool_text(a))
 
 
 def budget_commands(d: Path, prefix: str, limit: int = 60) -> list[str]:
@@ -928,6 +969,28 @@ def history_entry(i: int, r: dict, resp_summary: str) -> str:
     return "\n".join(lines)
 
 
+def make_llm(a, model: str, system_message: str, timeout: int, steps: int | None):
+    """The agent of --agent: SalvageOpenCodeLLM, or SalvageClaudeLLM (--effort; `steps` becomes
+    --max-turns steps + 10, a safety net behind BudgetBashTool's HARD limit)."""
+    if a.agent == "claude":
+        return N.SalvageClaudeLLM(model=model, system_message=system_message, timeout_seconds=timeout,
+                                  retries=1, effort=a.effort, max_turns=steps + 10 if steps else None)
+    oc_args = ["--print-logs", "--log-level", a.opencode_logs] if a.opencode_logs else None
+    return N.SalvageOpenCodeLLM(model=model, system_message=system_message, timeout_seconds=timeout, retries=1,
+                                builtin_tools=a.builtin_tools, extra_cli_args=oc_args, max_steps=steps)
+
+
+def tool_text(a) -> dict:
+    """How the prompts name the shell tool (each CLI names MCP tools its own way) and what they
+    say about the CLI's own tools."""
+    if a.agent == "claude":
+        return {"BASH_TOOL": "mcp__chipyard_bash__chipyard_bash_run_command",
+                "OTHER_TOOLS": " You have no other tool."}
+    return {"BASH_TOOL": "chipyard_bash_chipyard_bash_run_command",
+            "OTHER_TOOLS": " opencode's own `bash`, `read`, `edit`, `glob`, ... (if you see them) run in another "
+                           "container that has no Chipyard: nothing they read or write is the design."}
+
+
 def run(a, out: Path):
     csv_path = out / "results.csv"
     elfs = get(N.load_test_elfs.chia_remote())
@@ -940,14 +1003,9 @@ def run(a, out: Path):
     if a.baseline_only:
         return
 
-    oc_args = ["--print-logs", "--log-level", a.opencode_logs] if a.opencode_logs else None
-    llm = N.SalvageOpenCodeLLM(model=a.model, system_message=SYSTEM_MESSAGE_AB if a.ab_tool else SYSTEM_MESSAGE,
-                               timeout_seconds=a.edit_timeout if a.loop_ab else a.llm_timeout, retries=1,
-                               builtin_tools=a.builtin_tools, extra_cli_args=oc_args,
-                               max_steps=(a.edit_steps or None) if a.loop_ab else None)
-    fix_llm = N.SalvageOpenCodeLLM(model=a.fix_model or a.model, system_message=SYSTEM_MESSAGE_FIX,
-                                   timeout_seconds=a.fix_timeout, retries=1, builtin_tools=a.builtin_tools,
-                                   extra_cli_args=oc_args)
+    llm = make_llm(a, a.model, SYSTEM_MESSAGE_AB if a.ab_tool else SYSTEM_MESSAGE,
+                   a.edit_timeout if a.loop_ab else a.llm_timeout, (a.edit_steps or None) if a.loop_ab else None)
+    fix_llm = make_llm(a, a.fix_model or a.model, SYSTEM_MESSAGE_FIX, a.fix_timeout, None)
     best = {"name": "baseline", "patch": "", "synth": base["synth"], "rtl": base["rtl"]}
     if a.start_patch or a.fragments:
         best = ensure_start(a, out, snap, base)

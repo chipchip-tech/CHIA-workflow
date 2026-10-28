@@ -467,8 +467,40 @@ docker exec "$O" bash -lc 'opencode models opencode'
 docker exec "$O" bash -lc 'opencode run --model opencode/<id> "say hi"'
 ```
 
-Model phải gọi được tool MCP (`chipyard_bash`, `synth_ab`). Ví dụ BOOM của CHIA dùng Claude (`ClaudeCodeLLM`),
-còn loop này hiện chỉ dùng opencode.
+Model phải gọi được tool MCP (`chipyard_bash`, `synth_ab`).
+
+### Agent Claude Code (`--agent claude`)
+
+Thay opencode bằng Claude Code (`SalvageClaudeLLM`, kế thừa `ClaudeCodeLLM` của CHIA), thường dùng
+`--model sonnet --effort medium`. Mặc định vẫn là `--agent opencode`. Cách hoạt động:
+
+- **Tool.** `--tools ""` tắt mọi tool sẵn có của Claude (chúng chạy trong container claude, không có
+  Chipyard). `--strict-mcp-config` chỉ nạp `chipyard_bash`. Prompt gọi tool bằng tên của Claude,
+  `mcp__chipyard_bash__chipyard_bash_run_command`.
+- **Giới hạn bước.** Phiên sửa có `--max-turns` = `--edit-steps` + 10. Chạm mốc này thì Claude dừng
+  mà không trả lời, nên chặn chính vẫn là mốc HARD của `BudgetBashTool`. Agent sửa build không giới hạn
+  lượt, chỉ có `--fix-timeout`.
+- **Hết giờ.** `ClaudeCodeLLM` gốc ở chế độ stream chờ `claude` không giới hạn. Bản này giết tiến trình
+  sau `timeout_seconds`. Event stream của lần chạy hết giờ, lỗi hoặc hết hạn mức được ghi vào
+  `LLM_PARTIAL_FILE` trên worker claude, rồi loop chép về `<prefix>_transcript.txt`.
+- **Hết hạn mức.** Khi gặp "You've hit your limit · resets ...", CHIA ném `RateLimitError`. Loop chờ tới
+  giờ reset cộng 2 phút rồi gọi lại, với tag `_qN`, tối đa `--quota-retries` lần. Nếu giờ reset xa hơn
+  `--quota-max-wait` (6 giờ, tức hạn mức tuần) thì bỏ, không chờ.
+- **Chưa hỗ trợ** `--ab-tool` và `--bypass-llm`. `config_audit.py` vẫn chỉ dùng opencode.
+- **Worker.** Node `hello_claude` trong `cluster.yaml` dùng resource `claude_creds` và mount `~/.claude`
+  của host (đăng nhập `claude` trên host trước, gói Pro được).
+
+Gói Pro dùng chung hạn mức với các phiên chat. Một phiên sửa 35–45 lượt gọi tool tốn khá nhiều token, nên
+hạn mức 5 giờ có thể chỉ đủ vài phiên.
+
+Kiểm nhanh trước khi chạy vòng:
+
+```bash
+chia job submit --working-dir . -- python probe_tools.py --agent claude --models sonnet --effort medium
+```
+
+Probe này phải in ra `answer_ok=True`. Phần này đã kiểm bằng mock (CLI `claude` giả: chạy xong, hết giờ,
+hết hạn mức, chạm `--max-turns`). Chưa chạy thật.
 
 ## Đầu ra: `~/rocket-fmax-out/<run>/`
 

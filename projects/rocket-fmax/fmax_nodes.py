@@ -32,6 +32,7 @@ from types import SimpleNamespace
 
 from chia.base.ChiaFunction import ChiaFunction, get
 from chia.base.tools.BashTool import BashTool
+from chia.models.claude import ClaudeCodeLLM, ClaudeCodeQueryResult, parse_rate_limit_event
 from chia.models.opencode import OpenCodeLLM, parse_session_id
 
 import equiv as E
@@ -48,7 +49,7 @@ AUDIT_STAGE_DIR = "/home/ray/config_audit"   # on chipyard: inputs/outputs of th
 # Written by the loop scripts and the A/B tool (never by an agent), removed after use.
 AUDIT_CONFIG_FILE = f"{CHIPYARD}/generators/chipyard/src/main/scala/config/RocketFmaxAudit.scala"
 AB_PGID_FILE = "/home/ray/rocket_fmax_ab.pgid"   # process group of the A/B tool's make verilog
-LLM_PARTIAL_FILE = "/home/ray/rocket_fmax_llm_partial.txt"  # on opencode: transcript of a timed-out run
+LLM_PARTIAL_FILE = "/home/ray/rocket_fmax_llm_partial.txt"  # on opencode/claude: transcript of a cut-off run
 
 ISA_SUITES = ("rv64ui", "rv64um", "rv64ua", "rv64uf", "rv64ud")
 BENCHMARKS = ("dhrystone", "median", "multiply", "qsort", "towers", "vvadd")
@@ -224,10 +225,7 @@ def read_text(path: str) -> str | None:
         return f.read()
 
 
-@ChiaFunction(resources={"opencode_creds": 1}, max_retries=0)
-def read_text_opencode(path: str, remove: bool = False) -> str | None:
-    """Same as read_text on the opencode worker: opencode's built-in bash runs there, so an
-    agent that used it instead of chipyard_bash left its output there. `remove` deletes it."""
+def _read_local(path: str, remove: bool) -> str | None:
     if not os.path.isfile(path):
         return None
     with open(path, errors="replace") as f:
@@ -235,6 +233,109 @@ def read_text_opencode(path: str, remove: bool = False) -> str | None:
     if remove:
         os.remove(path)
     return text
+
+
+@ChiaFunction(resources={"opencode_creds": 1}, max_retries=0)
+def read_text_opencode(path: str, remove: bool = False) -> str | None:
+    """Same as read_text on the opencode worker: opencode's built-in bash runs there, so an
+    agent that used it instead of chipyard_bash left its output there. `remove` deletes it."""
+    return _read_local(path, remove)
+
+
+@ChiaFunction(resources={"claude_creds": 0.01}, max_retries=0)
+def read_text_claude(path: str, remove: bool = False) -> str | None:
+    """Same as read_text_opencode on the claude worker (SalvageClaudeLLM's LLM_PARTIAL_FILE)."""
+    return _read_local(path, remove)
+
+
+class SalvageClaudeLLM(ClaudeCodeLLM):
+    """ClaudeCodeLLM (`claude --print`) for the loop, in place of SalvageOpenCodeLLM (--agent claude).
+
+    - Claude's own tools (Bash, Read, Edit, ...) would run in the claude container, which has no
+      Chipyard: `--tools ""` removes them all and `--strict-mcp-config` loads only the MCP tools
+      the loop passes (chipyard_bash). Unlike opencode's free models, nothing breaks without them.
+    - `effort` is `--effort` (low/medium/high/xhigh/max); `max_turns` is `--max-turns`, the
+      counterpart of opencode's `steps`, but claude then stops without a final answer, so it is
+      only a safety net behind BudgetBashTool's HARD limit.
+    - The stock streaming run waits on `claude` with no time limit (timeout_seconds only applies
+      without log_stream). Here it is killed after timeout_seconds, and the event stream of a
+      run that timed out, failed or hit the usage limit is written to LLM_PARTIAL_FILE on the
+      claude worker (prompt() itself then returns an empty result or raises RateLimitError);
+      the loop reads it with read_text_claude."""
+
+    def __init__(self, *args, effort: str | None = None, max_turns: int | None = None, **kwargs):
+        kwargs.setdefault("log_stream", True)
+        super().__init__(*args, **kwargs)
+        extra = ["--tools", "", "--strict-mcp-config"]
+        if effort:
+            extra += ["--effort", effort]
+        if max_turns:
+            extra += ["--max-turns", str(max_turns)]
+        self.extra_cli_args = extra + list(self.extra_cli_args or [])
+
+    def _run_claude_streaming(self, user_message, tools=None):
+        cmd = self._build_cmd(tools)
+        self.logger.info("Running: %s", " ".join(cmd[:6]) + " ...")
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+        result_parts: list[str] = []
+        stderr_parts: list[str] = []
+        stream_parts: list[str] = [f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] claude {' '.join(cmd[1:4])}\n\n"]
+        lock = threading.Lock()
+
+        class _Tee:
+            def write(self, s):
+                stream_parts.append(s)
+
+            def flush(self):
+                pass
+
+        tee = _Tee()
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, env=env, start_new_session=True)
+        proc.stdin.write(user_message)
+        proc.stdin.close()
+
+        def drain_out():
+            for line in proc.stdout:
+                if line.strip():
+                    with lock:
+                        self._process_event_line(line.strip(), tee, result_parts)
+
+        def drain_err():
+            for line in proc.stderr:
+                with lock:
+                    stderr_parts.append(line)
+                    stream_parts.append(f"[stderr] {line}")
+
+        threads = [threading.Thread(target=drain_out), threading.Thread(target=drain_err)]
+        for t in threads:
+            t.start()
+        try:
+            proc.wait(timeout=self.timeout_seconds)
+        except subprocess.TimeoutExpired:
+            SalvageOpenCodeLLM._kill(proc)
+            for t in threads:
+                t.join(10)
+            self._salvage(stream_parts, f"hết {self.timeout_seconds} s")
+            raise
+        for t in threads:
+            t.join()
+        result = "".join(result_parts)
+        limited = (self._rate_limit_event is not None and parse_rate_limit_event(self._rate_limit_event)) \
+            or "hit your limit" in result
+        if proc.returncode != 0 or limited:
+            self._salvage(stream_parts, "usage limit" if limited else f"exit {proc.returncode}")
+        if proc.returncode != 0:
+            self.logger.warning("claude exited %d: %s", proc.returncode, "".join(stderr_parts)[-500:])
+        return ClaudeCodeQueryResult(result=result, returncode=proc.returncode, stderr="".join(stderr_parts),
+                                     stream_result="".join(stream_parts))
+
+    def _salvage(self, stream_parts: list[str], why: str) -> None:
+        try:
+            with open(LLM_PARTIAL_FILE, "w") as f:
+                f.write(f"[claude {why}]\n\n{''.join(stream_parts)}")
+        except OSError as e:
+            self.logger.warning("could not salvage claude run: %s", e)
 
 
 class SalvageOpenCodeLLM(OpenCodeLLM):

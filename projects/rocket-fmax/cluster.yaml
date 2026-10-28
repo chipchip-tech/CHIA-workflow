@@ -1,5 +1,6 @@
 # CHIA cluster for projects/rocket-fmax: configs/cluster-local.yaml plus
 #   - verilator_run: 4 slots (4 simulators at once, only while the build is idle)
+#   - hello_claude: Claude Code (claude_creds) for --agent claude
 #   - rocket_eda: Yosys + OpenSTA + sky130hd liberty (image built locally, docker/EdaDockerfile)
 # Node type names match cluster-local.yaml, so this is the same cluster ("default").
 #
@@ -52,6 +53,24 @@ available_node_types:
             image: "ghcr.io/ucb-bar/chia-opencode:latest"
             container_name: "chia-opencode-${USER}"
             pull_before_run: false
+
+    # --agent claude (rocket_fmax.py, probe_tools.py): Claude Code logged in on the host (`claude`, then
+    # `cp ~/.claude.json ~/.claude/.claude.json`); ~/.claude is mounted read-write (token refresh).
+    hello_claude:
+        resources: {"claude_creds": 1}
+        num_workers: 1
+        compatible_ips: ["${THIS_MACHINE}"]
+        docker:
+            image: "ghcr.io/ucb-bar/chia-claude-code:latest"
+            container_name: "chia-claude-${USER}"
+            pull_before_run: false
+            run_options:
+                - "--user $(id -u):$(id -g)"
+                - "-v ~/.claude:/home/ray/.claude:z"
+            run_setup_commands:
+                - echo "user:x:$(id -u):$(id -g)::/home/ray:/bin/bash" >> /etc/passwd
+                - cp /home/ray/.claude/.claude.json /home/ray/.claude.json
+                - python3 -c "import json,os; p=os.path.expanduser('~/.claude/settings.json'); d=json.load(open(p)) if os.path.exists(p) else {}; d['skipDangerousModePermissionPrompt']=True; json.dump(d,open(p,'w'))"
 
     rocket_eda:
         resources: {"eda": 1}

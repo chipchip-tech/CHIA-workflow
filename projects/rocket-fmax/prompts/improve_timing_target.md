@@ -43,9 +43,8 @@ if every cycle's outputs stay the same.
 
 ## Your tool
 
-Only `chipyard_bash_chipyard_bash_run_command`: a shell in `/home/ray/chipyard`. Do all reading
-and editing through it. opencode's own `bash`, `read`, `edit`, `glob`, ... (if you see them) run
-in another container that has no Chipyard: nothing they read or write is the design.
+Only `$BASH_TOOL`: a shell in `/home/ray/chipyard`. Do all reading
+and editing through it.$OTHER_TOOLS
 
 ## Rules
 
