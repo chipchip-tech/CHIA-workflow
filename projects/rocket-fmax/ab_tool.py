@@ -124,14 +124,35 @@ def ab_lines(parent_name: str, p: dict, c: dict, child) -> tuple[list, Optional[
     return lines, delta
 
 
+_END_RE = re.compile(r"\s*(\S+)\s.*?(-?\d+\.\d+)\s*(?:\(VIOLATED\)|\(MET\))?\s*$")
+
+
+def target_slack(s, rel: str) -> Optional[float]:
+    """Worst slack of the endpoints of SynthResult `s` inside instance `rel` (a path relative
+    to the synthesized module; "" = the whole module). None when none is among the reported
+    endpoints (the worst 2000)."""
+    if s is None or not s.success:
+        return None
+    if not rel:
+        return s.worst_slack_ns
+    vals = [float(m.group(2)) for m in map(_END_RE.match, s.endpoints.splitlines())
+            if m and m.group(1).startswith(rel + ".")]
+    return min(vals) if vals else None
+
+
 def loop_ab(parent_rtl: N.TileRTL, parent_synth, parent_name: str, child_rtl: N.TileRTL, path: str,
-            period_ns: float, flow: str, parent_cache: dict) -> dict:
+            period_ns: float, flow: str, parent_cache: dict, target: str = "") -> dict:
     """A/B run by the loop (--loop-ab), not by the agent: synthesize the module at
     instance `path` of the round's build (child) and of the best (parent). Module
     names may differ on both sides (firtool dedup suffixes), the instance path does
     not. path "" (or a path missing on one side) = the whole tile, compared with the
     best's full result; the child's result is then the round's full synth.
-    `parent_cache` ({parent module: SynthResult}) lives for one round."""
+    `parent_cache` ({parent module: SynthResult}) lives for one round.
+
+    With `target` (an instance path inside `path`) the decision delta is that of the worst
+    endpoint inside the target, not of the whole module: lab-c1 synthesized FPU for an edit
+    of dfma, and FPU's worst path on its own (divSqrt, +8.44 ns) was below dfma's slack in the
+    tile (+8.75 ns), so no dfma edit could ever have won."""
     pp, cp = N.instance_paths(parent_rtl), N.instance_paths(child_rtl)
     whole = path == "" or path not in pp or path not in cp
     if whole:
@@ -151,10 +172,26 @@ def loop_ab(parent_rtl: N.TileRTL, parent_synth, parent_name: str, child_rtl: N.
     child = get(child_ref)
     c, p = summary(child), summary(parent_synth if whole else parent)
     lines, delta = ab_lines(parent_name, p, c, child)
+    module_delta = delta
+    rel = target if not path else target[len(path) + 1:] if target.startswith(path + ".") else ""
+    if rel and delta is not None:
+        pt, ct = target_slack(parent_synth if whole else parent, rel), target_slack(child, rel)
+        if pt is not None and ct is not None:
+            delta = round(ct - pt, 4)
+            verdict = ("better" if delta > NOISE_NS else "worse" if delta < -NOISE_NS
+                       else f"no clear change (|delta| <= {NOISE_NS} ns is synthesis noise)")
+            i = next(k for k, l in enumerate(lines) if l.startswith("delta (child - parent)"))
+            lines[i] = lines[i].replace("delta (child - parent)", "module delta (child - parent, all paths)")
+            lines.insert(i + 1, f"target {rel} (worst endpoint inside it; this decides the A/B): parent {pt:+.3f} ns, "
+                                f"child {ct:+.3f} ns, delta {delta:+.3f} ns -> {verdict}")
+        else:
+            lines.append(f"target {rel}: no endpoint among the reported ones on "
+                         f"{'both sides' if pt is None and ct is None else 'one side'}; the module delta decides")
     where = "whole tile, parent = full result of the best" if whole else f"instance {path}"
     lines.insert(0, f"A/B of module {cm} ({where}; parent module {pm}), {time.time() - t0:.0f} s")
     return {"path": path, "module": cm, "parent_module": pm, "whole": whole, "child": child,
             "parent": parent_synth if whole else parent, "c": c, "p": p, "delta": delta,
+            "module_delta": module_delta,
             "text": "\n".join(lines), "files": report_files(child, None if whole else parent)}
 
 

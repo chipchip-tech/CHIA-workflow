@@ -829,6 +829,19 @@ def noedit_note(k: int, cmds: list[str], response: str, ab_note: str, attempt: s
     return "\n".join(lines)
 
 
+def revert_note(k: int, ab_note: str, response: str) -> str:
+    """Note of a session that follows one which undid the round's edit and made no new one."""
+    lines = [f"## This session: a different edit (session {k + 1})", "",
+             f"Session {k} undid the round's edit and made no new one, so the tree is back at the current best. "
+             "Undoing is not an answer: make a **different** restructuring of the same target now. Do not "
+             "repeat the undone edit."]
+    if response.strip():
+        lines += ["", "Its answer:", "", "```", response.strip()[-3000:], "```"]
+    if ab_note:
+        lines += ["", "The undone edit and its A/B:", "", ab_note.split("\n", 1)[1].strip()]
+    return "\n".join(lines)
+
+
 def session_note(k: int, ab_text: str, ab_dir: str, rdiff: str) -> str:
     if k == 0:
         return ("## This session\n\nFirst session of the round: the tree holds the current best, "
@@ -845,7 +858,8 @@ def session_note(k: int, ab_text: str, ab_dir: str, rdiff: str) -> str:
         f"`git -C {N.ROCKET} apply -R {ab_dir}/round.diff`).",
         "",
         "Read where the child's worst path goes now. Then improve the edit, or undo it and try a different "
-        "restructuring of the same target.",
+        "restructuring of the same target in this same session. Do not end the session with the edit undone "
+        "and nothing new: that wastes the session.",
         "", "Your edits of this round so far:", "", "```diff", rdiff[-8000:], "```"])
 
 
@@ -898,6 +912,14 @@ def run_round_loop_ab(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best
                 continue
             r["reason"] = f"{why}; hết {a.ab_refines + 1} phiên" + (f"; A/B trước đó: {last}" if k else "")
             return r
+        if diff is None and k < a.ab_refines and r["patch"] == best["patch"] and not violation:
+            # the session undid the round's edit and made no new one (lab-c1, session 2): the
+            # next session starts again from the best, with the losing A/B of the undone edit
+            print(f"round {i}: phiên sửa {k + 1} hoàn tác bản sửa và không sửa mới", flush=True)
+            resp = d / f"edit{k}_response.md"
+            note = revert_note(k + 1, ab_note, resp.read_text() if resp.exists() else "")
+            r["reason"] = ""
+            continue
         if diff is None:
             if k:
                 r["reason"] += f" (A/B trước đó: {last})"
@@ -923,7 +945,7 @@ def run_round_loop_ab(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best
         else:
             path = N.common_path([target["path"]] + N.changed_paths(rtl, mods))
             ab = AB.loop_ab(best["rtl"], best["synth"], best["name"], rtl, path, a.period_ns, a.synth_flow,
-                            parent_cache)
+                            parent_cache, target["path"])
             write(d / f"ab{k}.txt", ab["text"])
             print(f"round {i}, phiên {k + 1}: {ab['text']}", flush=True)
             r["ab_delta_ns"] = "" if ab["delta"] is None else ab["delta"]

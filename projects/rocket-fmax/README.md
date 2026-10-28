@@ -323,6 +323,9 @@ này). Kết luận: model free không tự làm được phần thủ tục (ch
    synth module đó của bản sửa và của bản tốt nhất (song song trên `eda`, kết quả bản tốt nhất nhớ trong vòng).
    Nếu instance đó là cả `RocketTile` thì synth cả tile, so với kết quả đầy đủ của bản tốt nhất, và dùng luôn
    kết quả này cho bước 6.
+   Số quyết định là **worst slack của các endpoint nằm trong instance mục tiêu** (tìm trong 2000 endpoint tệ nhất
+   của mỗi bên), không phải worst slack của cả module synth. Báo cáo vẫn in delta của cả module. Nếu một bên
+   không có endpoint nào của mục tiêu thì dùng delta của module (lý do: xem `lab-c1` dưới đây).
 5. A/B không tốt hơn `--ab-min-gain` (0,1 ns, cỡ nhiễu synth) → loop đưa báo cáo A/B (đường găng mới, Verilog
    của module, diff của vòng) vào một phiên sửa mới, tối đa `--ab-refines` (2) lần; hết lượt thì loại vòng mà
    **không chạy gate** (tiết kiệm ~13 phút). Bản sửa không làm Verilog đổi gì cũng được báo lại cho phiên sau.
@@ -426,6 +429,23 @@ dùng tool làm nháp. Lần sau chạy với `--edit-timeout 1500`.
   của phiên sau, với yêu cầu chạy lại ngay ở lệnh đầu.
 - Đã kiểm trên mock: thử sửa sau mốc 35 vẫn chạy; sửa hỏng thì được thêm 5 lệnh rồi mới dừng; note có toàn văn
   lệnh. Mock của các mục trên vẫn pass.
+
+**Lần chạy thật `fmax-lab-c1` (28/10/2026, `--agent claude --model sonnet --effort medium`, 1 vòng): bị loại sau
+7,5 phút, nhưng lộ ra một lỗi của loop.**
+- Agent Claude làm rất gọn. Phiên 1 dùng 2 lệnh, 25 s: đọc 3 dòng rồi sửa `FPU.scala`, dời 2 tầng prefix
+  của bộ cộng FMA qua thanh ghi `mulAddResult`. Build qua ngay, không cần agent sửa build.
+- Mỗi phiên tốn khoảng 15k token cache creation, 15–25k cache read và 1–3k output. Đó là một phần nhỏ của hạn mức
+  gói Pro.
+- A/B kém hơn 0,877 ns. Các thanh ghi mới `mulAddResult_pR/gR` (72 và 97 bit) nằm ngay trên đường găng, nên đánh
+  giá đúng là kém hơn.
+- **Lỗi của loop:** bản sửa đổi `MulAddRecFNPipe`, module dùng chung cho `sfma` và `dfma`, nên A/B synth cả `FPU`.
+  Khi synth riêng `FPU`, worst path là `divSqrt` (+8,444 ns), thấp hơn slack của `dfma` trong tile (+8,745 ns).
+  Vì vậy worst slack của module không bao giờ tăng được, và mọi bản sửa `dfma` đều không thể thắng A/B. Đã sửa:
+  `loop_ab` nhận `target` và quyết định theo worst slack của endpoint trong mục tiêu (bước 4 ở trên).
+- **Lỗi thứ hai:** phiên 2 đọc báo cáo A/B, hoàn tác bản sửa bằng `git apply -R`, rồi dừng (2 lệnh, 18 s). Vòng bị
+  loại với lý do "không thay đổi gì so với start" dù còn 1 phiên. Đã sửa: phiên hoàn tác mà không sửa mới thì loop
+  chuyển sang phiên sau, kèm note "Session k undid..." và báo cáo A/B của bản đã hoàn tác. Prompt phiên refine dặn
+  không kết thúc bằng hoàn tác. Hai sửa này mới kiểm bằng mock (case 9, 9b, 10, 10b).
 
 **Lần chạy thật `fmax-lab-t4` (28/10/2026, 1 vòng): agent đã sửa được file nhưng build lỗi, bị loại sau 28 phút.**
 - Lệnh 36 của phiên 0 (heredoc python) ghi `FPU.scala` và có `EDITED`; các lệnh 37–45 kiểm `git diff`. Bản sửa

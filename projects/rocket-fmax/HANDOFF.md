@@ -109,6 +109,10 @@ kiểm bằng mock:
   **Claude Code** (gói Pro, Sonnet, effort medium), giữ opencode làm phụ. Đã thêm `--agent claude` (`SalvageClaudeLLM`,
   `--effort`, `--quota-max-wait`, node `hello_claude`) và `probe_tools.py --agent claude`. Probe thật (28/10/2026) đạt:
   Sonnet effort medium gọi được `chipyard_bash` (6 s). Vòng agent với Claude (`lab-c1`) chưa chạy.
+- `lab-c1` (28/10/2026, Claude Sonnet): agent sửa `FPU.scala` bằng 2 lệnh, build qua; A/B synth cả `FPU` (sửa module
+  dùng chung `sfma`/`dfma`) mà worst path của `FPU` riêng là `divSqrt` (+8,444 < +8,745 của `dfma` trong tile), nên A/B
+  theo module không thể thắng. Sửa: A/B quyết định theo endpoint trong instance mục tiêu. Phiên 2 hoàn tác bản sửa
+  rồi dừng → giờ loop chạy tiếp phiên sau. Mới kiểm bằng mock.
 
 ## Chạy tiếp từ m4
 
