@@ -107,8 +107,8 @@ kiểm bằng mock:
   (chờ rồi gọi lại agent). Mới kiểm bằng mock.
 - `lab-t5` (28/10/2026): opencode lại báo `Free usage limit reached` (bị giết sau 60 s im lặng). Người dùng chọn
   **Claude Code** (gói Pro, Sonnet, effort medium), giữ opencode làm phụ. Đã thêm `--agent claude` (`SalvageClaudeLLM`,
-  `--effort`, `--quota-max-wait`, node `hello_claude`) và `probe_tools.py --agent claude`. Chưa chạy thật: host chưa cài
-  `claude` và chưa có `~/.claude/.credentials.json`.
+  `--effort`, `--quota-max-wait`, node `hello_claude`) và `probe_tools.py --agent claude`. Probe thật (28/10/2026) đạt:
+  Sonnet effort medium gọi được `chipyard_bash` (6 s). Vòng agent với Claude (`lab-c1`) chưa chạy.
 
 ## Chạy tiếp từ m4
 

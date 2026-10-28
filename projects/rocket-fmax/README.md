@@ -500,7 +500,9 @@ chia job submit --working-dir . -- python probe_tools.py --agent claude --models
 ```
 
 Probe này phải in ra `answer_ok=True`. Phần này đã kiểm bằng mock (CLI `claude` giả: chạy xong, hết giờ,
-hết hạn mức, chạm `--max-turns`). Chưa chạy thật.
+hết hạn mức, chạm `--max-turns`). **Probe chạy thật (28/10/2026):** `claude-sonnet_effort-medium rc=0 6s
+tool_in_stream=True answer_ok=True` (gói Pro, `claude` 2.1.311 trong image, node `hello_claude` lên được bằng
+`chia up`). Vòng agent với Claude chưa chạy thật.
 
 ## Đầu ra: `~/rocket-fmax-out/<run>/`
 
