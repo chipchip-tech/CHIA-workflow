@@ -402,7 +402,30 @@ dùng tool làm nháp. Lần sau chạy với `--edit-timeout 1500`.
 - trích nguồn có dấu `>`/`+` và gộp cửa sổ;
 - 8 tình huống của vòng, trong đó có "phiên 1 không sửa, phiên 2 sửa và thắng" và "cả 3 phiên không sửa".
 
-Chưa chạy thật.
+**Lần chạy thật `fmax-lab-t3` (28/10/2026, 1 vòng): bị loại sau 71 phút, cả 3 phiên đều không sửa.**
+- Phần mới chạy đúng:
+  - trích nguồn đúng `FPU.scala`: `in_in2` ở dòng 900–907, `mulAddResult_pHiR_15` ở dòng 844/854, có dấu `+`;
+  - lệnh rỗng bị chặn (5 lệnh);
+  - nhắc ngân sách và giấu output đúng mốc;
+  - phiên sau nhận lệnh và kế hoạch của phiên trước;
+  - opencode nhận khoá `steps`.
+- Phiên 0 dùng 37 lệnh, phiên 1 dùng 25 (dừng do `--edit-steps`), phiên 2 dùng 44. Câu trả lời của phiên 0 là
+  một kế hoạch đúng hướng: chèn một tầng thanh ghi giữa mạng prefix, giữ nguyên latency.
+- **Lỗi của loop:** lệnh 36–37 ở phiên 0 chính là lệnh sửa (heredoc python ghi lại `FPU.scala`). Hai lệnh này đến
+  sau mốc 35 nên bị trả "Session over" và không được chạy. Như vậy ngân sách đã chặn đúng cái nó muốn ép ra. Phiên 2
+  cũng gọi thêm 9 lệnh sau "Session over".
+
+Đã sửa:
+- `edit_command`: nhận ra lệnh định ghi file Scala. Đó là `sed -i`, `perl -i`, `open(..., 'w')`, `write_text(`,
+  `> x.scala` hoặc `tee x.scala` (kèm điều kiện lệnh có nhắc `.scala`), `git apply`, `patch -p`.
+- Lệnh sửa luôn được chạy và luôn hiện output, kể cả sau mốc 35.
+- Nếu lệnh sửa không làm đổi file (ví dụ `str.replace` không khớp, vốn không báo lỗi), loop nói rõ "file như cũ",
+  rồi cho thêm 5 lệnh để kiểm lại dòng hiện tại và sửa lại.
+- Lệnh sửa được ghi đầy đủ vào `budget.jsonl` (`"attempt": true`, các lệnh khác cắt ở 400 ký tự).
+  `budget_attempt` đưa toàn văn lần thử sửa cuối, kèm việc nó không được chạy hay chạy mà không đổi gì, vào note
+  của phiên sau, với yêu cầu chạy lại ngay ở lệnh đầu.
+- Đã kiểm trên mock: thử sửa sau mốc 35 vẫn chạy; sửa hỏng thì được thêm 5 lệnh rồi mới dừng; note có toàn văn
+  lệnh. Mock của các mục trên vẫn pass.
 
 ### Agent sửa lỗi build (`--build-fixes`)
 

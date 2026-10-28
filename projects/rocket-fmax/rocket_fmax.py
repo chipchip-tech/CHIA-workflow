@@ -713,7 +713,27 @@ def budget_commands(d: Path, prefix: str, limit: int = 60) -> list[str]:
     return rows[:limit]
 
 
-def noedit_note(k: int, cmds: list[str], response: str, ab_note: str) -> str:
+def budget_attempt(d: Path, prefix: str) -> str:
+    """The last command of an edit session that tried to write a Scala file (in full), with
+    what came of it ("stop": not run, "edit_failed": changed nothing)."""
+    f = d / f"{prefix}_budget.jsonl"
+    last = None
+    for line in (f.read_text().splitlines() if f.exists() else []):
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if e.get("attempt") or (e.get("action") == "stop" and N.edit_command(e.get("cmd", ""))):
+            last = e
+    if not last:
+        return ""
+    how = {"stop": "was not run (the session was over)",
+           "edit_failed": "ran but changed nothing (its old text did not match)"}.get(last.get("action"),
+                                                                                       "ran")
+    return f"Command {last.get('n')} {how}:\n\n```\n{last.get('cmd', '').strip()}\n```"
+
+
+def noedit_note(k: int, cmds: list[str], response: str, ab_note: str, attempt: str = "") -> str:
     """Note of a session that follows one which made no edit."""
     lines = [f"## This session: make the edit (session {k + 1})", "",
              f"Session {k} read the code but made **no edit**, and was stopped. Do not read the same things "
@@ -721,6 +741,9 @@ def noedit_note(k: int, cmds: list[str], response: str, ab_note: str) -> str:
              "should be the edit."]
     if cmds:
         lines += ["", "Commands of that session:", "", "```", *cmds, "```"]
+    if attempt:
+        lines += ["", "Its last attempt at the edit. Check the old text against the file as it is now, "
+                  "fix it, and run it as your first command:", "", attempt]
     if response.strip():
         lines += ["", "Its last answer (its plan, if it gave one):", "", "```", response.strip()[-3000:], "```"]
     if ab_note:      # an earlier session's edit is still in the tree, with its losing A/B
@@ -791,7 +814,8 @@ def run_round_loop_ab(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best
             if k < a.ab_refines:
                 resp = d / f"edit{k}_response.md"
                 note = noedit_note(k + 1, budget_commands(d, f"edit{k}"),
-                                   resp.read_text() if resp.exists() else "", ab_note)
+                                   resp.read_text() if resp.exists() else "", ab_note,
+                                   budget_attempt(d, f"edit{k}"))
                 r["reason"] = ""
                 continue
             r["reason"] = f"{why}; hết {a.ab_refines + 1} phiên" + (f"; A/B trước đó: {last}" if k else "")

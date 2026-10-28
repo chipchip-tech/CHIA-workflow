@@ -96,7 +96,11 @@ kiểm bằng mock:
 - `lab-t1`, `lab-t2` (27–28/10/2026, 1 vòng): chọn mục tiêu đúng (`fpuOpt.dfma`, `tile/FPU.scala`) nhưng agent
   40 lần gọi tool không sửa (lần 2: 16 lệnh cuối là script `pass`/heredoc rỗng). Đã thêm `BudgetBashTool`
   (`--edit-budget 15 25 35`, `--edit-steps 45`), mã Chisel hai đầu đường găng trong prompt, và phiên không sửa thì
-  chuyển sang phiên sau kèm lệnh/kế hoạch của nó (README). Chỉ mới kiểm bằng mock.
+  chuyển sang phiên sau kèm lệnh/kế hoạch của nó (README).
+- `lab-t3` (28/10/2026): các phần trên chạy đúng, nhưng lệnh sửa của agent (lệnh 36–37, heredoc python ghi
+  `FPU.scala`) đến sau mốc 35 nên bị chặn. Đã sửa: lệnh định ghi file Scala (`edit_command`) luôn được chạy;
+  sửa mà file không đổi thì được báo và thêm 5 lệnh; phiên sau nhận toàn văn lần thử sửa cuối. Chỉ mới kiểm bằng
+  mock.
 
 ## Chạy tiếp từ m4
 

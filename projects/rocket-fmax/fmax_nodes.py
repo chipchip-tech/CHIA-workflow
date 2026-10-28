@@ -779,6 +779,17 @@ _WORK_RE = re.compile(r"\b(sed|grep|rg|git|nl|awk|perl|find|ls|cat|wc|diff|patch
 _PY_EFFECT_RE = re.compile(r"\b(print|open|write|subprocess|os|sys|shutil|Path|exec|eval)\b")
 
 
+_WRITE_RE = re.compile(r"\bsed\b[^|;&\n]*\s-i|\bperl\b[^|;&\n]*\s-\w*i|\bopen\([^)]*,\s*['\"][wa]|write_text\(|"
+                       r">\s*\S*\.scala\b|\btee\b[^|;&\n]*\.scala\b")
+_APPLY_RE = re.compile(r"\bgit\b[^|;&\n]*\bapply\b|\bpatch\s+-p")
+
+
+def edit_command(cmd: str) -> bool:
+    """A command that tries to write a Scala file (lab-t3: the planned edit, a python3 heredoc
+    rewriting FPU.scala, came as command 36 and was not run: a session must never stop it)."""
+    return bool(_APPLY_RE.search(cmd) or (".scala" in cmd and _WRITE_RE.search(cmd)))
+
+
 def _empty_script(body: str, python: bool) -> bool:
     """Nothing but `pass`, comments and blank lines; for Python also: no output, no file
     written (lab-t2: "w = 107 / # try ... / pass")."""
@@ -820,13 +831,17 @@ class BudgetBashTool(BashTool):
       - after `read_only` calls the output of a command that changed no file is withheld
         (a script written to /tmp and run in a later call still works);
       - after `hard` calls nothing is run: the agent is told to stop and answer with its plan.
-    An edit lifts all of it (undoing the edit puts it back). Each call goes to `log_file` (jsonl)."""
+    A command that tries to write a Scala file (edit_command) is always run with its output
+    shown; if it changed nothing the agent is told so and gets `grace` more calls to fix it.
+    An edit lifts all of it (undoing the edit puts it back). Each call goes to `log_file` (jsonl),
+    an edit attempt in full."""
 
     def __init__(self, name: str, work_dir: str, soft: int, read_only: int, hard: int, log_file: str,
-                 timeout_seconds: int = 120, task_options: dict | None = None):
+                 timeout_seconds: int = 120, task_options: dict | None = None, grace: int = 5):
         # Set before BashTool.__init__: its __post_init__ pickles this object into the actor.
         self.soft, self.read_only, self.hard, self.log_file = soft, read_only, hard, log_file
-        self._n, self._start, self._edited = 0, None, False
+        self.grace = grace
+        self._n, self._start, self._edited, self._grace_until = 0, None, False, 0
         self._lock = threading.Lock()
         super().__init__(name, work_dir, timeout_seconds=timeout_seconds, task_options=task_options)
 
@@ -857,13 +872,17 @@ class BudgetBashTool(BashTool):
             self._n += 1
             n = self._n
             self._edited = tree_hash() != self._start
-            entry = {"n": n, "cmd": command[:400]}
+            attempt = edit_command(command)
+            entry = {"n": n, "cmd": command[:20000] if attempt else command[:400]}
+            if attempt:
+                entry["attempt"] = True
+            relaxed = attempt or n <= self._grace_until
             if noop_command(command):
                 entry["action"] = "noop"
                 out = ("[loop] Not run: this command only holds an empty script (`pass`, an empty heredoc, "
                        "comments). Do not use tools as a notepad: think in your reply, then edit the Scala "
                        "file directly (`sed -i`, or a python3 heredoc that rewrites the lines).")
-            elif not self._edited and n > self.hard:
+            elif not self._edited and n > self.hard and not relaxed:
                 entry["action"] = "stop"
                 out = (f"[loop] Session over: {self.hard} commands without an edit. Do not call any more "
                        "tools. Reply now with the edit you planned: file, line numbers, the exact new Chisel "
@@ -873,12 +892,19 @@ class BudgetBashTool(BashTool):
                 out = super().run_command(command)
                 self._edited = tree_hash() != self._start
                 entry["edited"] = self._edited
-                if not self._edited and n > self.read_only:
+                if attempt and not self._edited:
+                    entry["action"] = "edit_failed"
+                    self._grace_until = n + self.grace
+                    out = (out[-3000:] + "\n\n[loop] This command changed no file under rocket-chip: the Scala "
+                           "file is exactly as before. A `str.replace`/`sed` whose old text does not match "
+                           "changes nothing and reports no error. Check the exact current lines (`sed -n`/"
+                           f"`grep -n`), then edit again; {self.grace} more commands are allowed for that.")
+                elif not self._edited and n > self.read_only and not relaxed:
                     entry["action"] = "withheld"
                     err = out[-1500:] if "[exit code:" in out else ""
                     out = (f"[loop] Output withheld: {n} commands used and this one changed no file under "
                            f"rocket-chip. Only edits are allowed now (`sed -i`, or a python3 script that "
-                           f"rewrites the Scala file); {self.hard - n} commands left."
+                           f"rewrites the Scala file); {max(self.hard - n, 0)} commands left."
                            + (f"\n\nIt failed:\n{err}" if err else ""))
                 elif not self._edited and n > self.soft:
                     entry["action"] = "warned"
