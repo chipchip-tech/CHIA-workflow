@@ -25,9 +25,10 @@ File này dành cho session Claude Code tiếp quản project. Đọc cùng `CLA
 
 1. Sau đợt 2, người dùng chọn đo thêm timing bằng Vivado (song song, không dùng để nhận/loại; `synth_design`; Vivado ML
    Standard miễn phí, part Artix-7). Đã viết `vivado_nodes.py`, `--vivado-part`, `docker/VivadoDockerfile`, worker
-   `rocket_vivado` (README, mục Vivado); mới kiểm bằng mock. Việc: người dùng cài Vivado, build image, kiểm
-   `vivado -version` trong container, chạy `--baseline-only --vivado-part xc7a200tfbg676-2`, rồi đợt 3 với
-   `--start-patch ~/rocket-fmax-v2/chia-fmax-r2/patches/best.patch --vivado-part ...`.
+   `rocket_vivado` (README, mục Vivado). Đã chạy thật baseline (`viv-base`): Vivado 63,82 MHz, 2,2 phút, đường găng
+   `dcache.s2_data -> core.mem_reg_wdata` (Yosys: 47,13 MHz, `core.div`). Việc: đợt 3 với
+   `--start-patch ~/rocket-fmax-v2/chia-fmax-r2/patches/best.patch --vivado-part xc7a200tfbg676-2`, rồi so xu hướng
+   Yosys và Vivado qua các vòng trong `vivado.csv`.
    Flow Yosys `v4` (giữ ranh giới khối) đã thử viết rồi bỏ: người dùng chỉ giữ thay đổi cải thiện được cả Vivado lẫn
    Yosys; dùng số Vivado để đánh giá độ nhiễu của Yosys trước.
 2. Đọc log: baseline phải HIT cache; xem phiên agent có gọi `synth_ab` trọn vẹn không, có vòng nào được nhận,

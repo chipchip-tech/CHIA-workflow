@@ -236,8 +236,12 @@ docker exec chia-chipyard-$USER-0 bash -lc 'cd /home/ray/chipyard/generators/roc
     lớn hơn ngưỡng 1 % (~0,12 ns).
   - Probe Claude Code (28/10/2026): Sonnet medium gọi được `chipyard_bash`.
   - Build, gate, synth/STA, `SalvageClaudeLLM`, sửa build: đã dùng ở các lần chạy trước khi bắt đầu lại.
+  - Vivado (29/10/2026): Vivado 2025.1 ML Standard cài ở `~/tools/Xilinx`, image `chia-vivado`, worker `rocket_vivado`,
+    `--baseline-only --vivado-part xc7a200tfbg676-2` chạy được: baseline 63,82 MHz (slack -5,670 ns, 2000+ endpoint
+    fail), đường găng `dcache/s2_data_reg[34] -> core/mem_reg_wdata_reg[6]` (không phải `core.div` như Yosys),
+    28 750 LUT, 13 214 FF, 25 DSP, 2,2 phút. Bộ nhớ đỉnh ~9,5 GB (tiến trình con của synth song song), nên container
+    để `--memory=14g`.
 - **Mới kiểm bằng mock:**
-  - `--vivado-part`: ghi `vivado.csv`, chờ Vivado ở cuối job, lỗi Vivado không làm dừng loop. Script Tcl, Dockerfile,
-    worker `rocket_vivado` và cách cài Vivado **chưa chạy thật**.
+  - `--vivado-part` trong các vòng (ghi `vivado.csv` từng vòng, chờ Vivado ở cuối job, lỗi Vivado không làm dừng loop).
   - Huỷ gate khi synth tile thua, agent debug, gate điểm xuất phát (`--start-patch`).
 - Tính đúng chức năng chỉ dựa vào riscv-tests và 8 benchmark (như example), không kiểm tương đương.
