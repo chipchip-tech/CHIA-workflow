@@ -708,6 +708,26 @@ def tns_gain(a, best: dict, synth):
     return gain, floor, f"TNS {old:.2f} -> {new:.2f} ns ({gain:+.1%})"
 
 
+# Patches of rejected rounds, normalized (repeat_key) -> "round i: reason". lab-c3: Claude
+# re-applied the round-1 patch (A/B better, whole tile worse) in rounds 2-4 word for word, and
+# the loop measured it three more times (~13 min each).
+TRIED: dict[str, str] = {}
+
+
+def repeat_key(patch: str) -> str:
+    return "\n".join(l for l in patch.splitlines() if not l.startswith("index ")).strip()
+
+
+def repeat_note(k: int, seen: str, patch: str) -> str:
+    """Note of a session that follows one which re-made a patch already rejected."""
+    return "\n".join([
+        f"## This session: a different edit (session {k + 1})", "",
+        f"Session {k} made exactly the patch that was already measured and rejected ({seen}). The loop "
+        "did not measure it again and put the tree back at the current best. Measuring the same patch "
+        "gives the same numbers: make a **different** change, either to another part of the target or a "
+        "different restructuring.", "", "The rejected patch:", "", "```diff", patch[-6000:], "```"])
+
+
 def new_round(i: int) -> dict:
     return {"accepted": False, "reason": "", "synth": None, "rtl": None, "patch": "",
             "isa_pass": "", "bench_cycles_match": "", "build_fixes": 0}
@@ -951,9 +971,19 @@ def run_round_loop_ab(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best
             if k:
                 r["reason"] += f" (A/B trước đó: {last})"
             return r
+        if repeat_key(r["patch"]) in TRIED:
+            note = repeat_session(a, i, k, snap, best, r)
+            if note is None:
+                return r
+            continue
         art, diff = build_with_fixes(a, i, out, d, fix_llm, snap, best, r, diff, f"_e{k}")
         if art is None:
             return r
+        if repeat_key(r["patch"]) in TRIED:          # the build fix made it the rejected patch
+            note = repeat_session(a, i, k, snap, best, r)
+            if note is None:
+                return r
+            continue
         rtl = tile_rtl(art, r)
         if rtl is None:
             return r
@@ -992,6 +1022,21 @@ def run_round_loop_ab(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best
     return r
 
 
+def repeat_session(a, i: int, k: int, snap, best, r) -> str | None:
+    """A session re-made a rejected patch: back to the best, and the note of the next
+    session (None, r["reason"] set, after the last one)."""
+    seen = TRIED[repeat_key(r["patch"])]
+    print(f"round {i}: phiên sửa {k + 1} lặp lại patch đã loại ({seen[:120]}), không đo lại", flush=True)
+    r["repeats"] = r.get("repeats", 0) + 1
+    patch = r["patch"]
+    get(N.reset_rocket.chia_remote(snap["rocket_head"], best["patch"]))
+    r["patch"] = best["patch"]
+    if k >= a.ab_refines:
+        r["reason"] = f"phiên sửa {k + 1} lặp lại patch đã loại ({seen[:300]}); hết {a.ab_refines + 1} phiên"
+        return None
+    return repeat_note(k + 1, seen, patch)
+
+
 def last_response(d: Path) -> str:
     """Summary of the round's last agent answer (agent_response.md or editN_response.md)."""
     files = sorted(d.glob("edit*_response.md"), key=lambda p: int(re.sub(r"\D", "", p.stem) or 0))
@@ -1013,6 +1058,9 @@ def history_entry(i: int, r: dict, resp_summary: str) -> str:
     if resp_summary:
         lines.append(f"Tóm tắt của agent: {resp_summary[:800]}")
     patch = r.get("round_diff") or r["patch"]
+    if not r["accepted"] and r.get("ab_result") and s is not None and s.success:
+        lines.append("A/B của mục tiêu tốt hơn nhưng cả RocketTile bị loại. Patch này đã đo rồi: nộp lại y "
+                     "nguyên sẽ bị loop bỏ qua, không đo lại. Hãy sửa khác (chỗ khác của mục tiêu, hoặc cách khác).")
     if not r["accepted"] and patch:
         lines.append("Patch đã bị loại (đã revert, đừng lặp lại y nguyên):\n```diff\n" + patch[:4000] + "\n```")
     return "\n".join(lines)
@@ -1058,7 +1106,7 @@ def run(a, out: Path):
     best = {"name": "baseline", "patch": "", "synth": base["synth"], "rtl": base["rtl"]}
     if a.start_patch or a.fragments:
         best = ensure_start(a, out, snap, base)
-    start = best
+    start = top = best          # top: the accepted point with the best worst slack (Fmax)
     history: list[str] = []
     for i in range(1, a.iters + 1):
         t0 = time.time()
@@ -1086,21 +1134,34 @@ def run(a, out: Path):
                               "ab_delta_ns": r.get("ab_delta_ns", ""), "ab_sessions": r.get("ab_sessions", "")})
         print(f"round {i}: {'ACCEPT' if r['accepted'] else 'REJECT'} ({r['minutes']:.1f} min) - "
               f"{r['reason'][:400]}", flush=True)
+        if not r["accepted"] and r.get("synth") is not None and r["patch"] and r["patch"] != best["patch"]:
+            TRIED.setdefault(repeat_key(r["patch"]), f"vòng {i}: {r['reason'][:400]}")
         if r["accepted"]:
             peak = max(best.get("peak_wns", best["synth"].worst_slack_ns), r["synth"].worst_slack_ns)
             best = {"name": f"iter{i}", "patch": r["patch"], "synth": r["synth"], "rtl": r["rtl"],
                     "peak_wns": peak}
             print_synth(f"new best iter{i}", r["synth"])
+            if r["synth"].worst_slack_ns > top["synth"].worst_slack_ns:
+                top = best
         history.append(history_entry(i, r, resp_summary))
 
+    # best.patch: the last accepted point (rounds accepted on TNS may lower worst slack);
+    # best_wns.patch: the accepted point with the best worst slack, i.e. the Fmax to report
     write(out / "patches" / "best.patch", best["patch"])
-    write(out / "best.json", json.dumps({"best": best["name"], **synth_row(best["synth"])}, indent=2))
+    write(out / "patches" / "best_wns.patch", top["patch"])
+    write(out / "best.json", json.dumps({"best": best["name"], **synth_row(best["synth"]),
+                                         "best_wns": {"name": top["name"], **synth_row(top["synth"])}}, indent=2))
     get(N.reset_rocket.chia_remote(snap["rocket_head"], best["patch"]))
     print(f"\nbest: {best['name']} | " + json.dumps(synth_row(best["synth"]), ensure_ascii=False))
-    if a.equiv and best is not start:
+    if top is not best:
+        print(f"best_wns: {top['name']} | " + json.dumps(synth_row(top["synth"]), ensure_ascii=False))
+    if a.equiv:
         # against the start point: with --fragments the tile RTL differs from the
         # baseline by the config itself (address map), which is not an equivalence
-        run_equiv(a, out, start["rtl"], best["rtl"], best["name"], start["name"])
+        for p in ([best] if top is best else [best, top]):
+            if p is not start:
+                run_equiv(a, out, start["rtl"], p["rtl"], p["name"], start["name"],
+                          "equiv" if p is best else "equiv_best_wns")
 
 
 # ---------------------------------------------------------------------------
@@ -1112,8 +1173,8 @@ def rtl_sources(rtl) -> dict:
     return {**rtl.files, **{f"bb_{m}.v": t for m, t in rtl.blackboxes.items()}}
 
 
-def run_equiv(a, out: Path, base_rtl, best_rtl, label: str, ref: str = "baseline") -> dict:
-    d = out / "runs" / "equiv"
+def run_equiv(a, out: Path, base_rtl, best_rtl, label: str, ref: str = "baseline", sub: str = "equiv") -> dict:
+    d = out / "runs" / sub
     cs = E.find_units(rtl_sources(base_rtl), rtl_sources(best_rtl), N.TOP)
     info = {"label": label, "changed": cs.changed, "added": cs.added, "removed": cs.removed,
             "skipped": cs.skipped,

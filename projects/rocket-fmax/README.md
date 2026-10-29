@@ -94,7 +94,7 @@ chia job logs -f fmax-m3          # dừng: chia job stop fmax-m3 --kill-tracked
 
 Các tuỳ chọn khác: `--make-jobs 16`, `--build-timeout 3600`, `--llm-timeout 1800`,
 `--min-gain-ns 0`, `--tns-min-gain 0` (> 0: nhận cả vòng mà worst slack không tăng nhưng TNS âm giảm hơn tỉ lệ
-này, miễn worst slack không thấp hơn mức tốt nhất đã nhận quá `--wns-tol 0.1` ns), `--repeat-seed 7`, `--flush-cache`, `--out-dir ~/rocket-fmax-out`,
+này, miễn worst slack không thấp hơn mức tốt nhất đã nhận quá `--wns-tol 0.1` ns); phiên sửa nộp lại patch của vòng đã loại thì không đo lại; ra thêm `patches/best_wns.patch` (điểm có worst slack tốt nhất), `--repeat-seed 7`, `--flush-cache`, `--out-dir ~/rocket-fmax-out`,
 `--cache-dir ~/chia_cache`.
 
 ## Kiểm tương đương bản tốt nhất
@@ -471,6 +471,18 @@ dùng tool làm nháp. Lần sau chạy với `--edit-timeout 1500`.
 | best_cfg | −1,307 | 11,307 | 88,44 | `fpuOpt.ifpu.in_pipe_b_in1[6]` → `io_out_pipe_b_data[28]` |
 
 Gate `best_cfg` pass. Ở 21,2 ns cùng bản này chỉ đo được 80,3 MHz (xem mục Đo timing). Còn thiếu ~1,3 ns để đạt 100 MHz.
+
+**Lần chạy thật `fmax-lab-c3` (29/10/2026, Claude, 4 vòng, 10 ns, `--tns-min-gain 0.05`, từ `lab-c2` best): không nhận vòng nào.**
+- Điểm xuất phát (synth lại ở 10 ns): worst slack −1,3067 ns, TNS −2430,5 ns, 88,44 MHz.
+- Cả 4 vòng cho kết quả giống hệt nhau tới 4 chữ số: Claude nộp lại đúng patch `IntToFP` của vòng 1 (đọc từ lịch sử, vì
+  A/B của nó tốt hơn), mỗi lần ~0,5 phút. A/B: `ifpu` +0,135 ns, cả `FPU` +0,341 ns. Gate pass.
+- Cả tile: TNS −2430,5 → −1329,8 ns (+45,3 %), nhưng worst slack −1,3067 → −1,6807 ns, đường găng mới
+  `dcache.s2_req_addr[2]` → `core.mem_reg_wdata[62]` nằm ngoài phần đã sửa → dưới sàn `--wns-tol 0.1` → loại.
+  Synth `-flatten` cho ABC chạy chung cả tile, nên sửa FPU cũng đổi kết quả của đường không liên quan.
+- Sửa: loop nhớ patch của các vòng đã loại (`TRIED`); phiên sửa nộp lại y nguyên một patch đó thì không build, không
+  đo lại, tree về best và phiên sau được báo phải sửa khác. Lịch sử ghi rõ khi A/B thắng nhưng tile thua. Thêm
+  `patches/best_wns.patch` và `best_wns` trong `best.json`: điểm đã nhận có worst slack tốt nhất (Fmax để báo cáo),
+  vì vòng nhận theo TNS có thể làm worst slack giảm; `--equiv` kiểm cả điểm này nếu nó khác `best`. Mới kiểm bằng mock.
 
 **Lần chạy thật `fmax-lab-t4` (28/10/2026, 1 vòng): agent đã sửa được file nhưng build lỗi, bị loại sau 28 phút.**
 - Lệnh 36 của phiên 0 (heredoc python) ghi `FPU.scala` và có `EDITED`; các lệnh 37–45 kiểm `git diff`. Bản sửa

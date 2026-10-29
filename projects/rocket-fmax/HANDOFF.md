@@ -117,6 +117,9 @@ kiểm bằng mock:
   tile 8,7454 → 8,7515 ns vì đường găng chuyển sang `fpuOpt.ifpu`); equiv PASS. Đo lại ở 10 ns (`p10`, `measure_soc.py`):
   `abc -D` 21,2 ns làm ABC không ép delay, nên cùng bản này ở 10 ns cho 88,44 MHz (11,307 ns) thay vì 80,3; base 47,13 MHz.
   **Mục tiêu người dùng: > 100 MHz**, chạy tiếp với `--period-ns 10` và `--tns-min-gain` (nhận vòng giảm TNS, mới kiểm bằng mock).
+- `lab-c3` (29/10/2026, 10 ns, `--tns-min-gain 0.05 --wns-tol 0.1`): 0/4 vòng; Claude nộp lại cùng patch `IntToFP` 4 lần.
+  TNS +45 % nhưng worst slack −1,31 → −1,68 ns ở `dcache` → `core.mem_reg_wdata` (ngoài phần sửa; synth flatten). Đã thêm:
+  bỏ qua patch đã loại (`TRIED`), `best_wns.patch`. Chạy tiếp với `--wns-tol 0.5` (mới kiểm bằng mock).
 
 ## Chạy tiếp từ m4
 
