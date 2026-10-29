@@ -120,6 +120,9 @@ kiểm bằng mock:
 - `lab-c3` (29/10/2026, 10 ns, `--tns-min-gain 0.05 --wns-tol 0.1`): 0/4 vòng; Claude nộp lại cùng patch `IntToFP` 4 lần.
   TNS +45 % nhưng worst slack −1,31 → −1,68 ns ở `dcache` → `core.mem_reg_wdata` (ngoài phần sửa; synth flatten). Đã thêm:
   bỏ qua patch đã loại (`TRIED`), `best_wns.patch`. Chạy tiếp với `--wns-tol 0.5` (mới kiểm bằng mock).
+- `lab-c4` (29/10/2026, 10 ns, `--wns-tol 0.5`): nhận vòng 3 (`IntToFP`), −1,3067 → −1,1281 ns, **89,86 MHz**; đường găng
+  giờ `divSqrt_2` → `regfile_ext`. Vòng 2 A/B +0,41 nhưng tile −1,95 ns. Đã thêm: synth tile trước (tile loại thì huỷ
+  gate, sang phiên sửa sau với số liệu tile), patch thua A/B vào `TRIED` (mới kiểm bằng mock).
 
 ## Chạy tiếp từ m4
 

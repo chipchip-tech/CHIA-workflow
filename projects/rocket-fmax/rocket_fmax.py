@@ -656,44 +656,48 @@ def tile_rtl(art, r: dict):
 
 def gate_and_judge(a, d: Path, art, rtl, elfs, base: dict, best: dict, r: dict, synth=None) -> dict:
     """Gate and full synth of a built round (in parallel), then the decision. `synth`:
-    a full RocketTile result already in hand (a whole-tile A/B), not synthesized again."""
+    a full RocketTile result already in hand (a whole-tile A/B), not synthesized again.
+    The synth (~4 min) is judged first: when it rejects the round the gate (~12 min) is
+    cancelled and r["tile_reject"] is set (lab-c3/c4: A/B wins the whole tile rejected)."""
     r["rtl"] = rtl
     gate_ref = N.run_gate.chia_remote(art, elfs)
-    synth_ref = None if synth is not None else N.synth_sta.chia_remote(rtl, a.period_ns, a.synth_flow)
-    gate = get(gate_ref)
-    save_gate(d, gate)
-    isa_ok, cyc_ok, why = compare_gate(base["gate"], gate, a.exclude_isa)
-    r["isa_pass"], r["bench_cycles_match"] = isa_ok, cyc_ok
-    write(d / "gate_compare.txt", "\n".join(why) or "khớp baseline")
-    if not (isa_ok and cyc_ok):
-        if synth_ref is not None:
-            chia_cancel(synth_ref, force=True)
-        r["reason"] = "gate không đạt: " + "; ".join(why)
-        return r
-
-    synth = synth if synth is not None else get(synth_ref)
+    synth = synth if synth is not None else get(N.synth_sta.chia_remote(rtl, a.period_ns, a.synth_flow))
     save_synth(d, synth)
     r["synth"] = synth
-    if not synth.success:
-        r["reason"] = f"synth/STA lỗi: {synth.error}"
+    ok, why = judge(a, best, synth)
+    if not ok:
+        chia_cancel(gate_ref, force=True)
+        r["reason"], r["tile_reject"] = why, synth.success
         return r
+    gate = get(gate_ref)
+    save_gate(d, gate)
+    isa_ok, cyc_ok, gwhy = compare_gate(base["gate"], gate, a.exclude_isa)
+    r["isa_pass"], r["bench_cycles_match"] = isa_ok, cyc_ok
+    write(d / "gate_compare.txt", "\n".join(gwhy) or "khớp baseline")
+    if not (isa_ok and cyc_ok):
+        r["reason"] = "gate không đạt: " + "; ".join(gwhy)
+        return r
+    r["accepted"], r["reason"] = True, why
+    return r
+
+
+def judge(a, best: dict, synth) -> tuple[bool, str]:
+    """Whole-tile decision of a synth result against the best: (accepted, reason)."""
+    if not synth.success:
+        return False, f"synth/STA lỗi: {synth.error}"
     old, new = best["synth"].worst_slack_ns, synth.worst_slack_ns
     if new > old + a.min_gain_ns:
-        r["accepted"] = True
-        r["reason"] = f"slack {old:.4f} -> {new:.4f} ns"
-        return r
+        return True, f"slack {old:.4f} -> {new:.4f} ns"
     tns = tns_gain(a, best, synth)
     if tns is not None:
         gain, floor, text = tns
         if gain > a.tns_min_gain and new >= floor:
-            r["accepted"] = True
-            r["reason"] = f"{text}; slack {old:.4f} -> {new:.4f} ns (sàn {floor:.4f})"
-            return r
-    r["reason"] = (f"slack không tốt hơn: {new:.4f} ns so với {old:.4f} ns "
-                   f"của {best['name']} (đường găng {synth.crit_start} -> {synth.crit_end})")
+            return True, f"{text}; slack {old:.4f} -> {new:.4f} ns (sàn {floor:.4f})"
+    why = (f"slack không tốt hơn: {new:.4f} ns so với {old:.4f} ns "
+           f"của {best['name']} (đường găng {synth.crit_start} -> {synth.crit_end})")
     if tns is not None:
-        r["reason"] += f"; {tns[2]} (cần > {a.tns_min_gain:.0%}, slack >= {tns[1]:.4f})"
-    return r
+        why += f"; {tns[2]} (cần > {a.tns_min_gain:.0%}, slack >= {tns[1]:.4f})"
+    return False, why
 
 
 def tns_gain(a, best: dict, synth):
@@ -910,6 +914,29 @@ def session_note(k: int, ab_text: str, ab_dir: str, rdiff: str) -> str:
         "", "Your edits of this round so far:", "", "```diff", rdiff[-8000:], "```"])
 
 
+def tile_note(k: int, ab_text: str, last: str, best: dict, tile, ab_dir: str, rdiff: str) -> str:
+    """Note of a session that follows one whose edit won its A/B but lost on the whole tile."""
+    b = best["synth"]
+    return "\n".join([
+        f"## This session: the whole tile rejected your edit (session {k + 1})", "",
+        "Your edit won the A/B of the target:", "", "```", ab_text, "```", "",
+        "but the round is judged on the full RocketTile synth, and that rejected it:", "",
+        f"- with your edit: worst slack {tile.worst_slack_ns:.4f} ns, TNS {tile.tns_ns}, worst path "
+        f"`{tile.crit_start} -> {tile.crit_end}`",
+        f"- current best ({best['name']}): worst slack {b.worst_slack_ns:.4f} ns, TNS {b.tns_ns}, worst path "
+        f"`{b.crit_start} -> {b.crit_end}`",
+        f"- loop: {last}", "",
+        "The A/B synthesizes the module alone; the tile is flattened and ABC maps all of it at once, so the "
+        "same logic can come out slower there. "
+        f"`{ab_dir}/tile_paths.rpt` has the tile's worst paths with your edit, `{ab_dir}/tile_families.txt` "
+        f"its endpoint families; `{ab_dir}/round.diff` your edits of this round.", "",
+        "If the tile's worst path runs through logic you changed, shorten it further: the tile's numbers are "
+        "what count, keep the logic depth low (fewer levels, not just a different form). If it is elsewhere, "
+        "check in the families whether your target got better at all in the tile. This exact patch will not "
+        "be measured again: change it or undo it and try a different restructuring.",
+        "", "Your edits of this round so far:", "", "```diff", rdiff[-8000:], "```"])
+
+
 def run_round_loop_ab(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best, history) -> dict:
     """One --loop-ab round: the loop picks the target from the best's worst path; an
     agent session edits; the loop builds (build-fix agent on a compile error) and
@@ -1010,11 +1037,31 @@ def run_round_loop_ab(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best
                     else f"{ab['module']}: synth lỗi ({ab['c'].get('error') or ab['p'].get('error')})")
             if ab["delta"] is not None and ab["delta"] > a.ab_min_gain:
                 r["ab_result"] = last
-                return gate_and_judge(a, d, art, rtl, elfs, base, best, r,
-                                      synth=ab["child"] if ab["whole"] else None)
+                r = gate_and_judge(a, d, art, rtl, elfs, base, best, r,
+                                   synth=ab["child"] if ab["whole"] else None)
+                if not r.pop("tile_reject", False) or k >= a.ab_refines:
+                    return r
+                # lab-c3/c4: the target won its A/B but the whole tile (flattened, one ABC run)
+                # rejected it; the next session gets the tile's numbers instead of ending the round
+                tile = r["synth"]
+                TRIED.setdefault(repeat_key(r["patch"]), f"vòng {i} phiên {k + 1}: {r['reason'][:400]}")
+                r["tile_rejects"] = r.get("tile_rejects", 0) + 1
+                print(f"round {i}, phiên {k + 1}: A/B thắng nhưng cả tile bị loại ({r['reason'][:300]}); "
+                      "sang phiên sau", flush=True)
+                write(d / f"edit{k}_tile.txt", r["reason"])
+                last = f"{last}, cả tile: {r['reason'][:200]}"
+                r.update(reason="", synth=None, rtl=None, ab_result="")
+                stage = {**ab["files"], "round.diff": rdiff, "tile_paths.rpt": tile.paths or "",
+                         "tile_families.txt": tile.families or "",
+                         "child_verilog.sv": AB.module_texts(rtl).get(ab["module"], "")}
+                get(N.stage_for_agent.chia_remote(stage, ab_dir))
+                note = ab_note = tile_note(k + 1, ab["text"], last, best, tile, ab_dir, rdiff)
+                continue
             ab_text = ab["text"]
             stage = {**ab["files"], "round.diff": rdiff,
                      "child_verilog.sv": AB.module_texts(rtl).get(ab["module"], "")}
+        if mods:     # lab-c4: a session went back to an earlier session's losing edit
+            TRIED.setdefault(repeat_key(r["patch"]), f"vòng {i} phiên {k + 1}: A/B {last}")
         if k < a.ab_refines:
             get(N.stage_for_agent.chia_remote(stage, ab_dir))
             note = ab_note = session_note(k + 1, ab_text, ab_dir, rdiff)

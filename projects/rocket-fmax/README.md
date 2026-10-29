@@ -472,6 +472,18 @@ dùng tool làm nháp. Lần sau chạy với `--edit-timeout 1500`.
 
 Gate `best_cfg` pass. Ở 21,2 ns cùng bản này chỉ đo được 80,3 MHz (xem mục Đo timing). Còn thiếu ~1,3 ns để đạt 100 MHz.
 
+**Lần chạy thật `fmax-lab-c4` (29/10/2026, Claude, 5 vòng, 10 ns, `--tns-min-gain 0.05 --wns-tol 0.5`, từ `lab-c2` best): nhận 1/5.**
+- Vòng 3 nhận (sửa `IntToFP`, A/B `ifpu` +0,259 ns): worst slack −1,3067 → −1,1281 ns, TNS −2430,5 → −1270,6 ns,
+  **88,44 → 89,86 MHz**, area 1 064 761 µm². Đường găng mới: `fpuOpt.divSqrt_2...sExp_Z` → `fpuOpt.regfile_ext.Memory`.
+- Vòng 2: A/B `ifpu` +0,411 ns nhưng cả tile cho worst slack −1,9516 ns ngay trong `ifpu` (dưới sàn −1,8067) → loại
+  sau 12 phút gate. Đây là lần thứ hai A/B module thắng mà tile thua (cùng `lab-c3`).
+- Vòng 1, 4, 5: A/B không thắng sau 4 phiên. Phiên 4 của vòng 1 và phiên 3 của vòng 5 quay về đúng bản sửa
+  của phiên 1 (cùng delta), loop đo lại.
+- Sửa (mới kiểm bằng mock):
+  - synth cả tile chạy trước, song song với gate; tile loại thì huỷ gate.
+  - A/B thắng mà tile loại thì sang phiên sửa sau, đưa số liệu và `tile_paths.rpt` của tile cho phiên đó, không kết thúc vòng.
+  - Patch thua A/B cũng vào `TRIED`, nên phiên sau làm lại y nguyên thì không build lại.
+
 **Lần chạy thật `fmax-lab-c3` (29/10/2026, Claude, 4 vòng, 10 ns, `--tns-min-gain 0.05`, từ `lab-c2` best): không nhận vòng nào.**
 - Điểm xuất phát (synth lại ở 10 ns): worst slack −1,3067 ns, TNS −2430,5 ns, 88,44 MHz.
 - Cả 4 vòng cho kết quả giống hệt nhau tới 4 chữ số: Claude nộp lại đúng patch `IntToFP` của vòng 1 (đọc từ lịch sử, vì
