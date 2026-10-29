@@ -135,7 +135,18 @@ Cache: `baseline_rtl`, `baseline_synth_v2_p10`, `baseline_gate_b2_mm_spmv` (cach
 
 | Đợt | Vòng nhận | Fmax | Chi phí cycle | Ghi chú |
 |---|---|---|---|---|
-| (chưa chạy) | | | | |
+| baseline | | 47,13 MHz | 1,000 | đường găng `core.div` |
+| `chia-fmax-r1` (29/10/2026) | 4/5 | 47,13 → 59,80 → 72,94 → 79,42 → **81,91 MHz** | +0,405 % | hiệu năng +73,1 %; diện tích +1,5 %; vòng 5 agent không sửa gì (0,3 phút) |
+
+Chi tiết `chia-fmax-r1` (gate riscv-tests pass ở mọi vòng nhận):
+
+| Vòng | Fmax (MHz) | Worst slack (ns) | Cycle | Hiệu năng | Đường găng sau vòng | Phút |
+|---|---|---|---|---|---|---|
+| 1 | 59,80 | −6,72 | +0 % | +26,9 % | `fpuOpt.dfma` (mulAdd) | 20,3 |
+| 2 | 72,94 | −3,71 | +0,405 % | +21,5 % | `dcache.s2_req_addr` → `core.mem_reg_wdata` | 22,8 |
+| 3 | 79,42 | −2,59 | +0,405 % | +8,9 % | `fpuOpt.ifpu` | 21,1 |
+| 4 | 81,91 | −2,21 | +0,405 % | +3,1 % | `dcache.s2_req_addr` → `core.mem_reg_wdata` | 28,9 |
+| 5 | loại | | | | agent không thay đổi gì | 0,3 |
 
 ## Đầu ra: `<out-dir>/<run>/`
 
@@ -163,9 +174,11 @@ docker exec chia-chipyard-$USER-0 bash -lc 'cd /home/ray/chipyard/generators/roc
 
 - **Chạy thật:**
   - Baseline 10 ns với `--extra-bench mm spmv` (`fmax-chia-2`, 29/10/2026); số liệu ở bảng trên.
+  - Vòng `--chia-mode` (`chia-fmax-r1`, 29/10/2026): 4 vòng được nhận, gate và nhận/loại theo chi phí cycle chạy
+    đúng. Nguyên nhân vòng 5 kết thúc sau 0,3 phút chưa rõ.
   - Probe Claude Code (28/10/2026): Sonnet medium gọi được `chipyard_bash`.
   - Build, gate, synth/STA, `SalvageClaudeLLM`, sửa build: đã dùng ở các lần chạy trước khi bắt đầu lại.
 - **Mới kiểm bằng mock:**
-  - Vòng `--chia-mode`: nhận/loại theo chi phí cycle, huỷ gate khi synth tile thua, agent debug, gate điểm xuất phát.
-  - `synth_ab` chưa từng được Claude gọi trọn vẹn trong lần chạy thật nào.
+  - Huỷ gate khi synth tile thua, agent debug, gate điểm xuất phát (`--start-patch`).
+  - Chưa xác nhận Claude có gọi `synth_ab` trọn vẹn trong `chia-fmax-r1` (cần `agent_ab_experiments.jsonl`).
 - Tính đúng chức năng chỉ dựa vào riscv-tests và 8 benchmark (như example), không kiểm tương đương.

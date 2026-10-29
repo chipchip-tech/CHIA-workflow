@@ -13,14 +13,16 @@ File này dành cho session Claude Code tiếp quản project. Đọc cùng `CLA
   xuất phát từ RocketConfig gốc.
 - Baseline 10 ns đã đo thật (47,13 MHz, đường găng `core.div`, gate pass trừ `rv64ui-p-ma_data`) và nằm trong
   cache Ray của máy người dùng (`baseline_rtl`, `baseline_synth_v2_p10`, `baseline_gate_b2_mm_spmv`).
-- Chưa vòng `--chia-mode` nào chạy thật; phần vòng mới kiểm bằng mock.
+- Đợt 1 `chia-fmax-r1` (29/10/2026) xong: 4/5 vòng nhận, 47,13 → 81,91 MHz, cycle +0,405 %. Vòng 5 dừng sau
+  0,3 phút vì agent không sửa gì, chưa rõ lý do. Kết quả ở `~/rocket-fmax-v2/chia-fmax-r1/` trên máy người dùng.
 
 ## Việc tiếp theo
 
-1. Người dùng chạy đợt 1 bằng lệnh ở mục "Chạy" của `README.md` (`--out-dir ~/rocket-fmax-v2 --run-name v2-r1`).
-2. Đọc log: baseline phải HIT cache; xem phiên agent có gọi `synth_ab` trọn vẹn không, có vòng nào được nhận,
+1. Tìm lý do vòng 5 của `chia-fmax-r1` kết thúc sau 0,3 phút; kiểm `agent_ab_experiments.jsonl` các vòng.
+2. Đợt 2: `--start-patch ~/rocket-fmax-v2/chia-fmax-r1/patches/best.patch --run-name chia-fmax-r2`.
+3. Đọc log: baseline phải HIT cache; xem phiên agent có gọi `synth_ab` trọn vẹn không, có vòng nào được nhận,
    agent debug có chạy khi test fail không. Sửa loop theo log.
-3. Ghi kết quả từng đợt vào bảng "Kết quả" của `README.md`. Đợt sau dùng `--start-patch` từ `best.patch` của đợt trước.
+4. Ghi kết quả từng đợt vào bảng "Kết quả" của `README.md`. Đợt sau dùng `--start-patch` từ `best.patch` của đợt trước.
 
 ## Quy ước làm việc
 
