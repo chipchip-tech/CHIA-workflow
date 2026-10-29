@@ -80,6 +80,18 @@ SYSTEM_MESSAGE_CHIA = ("You are a hardware timing engineer working on the Rocket
                        "allowed, with every consumer updated) and check each edit with the synth_ab tool. You never "
                        "run make, sbt, verilator or yosys yourself: the full build, tests and synthesis run after "
                        "you finish.")
+EMPTY_RETRY = """
+
+## Your previous session made no edit
+
+A session on this round finished without changing any file. Its answer:
+
+{answer}
+
+That wastes the round. Try at least two concrete edits on the worst path family. Check each one with
+synth_ab, ending with the whole `RocketTile`. A pipeline stage is allowed: the loop measures its
+cycle cost on the benchmarks and rejects the round if that cost is too high.
+"""
 SYSTEM_MESSAGE_DEBUG = ("You are a Chisel engineer working on the Rocket core in Chipyard. An edit made earlier in this "
                         "round builds but fails functional tests; you find and fix the bug through the chipyard_bash "
                         "tool and keep the intent of the edit. You never run make, sbt, verilator or yosys.")
@@ -187,6 +199,8 @@ def parse_args():
                    help="--chia-mode: Fmax / cycle cost must beat the best by more than this fraction")
     p.add_argument("--debug-retries", type=int, default=2,
                    help="--chia-mode: debug-agent sessions after a functional failure of the gate")
+    p.add_argument("--empty-retries", type=int, default=1,
+                   help="--chia-mode: new sessions when the agent finishes without any edit")
     p.add_argument("--equiv", action="store_true",
                    help="after the loop: equivalence check of the best patch vs the baseline")
     p.add_argument("--equiv-only", action="store_true",
@@ -872,6 +886,15 @@ def run_round(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best, histor
         reason = "" if resp.success else f"LLM không thành công (returncode {resp.returncode})"
     else:
         reason = call_agent(a, llm, prompt, tag, d, "agent", best, a.ab_tool)
+        # --chia-mode: a session that gives up without any edit (chia-fmax-r1 round 5: one turn,
+        # 7 s, no synth_ab) gets a new session told so, at most --empty-retries times
+        for k in range(1, (a.empty_retries if a.chia_mode else 0) + 1):
+            if reason or get(N.collect_diff.chia_remote(snap["rocket_head"], snap["outside"]))["patch"] != best["patch"]:
+                break
+            print(f"round {i}: agent không sửa gì, gọi phiên mới (lần {k}/{a.empty_retries})", flush=True)
+            rprompt = prompt + EMPTY_RETRY.format(answer=last_response(d)[-1500:])
+            write(d / f"retry{k}_prompt.md", rprompt)
+            reason = call_agent(a, llm, rprompt, f"{tag}_retry{k}", d, f"retry{k}", best, a.ab_tool)
     r["agent_min"] = (time.time() - t_agent) / 60
 
     diff = after_agent(out, d, i, snap, best, r, reason)
@@ -1258,8 +1281,9 @@ def repeat_session(a, i: int, k: int, snap, best, r) -> str | None:
 
 
 def last_response(d: Path) -> str:
-    """Summary of the round's last agent answer (agent_response.md or editN_response.md)."""
+    """Summary of the round's last agent answer (agent_response.md, retryN_ or editN_response.md)."""
     files = sorted(d.glob("edit*_response.md"), key=lambda p: int(re.sub(r"\D", "", p.stem) or 0))
+    files = files or sorted(d.glob("retry*_response.md"), key=lambda p: int(re.sub(r"\D", "", p.stem) or 0))
     files = files or [d / "agent_response.md"]
     return files[-1].read_text()[-1500:] if files[-1].exists() else ""
 

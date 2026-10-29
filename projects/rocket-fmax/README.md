@@ -115,7 +115,7 @@ chia job logs -f fmax-v2-r1          # dừng: chia job stop fmax-v2-r1
   job dừng ngay lúc đọc tham số.
 - Gói Pro: một phiên dài tốn nhiều token, nên chạy theo đợt khoảng 5 vòng. Gặp "You've hit your limit" thì loop
   chờ tới giờ reset rồi gọi lại (`--quota-retries`, bỏ nếu xa hơn `--quota-max-wait`).
-- Tuỳ chọn khác: `--llm-timeout 1800` (example dùng 3600), `--debug-retries 2`, `--build-fixes 2`,
+- Tuỳ chọn khác: `--llm-timeout 1800` (example dùng 3600), `--debug-retries 2`, `--empty-retries 1` (phiên mới khi agent không sửa gì), `--build-fixes 2`,
   `--fix-timeout 900`, `--make-jobs 16`, `--build-timeout 3600`, `--cache-dir ~/chia_cache`.
 - `rv64ui-p-ma_data` fail ngay trên baseline (Rocket không hỗ trợ truy cập lệch địa chỉ), nên phải `--exclude-isa`.
 
@@ -175,10 +175,11 @@ docker exec chia-chipyard-$USER-0 bash -lc 'cd /home/ray/chipyard/generators/roc
 - **Chạy thật:**
   - Baseline 10 ns với `--extra-bench mm spmv` (`fmax-chia-2`, 29/10/2026); số liệu ở bảng trên.
   - Vòng `--chia-mode` (`chia-fmax-r1`, 29/10/2026): 4 vòng được nhận, gate và nhận/loại theo chi phí cycle chạy
-    đúng. Nguyên nhân vòng 5 kết thúc sau 0,3 phút chưa rõ.
+    đúng; baseline HIT cache. Claude gọi `synth_ab` ở cả 4 vòng nhận (2–10 lần/vòng, có A/B cả `RocketTile`).
+    Vòng 5: Sonnet bỏ cuộc sau 1 lượt, 7 giây, không gọi tool (prompt cũ cho phép "vòng trống"). Đã sửa prompt và
+    thêm `--empty-retries` (phiên mới khi agent không sửa gì); phần này mới kiểm bằng mock.
   - Probe Claude Code (28/10/2026): Sonnet medium gọi được `chipyard_bash`.
   - Build, gate, synth/STA, `SalvageClaudeLLM`, sửa build: đã dùng ở các lần chạy trước khi bắt đầu lại.
 - **Mới kiểm bằng mock:**
   - Huỷ gate khi synth tile thua, agent debug, gate điểm xuất phát (`--start-patch`).
-  - Chưa xác nhận Claude có gọi `synth_ab` trọn vẹn trong `chia-fmax-r1` (cần `agent_ab_experiments.jsonl`).
 - Tính đúng chức năng chỉ dựa vào riscv-tests và 8 benchmark (như example), không kiểm tương đương.

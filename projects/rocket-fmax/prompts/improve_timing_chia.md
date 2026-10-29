@@ -102,8 +102,14 @@ when it answers `running`, call it again.
 The sub-block A/B is a guide only: the whole tile is synthesized in one flattened ABC run and has
 often disagreed with it (a sub-block +0.4 ns, the tile -0.6 ns). Before you finish, run
 `$AB_START("RocketTile")` once on the final edit and finish only if it beats $BEST_SLACK ns, or if
-the cycle cost of your pipelining is clearly paid for (state the numbers). If nothing helps, undo
-your edits and say so: an empty round costs less than a worse one.
+the cycle cost of your pipelining is clearly paid for (state the numbers).
+
+You must try: finishing without an edit that you have measured wastes the round. A rejected edit
+costs nothing, because the loop rejects it and keeps $BEST_NAME. You cannot measure cycle cost
+yourself, but the loop measures it on the benchmarks and rejects the round if it is too high. So a
+pipeline stage whose IPC cost you only estimate is still worth trying. Give up only after at least
+two different edits, each checked with `$AB_START("RocketTile")`, failed to beat $BEST_SLACK ns. Then
+undo your edits and list what you tried, with the `synth_ab` numbers.
 
 ## Steps
 
