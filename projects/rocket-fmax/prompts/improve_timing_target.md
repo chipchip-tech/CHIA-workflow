@@ -27,7 +27,7 @@ When you finish, the loop (not you) will:
 2. A/B: synthesize the smallest module that holds the target and everything your edit changed,
    once from your edit and once from the current best ($BEST_NAME), with Yosys + OpenSTA
    (sky130_fd_sc_hd, fixed clock period $PERIOD_NS ns). What counts is the worst slack of the
-   endpoints inside the target instance (paths elsewhere in that module are reported too). If it is
+   endpoints inside the instance named in the target section above (paths elsewhere in that module are reported too). If it is
    not better by more than $AB_MIN_GAIN ns, you get the A/B report in a new session to improve the edit (at most
    $MAX_SESSIONS sessions in this round); after the last one the round is rejected.
 3. If the A/B is better: riscv-tests `rv64ui/um/ua/uf/ud-p-*` (all must pass) and the

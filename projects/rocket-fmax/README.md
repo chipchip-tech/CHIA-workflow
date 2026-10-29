@@ -472,6 +472,15 @@ dùng tool làm nháp. Lần sau chạy với `--edit-timeout 1500`.
 
 Gate `best_cfg` pass. Ở 21,2 ns cùng bản này chỉ đo được 80,3 MHz (xem mục Đo timing). Còn thiếu ~1,3 ns để đạt 100 MHz.
 
+**Lần chạy thật `fmax-lab-c5` (29/10/2026, Claude, 5 vòng, 10 ns, từ `lab-c4` best): không nhận vòng nào.**
+- Cả 5 vòng nhắm `fpuOpt (FPU)` (đường găng `divSqrt_2...sExp_Z` → `regfile_ext.Memory`, −1,1281 ns). Mỗi vòng 4 phiên,
+  trong đó 2–3 phiên không sửa gì; mọi A/B đều tệ hơn (−0,02 đến −2,44 ns).
+- Nguyên nhân phía loop: mục tiêu `fpuOpt` cũng là cả module A/B, nên A/B chấm theo worst path của riêng `FPU`
+  (`divSqrt_2...inReady` → `notZeroRem_Z`, −0,733 ns, nằm trong divSqrt), không phải đường găng của tile (kết thúc ở
+  `regfile_ext`). Sửa đường divSqrt → regfile không thể thắng A/B kiểu này (giống `lab-c1`).
+- Sửa (mới kiểm bằng mock): A/B chấm theo worst slack của các endpoint trong instance nơi đường găng kết thúc
+  (`decision_path`, ở đây `fpuOpt.regfile_ext`), prompt nói rõ instance đó.
+
 **Lần chạy thật `fmax-lab-c4` (29/10/2026, Claude, 5 vòng, 10 ns, `--tns-min-gain 0.05 --wns-tol 0.5`, từ `lab-c2` best): nhận 1/5.**
 - Vòng 3 nhận (sửa `IntToFP`, A/B `ifpu` +0,259 ns): worst slack −1,3067 → −1,1281 ns, TNS −2430,5 → −1270,6 ns,
   **88,44 → 89,86 MHz**, area 1 064 761 µm². Đường găng mới: `fpuOpt.divSqrt_2...sExp_Z` → `fpuOpt.regfile_ext.Memory`.

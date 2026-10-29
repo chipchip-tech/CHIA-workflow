@@ -123,6 +123,9 @@ kiểm bằng mock:
 - `lab-c4` (29/10/2026, 10 ns, `--wns-tol 0.5`): nhận vòng 3 (`IntToFP`), −1,3067 → −1,1281 ns, **89,86 MHz**; đường găng
   giờ `divSqrt_2` → `regfile_ext`. Vòng 2 A/B +0,41 nhưng tile −1,95 ns. Đã thêm: synth tile trước (tile loại thì huỷ
   gate, sang phiên sửa sau với số liệu tile), patch thua A/B vào `TRIED` (mới kiểm bằng mock).
+- `lab-c5` (29/10/2026, từ `lab-c4` best): 0/5, cả 5 vòng nhắm `fpuOpt`; A/B chấm theo worst path riêng của `FPU`
+  (trong divSqrt, −0,733 ns) thay vì đường tile (→ `regfile_ext`). Đã đổi: A/B chấm theo endpoint trong instance nơi đường
+  găng kết thúc (`decision_path`; mới kiểm bằng mock). 2–3/4 phiên mỗi vòng không sửa gì (chưa xem lý do).
 
 ## Chạy tiếp từ m4
 

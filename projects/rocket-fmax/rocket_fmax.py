@@ -773,12 +773,28 @@ def run_round(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best, histor
 # --loop-ab rounds: the loop picks the target and runs the A/B, the agent edits
 # ---------------------------------------------------------------------------
 
+def decision_path(rtl, target: dict) -> str:
+    """Instance whose endpoints decide the A/B: the instance where the best's worst path
+    ends, when it lies inside the target (a black box -> its parent); else the target.
+    lab-c5: target fpuOpt (divSqrt_2 -> regfile_ext) = the whole A/B module, whose own worst
+    path (inside divSqrt, -0.73 ns) is not the tile's (-1.13 ns, ending in regfile_ext), so
+    the module delta could not see an edit of the tile's path."""
+    path, end = target["path"], target["end_path"]
+    paths = N.instance_paths(rtl)
+    while end and paths.get(end) in rtl.blackboxes:
+        end = end.rpartition(".")[0]
+    return end if path and end.startswith(path + ".") else path
+
+
 def target_text(target: dict, classes: dict) -> str:
     lines = [f"- Worst path of the current best: `{target['crit']}`",
              f"- It starts in instance `{target['start_path'] or N.TOP}` and ends in "
              f"`{target['end_path'] or N.TOP}`.",
              f"- **Target: instance `{target['path'] or N.TOP}` = module `{target['module']}`** "
              "(the smallest instance holding both ends).",
+             f"- **The A/B is decided by the worst slack of the endpoints inside `{target['decide'] or N.TOP}`**"
+             + (" (where the worst path ends), not by the worst path of the whole synthesized module."
+                if target["decide"] != target["path"] else "."),
              "- Instances from the top down (instance -> Verilog module -> Scala files that define it):"]
     for path, mod in target["chain"]:
         files = classes.get(mod) or []
@@ -951,6 +967,7 @@ def run_round_loop_ab(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best
     target = N.pick_target(best["rtl"], best["synth"])
     target["report"] = first_path(best["synth"].paths)
     target["ends"], target["sources"] = N.path_sources(best["rtl"], best["synth"], best["patch"])
+    target["decide"] = decision_path(best["rtl"], target)
     classes = get(N.find_scala_classes.chia_remote([m for _, m in target["chain"]]))
     r["target"] = f"{target['path'] or N.TOP} ({target['module']})"
     write(d / "target.json", json.dumps({**target, "scala": classes}, indent=2))
@@ -1029,7 +1046,7 @@ def run_round_loop_ab(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best
         else:
             path = N.common_path([target["path"]] + N.changed_paths(rtl, mods))
             ab = AB.loop_ab(best["rtl"], best["synth"], best["name"], rtl, path, a.period_ns, a.synth_flow,
-                            parent_cache, target["path"])
+                            parent_cache, target["decide"])
             write(d / f"ab{k}.txt", ab["text"])
             print(f"round {i}, phiên {k + 1}: {ab['text']}", flush=True)
             r["ab_delta_ns"] = "" if ab["delta"] is None else ab["delta"]
