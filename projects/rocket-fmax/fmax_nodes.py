@@ -10,8 +10,8 @@ verilator, eda and opencode containers do not share a filesystem.
   any node (no resource):          extract_tile_rtl, run_gate (fans out to
                                    VerilatorRunNode on "verilator_run")
   eda (resource "eda"):            synth_sta (Yosys + OpenSTA, sky130hd tt),
-                                   synth_area (ChipTop, hierarchical), equiv_formal
-  chipyard, after the loop:        equiv_sim (Verilator lockstep), audit config file
+                                   equiv_formal
+  chipyard, after the loop:        equiv_sim (Verilator lockstep)
 """
 
 from __future__ import annotations
@@ -42,12 +42,9 @@ ROCKET = f"{CHIPYARD}/generators/rocket-chip"
 ROCKET_REL = "generators/rocket-chip"
 CONFIG = "RocketConfig"
 TOP = "RocketTile"
-SOC_TOP = "ChipTop"
 STAGE_DIR = "/home/ray/rocket_fmax"          # on chipyard: what the agent may read
 SIM_WORK_DIR = "/home/ray/rocket_fmax_sim"   # on verilator_run
-AUDIT_STAGE_DIR = "/home/ray/config_audit"   # on chipyard: inputs/outputs of the audit agent
 # Written by the loop scripts and the A/B tool (never by an agent), removed after use.
-AUDIT_CONFIG_FILE = f"{CHIPYARD}/generators/chipyard/src/main/scala/config/RocketFmaxAudit.scala"
 AB_PGID_FILE = "/home/ray/rocket_fmax_ab.pgid"   # process group of the A/B tool's make verilog
 LLM_PARTIAL_FILE = "/home/ray/rocket_fmax_llm_partial.txt"  # on opencode/claude: transcript of a cut-off run
 
@@ -483,7 +480,7 @@ class SalvageOpenCodeLLM(OpenCodeLLM):
 @ChiaFunction(resources={"chipyard": 1}, max_retries=0)
 def ab_cleanup() -> str:
     """After the A/B tool (ab_tool.py) is stopped: kill a `make verilog` it left
-    running (its process group) and remove the config file written for it."""
+    running (its process group)."""
     out = []
     if os.path.exists(AB_PGID_FILE):
         pgid = open(AB_PGID_FILE).read().strip()
@@ -494,22 +491,7 @@ def ab_cleanup() -> str:
         except (ProcessLookupError, PermissionError):
             pass
         os.remove(AB_PGID_FILE)
-    if os.path.exists(AUDIT_CONFIG_FILE):
-        os.remove(AUDIT_CONFIG_FILE)
-        out.append(f"removed {AUDIT_CONFIG_FILE}")
     return "; ".join(out) or "nothing to clean"
-
-
-@ChiaFunction(resources={"chipyard": 1}, max_retries=0)
-def write_audit_config(text: str | None) -> str:
-    """Write (or, with None, delete) AUDIT_CONFIG_FILE."""
-    if text is None:
-        if os.path.exists(AUDIT_CONFIG_FILE):
-            os.remove(AUDIT_CONFIG_FILE)
-        return "removed"
-    with open(AUDIT_CONFIG_FILE, "w") as f:
-        f.write(text)
-    return AUDIT_CONFIG_FILE
 
 
 def scope_violations(files: list[str], outside_changed: list[str]) -> list[str]:
@@ -605,12 +587,6 @@ def extract_tile_rtl(artifact) -> TileRTL:
     """RocketTile hierarchy (as text) from a BuildArtifact built with
     collect_generated_src=True."""
     return tile_rtl_from_sources(artifact.generated_src_files, TOP)
-
-
-@ChiaFunction(max_retries=0)
-def extract_soc_rtl(artifact) -> TileRTL:
-    """ChipTop hierarchy with RocketTile and the SRAMs as black boxes (config audit)."""
-    return tile_rtl_from_sources(artifact.generated_src_files, SOC_TOP, stub_modules=(TOP,))
 
 
 # ---------------------------------------------------------------------------
@@ -1054,17 +1030,6 @@ def round_diff(rocket_head: str, base_patch: str) -> str:
             os.remove(idx)
 
 
-def sram_bits(mems_conf: str) -> dict:
-    """{sram module: depth * width} from a .top.mems.conf."""
-    out = {}
-    for line in mems_conf.splitlines():
-        f = line.split()
-        kv = dict(zip(f[0::2], f[1::2]))
-        if "name" in kv and "depth" in kv and "width" in kv:
-            out[kv["name"]] = int(kv["depth"]) * int(kv["width"])
-    return out
-
-
 # ---------------------------------------------------------------------------
 # eda: Yosys + OpenSTA
 # ---------------------------------------------------------------------------
@@ -1290,150 +1255,6 @@ def synth_sta(rtl: TileRTL, period_ns: float, flow: str = "v2",
         return res
     finally:
         shutil.rmtree(work, ignore_errors=True)
-
-
-# Area only, hierarchy kept (config audit): per-module cells -> area per block.
-AREA_SCRIPT = """\
-read_liberty -lib {lib}
-{read_blackboxes}
-read_verilog -sv -DSYNTHESIS {files}
-hierarchy -check -top {top}
-synth -top {top}
-dfflibmap -liberty {lib}
-abc -D {period_ps} -liberty {lib} -constr abc.constr
-opt_clean -purge
-tee -o {stat} stat -liberty {lib} -top {top}
-"""
-
-
-def sv_packed_patterns(text: str) -> tuple[str, int]:
-    """firtool writes small Vec lookups as packed-array assignment patterns
-    (`wire [3:0][3:0] _GEN = '{4'hC, 4'h8, ...};`), which the Yosys in the eda
-    image cannot parse (`unexpected OP_CAST`). For a packed array '{a, b, ...}
-    equals the concatenation {a, b, ...} as long as every element has the
-    element's width, which firtool's sized literals and signals do. Returns
-    (text, patterns rewritten); raises on patterns that are not plain lists."""
-    code = re.sub(r"//[^\n]*", lambda m: " " * len(m.group(0)), text)   # comments masked, same offsets
-    starts = [m.start() for m in re.finditer(r"'\{", code)]
-    for s in starts:
-        depth, i = 0, s + 1
-        while i < len(code):
-            depth += {"{": 1, "}": -1}.get(code[i], 0)
-            if depth == 0:
-                break
-            i += 1
-        body = code[s + 2: i]
-        if re.search(r"\bdefault\b|[{,]\s*\w+\s*:(?!:)|^\s*\w+\s*:(?!:)", body) or \
-                any(re.fullmatch(r"\s*\d+\s*", e) for e in body.split(",")):
-            raise ValueError(f"unsupported assignment pattern: '{{{body[:120]}}}")
-    out = list(text)
-    for s in starts:
-        out[s] = " "
-    return "".join(out), len(starts)
-
-
-@dataclass
-class AreaResult:
-    success: bool
-    top: str
-    area_um2: float | None = None      # whole hierarchy (black boxes count 0)
-    module_area: dict = field(default_factory=dict)   # {module: own cell area}
-    stat: str = ""
-    yosys_log_tail: str = ""
-    seconds: float = 0.0
-    error: str = ""
-
-
-def parse_module_areas(stat: str) -> dict:
-    out = {}
-    for m in re.finditer(r"Chip area for module '\\?([^']+)':\s*([\d.]+)", stat):
-        out[m.group(1)] = float(m.group(2))
-    return out
-
-
-@ChiaFunction(resources={"eda": 1}, num_cpus=2, max_retries=0)
-def synth_area(rtl: TileRTL, period_ns: float, yosys_timeout: int = 4 * 3600) -> AreaResult:
-    """Hierarchical Yosys run on rtl.top (no flatten, no STA): area per module."""
-    res = AreaResult(success=False, top=rtl.top)
-    lib_src = os.environ.get("SKY130HD_LIB", "/home/ray/pdk/sky130hd/sky130_fd_sc_hd__tt_025C_1v80.lib")
-    work = tempfile.mkdtemp(prefix="rocket_fmax_area_")
-    try:
-        lib = "sky130hd_filtered.lib"
-        with open(lib_src) as f:
-            filtered, _ = filter_liberty(f.read())
-        with open(os.path.join(work, lib), "w") as f:
-            f.write(filtered)
-        os.makedirs(os.path.join(work, "rtl"))
-        for name, text in rtl.files.items():
-            try:
-                text, _ = sv_packed_patterns(text)
-            except ValueError as e:
-                res.error = f"{name}: {e}"
-                return res
-            with open(os.path.join(work, "rtl", name), "w") as f:
-                f.write(text)
-        bb_paths = []
-        for name, text in rtl.blackboxes.items():
-            bb_paths.append(f"bb_{name}.v")
-            with open(os.path.join(work, bb_paths[-1]), "w") as f:
-                f.write(text + "\n")
-        with open(os.path.join(work, "abc.constr"), "w") as f:
-            f.write(ABC_CONSTR)
-        with open(os.path.join(work, "area.ys"), "w") as f:
-            f.write(AREA_SCRIPT.format(
-                lib=lib, top=rtl.top, period_ps=int(round(period_ns * 1000)), stat="stat.txt",
-                read_blackboxes="\n".join(f"read_verilog -lib -sv {p}" for p in bb_paths),
-                files=" ".join(f"rtl/{n}" for n in sorted(rtl.files))))
-        t0 = time.time()
-        try:
-            y = subprocess.run(["yosys", "-q", "-l", "yosys.log", "-s", "area.ys"],
-                               cwd=work, capture_output=True, text=True, timeout=yosys_timeout)
-            rc, yerr = y.returncode, y.stdout + y.stderr
-        except subprocess.TimeoutExpired:
-            rc, yerr = -1, ""
-        res.seconds = time.time() - t0
-        ylog = os.path.join(work, "yosys.log")
-        res.yosys_log_tail = (open(ylog, errors="replace").read()[-20000:] if os.path.exists(ylog) else "") \
-            + (f"\n[yosys stdout/stderr]\n{yerr[-5000:]}" if yerr else "")
-        stat = os.path.join(work, "stat.txt")
-        if rc != 0 or not os.path.exists(stat):
-            res.error = f"yosys returncode {rc}" + (" (timeout)" if rc == -1 else "")
-            return res
-        res.stat = open(stat).read()
-        res.area_um2 = parse_area(res.stat)
-        res.module_area = parse_module_areas(res.stat)
-        res.success = res.area_um2 is not None
-        if not res.success:
-            res.error = "không đọc được area trong stat"
-        return res
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
-
-
-def block_tree(rtl: TileRTL, module_area: dict, max_depth: int = 3) -> list[tuple]:
-    """[(depth, instance path, module, subtree area or None for black boxes)]
-    for rtl.top down to `max_depth`, from the RTL instance structure."""
-    mods = E.modules_of(rtl.files)
-    inst_re = re.compile(r"^\s*([A-Za-z_]\w*)\s+(?:#\s*\(.*?\)\s*)?([A-Za-z_]\w*)\s*\(", re.M | re.S)
-    kids = {m: [(i, c) for c, i in inst_re.findall(t) if c in mods or c in rtl.blackboxes]
-            for m, t in mods.items()}
-    memo: dict[str, float] = {}
-
-    def area(m):
-        if m not in memo:
-            memo[m] = module_area.get(m, 0.0) + sum(area(c) for _, c in kids.get(m, []))
-        return memo[m]
-
-    rows = []
-
-    def walk(m, path, depth):
-        rows.append((depth, path, m, None if m in rtl.blackboxes else area(m)))
-        if depth < max_depth:
-            for inst, c in sorted(kids.get(m, []), key=lambda ic: -area(ic[1])):
-                walk(c, f"{path}.{inst}", depth + 1)
-
-    walk(rtl.top, rtl.top, 0)
-    return rows
 
 
 # ---------------------------------------------------------------------------

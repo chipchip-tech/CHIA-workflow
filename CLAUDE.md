@@ -122,53 +122,18 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   push luôn lên nhánh đích.
 - Project hiện có: `project/ascon-secureboot` (RoCC Ascon-Hash256, secure boot; xong M1–M4).
   Nhánh `temp` cũ đã đổi tên thành nhánh này.
-- `project/rocket-fmax`: **session mới đọc `projects/rocket-fmax/HANDOFF.md` trước** (bàn giao từ mốc m4;
-  kết quả ở `projects/rocket-fmax/results/`). Sau m4 có thêm `--ab-tool` (agent synth A/B một module) và
-  `--build-fixes` (agent sửa lỗi build), theo ví dụ `timing_opt` của CHIA. Lần chạy thật đầu `fmax-ab-t1`
-  (27/10/2026) hỏng: tắt hết tool sẵn có của opencode thì model free trả `Free usage limit reached` (bật thì
-  chạy được, `probe_tools.py`) và opencode treo tới hết giờ. Đã đổi `--builtin-tools` thành `on|off|deny|readonly`
-  (mặc định `on`) và thêm cơ chế giết opencode khi gặp lỗi provider; probe lần 2: `deny`, `readonly`, `on` đều gọi được `chipyard_bash` → dùng `--builtin-tools readonly`. Lần `fmax-ab-t2` (`--ab-tool`, readonly): agent đi lan man 45 phút, không A/B lần nào, hết giờ → loại. Người dùng
-  chọn **`--loop-ab`**: loop chọn mục tiêu (instance chứa đường găng), agent chỉ sửa trong phiên ngắn, loop build + synth A/B
-  module, thua A/B thì đưa báo cáo cho phiên sửa tiếp, thắng mới gate; agent hết giờ mà đã sửa thì vẫn đánh giá diff. `lab-t1`/`lab-t2` (thật): mục tiêu đúng nhưng agent 40 lần gọi tool không sửa (dùng script `pass`/heredoc rỗng làm nháp) → thêm `BudgetBashTool` (`--edit-budget 15 25 35`, `--edit-steps 45`), mã Chisel hai đầu đường găng trong prompt, phiên không sửa thì sang phiên sau. `lab-t3` (thật): các phần đó chạy đúng, nhưng ngân sách chặn chính lệnh sửa (lệnh 36 > mốc 35) → lệnh ghi file Scala luôn được chạy, sửa không đổi file thì được báo + thêm 5 lệnh. Mới kiểm bằng mock. `lab-t4` (thật): agent sửa được `FPU.scala`, build lỗi elaborate (`IndexOutOfBoundsException -1`, `FPU.scala:870`); 2 lần agent sửa build hỏng vì model free báo `Free usage limit reached` → `build_errors` giữ stack frame, thêm `--quota-wait`/`--quota-retries`. `lab-t5`: opencode lại hết quota → người dùng chọn **Claude Code** (gói Pro, `--agent claude --model sonnet --effort medium`, node `hello_claude`, giữ opencode làm phụ); probe thật đạt (Sonnet gọi được `chipyard_bash`). `lab-c1` (thật): Claude sửa gọn (2 lệnh), build qua, nhưng A/B synth cả `FPU` (sửa module dùng chung) mà worst path của FPU là `divSqrt` → không thể thắng; đã đổi A/B sang endpoint trong instance mục tiêu, và phiên hoàn tác bản sửa thì chuyển sang phiên sau (mới kiểm bằng mock). `lab-c2` (thật): hai sửa đó chạy đúng, nhận 1/3 vòng (80,33 MHz ở 21,2 ns). Đo ở 10 ns (`p10`): `abc -D` theo chu kỳ nên chu kỳ rộng làm ABC không ép delay; cùng bản đo ở 10 ns được 88,44 MHz. Mục tiêu người dùng > 100 MHz: chạy `--period-ns 10` và thêm `--tns-min-gain` (nhận vòng giảm TNS khi worst slack giữ trong `--wns-tol`; mới kiểm bằng mock). `lab-c3` (thật, 10 ns): 0/4, Claude nộp lại cùng patch `IntToFP` 4 lần (TNS +45 % nhưng worst slack −1,31 → −1,68 ns ở `dcache`, ngoài phần sửa) → loop bỏ qua patch đã loại, thêm `best_wns.patch`; chạy tiếp `--wns-tol 0.5` (mới kiểm bằng mock). `lab-c4` (thật): nhận 1/5, 88,44 → 89,86 MHz (−1,1281 ns), đường găng sang `divSqrt_2` → `regfile_ext`; vòng 2 A/B thắng mà tile thua → synth tile trước gate, tile loại thì huỷ gate và sang phiên sửa sau (mới kiểm bằng mock). `lab-c5` (thật): 0/5, mục tiêu `fpuOpt` = cả module A/B nên A/B chấm theo đường riêng của FPU (divSqrt), không phải đường tile → A/B chấm theo endpoint trong instance cuối đường găng (`regfile_ext`; mới kiểm bằng mock). Sau đó người dùng chọn **`--chia-mode`** theo example `timing_opt` của CHIA (Sonnet medium, phiên dài tự A/B bằng `synth_ab`, được thêm pipeline, nhận khi Fmax / chi phí cycle tăng > 1 % và cycle tăng ≤ 3 % so với baseline, `--extra-bench` thêm benchmark FP, agent debug khi test fail; không `--equiv`), xuất phát từ `lab-c4` best; mới kiểm bằng mock.
-- `project/rocket-fmax` (`projects/rocket-fmax/`): loop agent tối ưu Fmax của RocketTile, giữ
-  nguyên cycle (gate: riscv-tests + mcycle của benchmark phải khớp baseline; đo bằng Yosys +
-  OpenSTA sky130hd, worker `eda` tự build). **Mốc 1 xong (25/10/2026)**: chốt luồng `v2`,
-  chu kỳ cố định **21,2 ns**; baseline worst slack −1,00 ns (đường găng 22,2 ns, ~45 MHz),
-  `~/rocket-fmax-out/m1-final`. **Mốc 2 xong (25/10/2026)**: 1 vòng bypass LLM (`m2a`, `m2b`),
-  vòng bị loại đúng (slack bằng baseline), lần 2 cả 3 bước baseline HIT cache; một vòng
-  ~13–14 phút (build 1,3 + gate ~12, synth chạy song song). **Mốc 3 xong (25/10/2026)**: 5 vòng agent thật (`m3`), nhận 4/5;
-  slack −1,00 → +6,98 ns ở 21,2 ns, Fmax ~45,0 → ~70,3 MHz, area +1,4 %; tổng ~116 phút. Lợi
-  chủ yếu do agent thay `+`/`-`/`*` bằng prefix adder/CSA viết tay (bù điểm yếu của Yosys/ABC),
-  và vòng 4 dời một tầng prefix của FMA qua thanh ghi pipeline sẵn có. Gate chỉ gồm riscv-tests +
-  6 benchmark; chưa kiểm equivalence hình thức cho các thay đổi FPU.
-  **Kiểm tương đương `best.patch` (25/10/2026): PASS** (`--equiv-only`, `equiv.py`): `RocketALU`
-  proven hình thức; `MulDiv` (unproven) và `FPU` (timeout) pass lockstep Verilator 10⁷ cycle.
-  Chưa chạy thật: mốc phụ `config_audit.py`
-  (agent chỉ đọc tìm khối thừa trong `RocketConfig`; loop tự ghi `RocketFmaxAudit.scala` trong
-  `generators/chipyard` — ngoại lệ đã được người dùng duyệt — build, gate, area từng ứng viên). Audit có danh sách khối bảo vệ cho FPGA Arty A7-100T và ASIC (ORFS): debug/JTAG,
-  UART, serial-TL, mem port, BootROM, CLINT/PLIC, boot-select, clock tap, clock/reset; chặn theo fragment và so cổng/module
-  `ChipTop` với baseline; xuất `patches/chipyard-config.patch` (`RocketFmaxSoCConfig` + biến thể Arty). Lần chạy thật đầu (26/10/2026): Yosys area `ChipTop` lỗi `unexpected OP_CAST` ở `'{...}` (bảng tra Vec
-  của firtool ngoài `RocketTile`); đã thêm `sv_packed_patterns` (đổi `'{`→`{`) cho luồng area, tag `audit_soc_area_a2_*`,
-  và `area_check.py` để kiểm trong container `eda` ngoài CHIA. Image `eda` có Yosys `0.38+92` (litex-hub, bản dev sau 0.38; đọc được
-  `wire [3:0][3:0]` nhưng không đọc `'{`). `area_check.py` chạy thật: 334 file, 126 pattern đổi, parse hết, area `ChipTop`
-  (trừ `RocketTile` và SRAM) 1,18 mm², Yosys 149 s. Lần `fmax-audit-3`: bảng khối bảo vệ tìm đủ 10 khối; agent đề xuất 2 ứng viên (scratchpad,
-  bus error devices) nhưng ghi `candidates.json` bằng `bash` có sẵn của opencode (chạy trong container opencode, không phải
-  `chipyard_bash`) nên loop không thấy → prompt bắt dùng `chipyard_bash` + lặp JSON ở cuối câu trả lời; loop đọc dự phòng
-  bên container opencode (`read_text_opencode`). Câu trả lời agent cache theo `audit_<run-name>_llm`: chạy lại phải đổi
-  `--run-name`. **Audit chạy thật xong (26/10/2026, `fmax-audit-4`, `--candidates-file`, `~/rocket-fmax-out/audit2`)**:
-  cả 2 ứng viên và bản gộp gate pass, mcycle giữ nguyên, khối bảo vệ còn đủ; bản gộp bớt 61 207 µm² (5,17 % area
-  `ChipTop` ngoài tile) + 64 KiB SRAM scratchpad. Đã xuất `chipyard-config.patch`; kiểm tay: áp được, `RocketFmaxSoCConfig` elaborate qua. Bản Arty chưa elaborate được vì project `chipyard_fpga` của nhánh `chia_artifact` vốn không compile (6 harness FPGA thiếu `def wf_active: chisel3.Bool` của `HasHarnessInstantiators`; lỗi y hệt với `RocketArty100TConfig` gốc). Đo lại Fmax sau audit (`measure_soc.py`, chạy thật 26/10/2026, `~/rocket-fmax-out/soc-fmax`): best.patch + config audit cho slack +7,35 ns (13,85 ns, ~72,2 MHz) so với +6,98 ns (70,3 MHz) của best.patch; gate pass. RTL tile đổi (DCache/Frontend/ICache/PMAChecker/PTW, xbar size z4→z3); nhiễu synth cỡ 0,1 ns (base→cfg lệch 0,09 ns dù `core.div` không đổi). Đường găng của bản tốt nhất giờ ở `dcache` (store data → storegen). `rocket_fmax.py` có thêm `--fragments` (build `RocketFmaxCfg` = fragment ++ RocketConfig cho mọi vòng, file config ghi sau `collect_diff` rồi xoá) và `--start-patch` (xuất phát từ best.patch, cache `baseline_start_<hash>_*`, `--equiv` so với điểm xuất phát); chạy thật (`fmax-m4`, 26/10/2026): 5 vòng, nhận 2 (vòng 1, 5), slack +7,35 → +8,75 ns (72,2 → 80,3 MHz, area +0,4 %), đường găng chuyển sang FPU (`fpuOpt.dfma`); vòng 3 build lỗi, vòng 4 agent hết `--llm-timeout` 30 phút; equiv iter5 so với điểm xuất phát PASS (`AMOALU` proven, `FPU` lockstep 10⁷ cycle). Đã sửa: `build_errors` bỏ mã màu ANSI trước khi lọc `[error]`; tiêu đề equiv ghi đúng điểm so sánh.
-  Bỏ error device: truy cập địa chỉ không ánh xạ có thể treo bus thay vì báo lỗi (gate không kiểm). Vivado/ORFS chưa
-  chạy (người dùng: để sau, chỉ cần audit không bỏ khối hai luồng này cần). Claude không tự viết patch Chisel: mọi chỉnh sửa Chisel do loop
-  (agent) làm. Đã kiểm (probe 25/10/2026): riscv-tests ở
-  `$RISCV/riscv64-unknown-elf/share/riscv-tests` (107 test ISA -p), module `RocketTile` có cổng
-  `clock`/`reset`, `chia-cacti` có `sta` (dùng `-group_count`, không phải `-group_path_count`),
-  `make verilog CONFIG=RocketConfig` chỉ mất ~1 phút.
-  Ghi chú CHIA dùng chung (đã chuyển lên `setup`, mục Ghi chú kỹ thuật về CHIA). Build baseline RocketConfig thật: 1,3–1,7 phút;
-  gate 15,5 phút (4 slot); Yosys trên RocketTile 3,4 phút. `abc -D` không có `-constr` thì không
-  chèn buffer, cho đường găng ~80 ns ảo → dùng `-constr` (luồng `v2`: 21,2 ns, đường găng trong `core.div`; `v3` dùng
-  `+/choices/kogge-stone.v` nhưng file này chỉ có từ Yosys 0.40, image eda có 0.38 → đã bỏ). `rv64ui-p-ma_data` fail ở
-  baseline (Rocket không hỗ trợ truy cập lệch địa chỉ).
+- `project/rocket-fmax` (`projects/rocket-fmax/`): **session mới đọc `projects/rocket-fmax/HANDOFF.md` trước.**
+  Loop CHIA tối ưu Fmax của `RocketTile` (Chipyard `RocketConfig`), đo bằng Yosys + OpenSTA sky130hd
+  (worker `eda` tự build), mục tiêu > 100 MHz ở chu kỳ 10 ns. **Bắt đầu lại từ đầu ngày 29/10/2026**: mọi kết
+  quả trước bị bỏ (lịch sử chỉ còn trong git, trước commit `ab43d94`), code config audit đã gỡ. Hướng duy nhất là
+  `--chia-mode` theo `examples/timing_opt` của CHIA: mỗi vòng một phiên Claude Code (Sonnet, effort medium, gói
+  Pro) tự A/B bằng `synth_ab`, được thêm pipeline; nhận khi Fmax / chi phí cycle tăng > 1 % và cycle tăng ≤ 3 %
+  so với baseline; gate riscv-tests + 8 benchmark (`--extra-bench mm spmv`), agent debug khi test fail; không
+  equiv. Baseline 10 ns đo thật: 47,13 MHz, đường găng `core.div`, gate 18,9 phút. Vòng `--chia-mode` chưa chạy
+  thật. Ghi nhớ kỹ thuật: build RocketConfig 1,3–1,7 phút, Yosys trên RocketTile ~3–4 phút; `abc -D` phải có
+  `-constr` và chu kỳ đặt ở mục tiêu (chu kỳ rộng làm Fmax đo thấp hơn); `rv64ui-p-ma_data` fail ở baseline
+  (`--exclude-isa`); image `eda` có Yosys 0.38. Claude không tự viết patch Chisel: mọi chỉnh sửa Chisel do loop
+  (agent) làm.
 
 ## Việc tiếp theo (gợi ý)
 

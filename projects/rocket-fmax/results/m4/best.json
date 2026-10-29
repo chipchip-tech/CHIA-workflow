@@ -1,9 +1,0 @@
-{
-  "best": "iter5",
-  "wns_ns": "0.0000",
-  "tns_ns": "0.0000",
-  "worst_slack_ns": "8.7454",
-  "fmax_mhz": "80.29",
-  "critical_path": "fpuOpt.dfma.in_in2[53]_reg -> fpuOpt.dfma.fma.mulAddResult_pHiR_15_reg",
-  "area_um2": "1082577"
-}

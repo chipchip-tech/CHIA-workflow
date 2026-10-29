@@ -21,8 +21,7 @@ thread (make) or as Ray tasks (synth_sta on "eda"), and the agent polls.
 The tool actor runs on the chipyard worker next to chipyard_bash (the two share
 the "chipyard" slot, 0.5 each), so `make verilog` sees the agent's edits and the
 reports land where chipyard_bash can read them. The loop calls ab_cleanup
-(fmax_nodes) after stopping the tool: it kills a `make verilog` still running and
-removes the config file written for it.
+(fmax_nodes) after stopping the tool: it kills a `make verilog` still running.
 
 loop_ab is the same A/B driven by the loop instead of the agent (`--loop-ab`): the
 loop builds the round, picks the module and passes the report to the agent.
@@ -198,7 +197,7 @@ def loop_ab(parent_rtl: N.TileRTL, parent_synth, parent_name: str, child_rtl: N.
 class SynthABTool(ChiaTool):
 
     def __init__(self, name: str, parent_rtl: N.TileRTL, parent_synth, parent_name: str, config: str,
-                 config_text: Optional[str], period_ns: float, flow: str, make_jobs: int = 16,
+                 period_ns: float, flow: str, make_jobs: int = 16,
                  task_options: Optional[dict] = None):
         super().__init__(name, task_options=task_options)
         # Set before __post_init__: it pickles this object into the actor.
@@ -206,7 +205,6 @@ class SynthABTool(ChiaTool):
         self._parent_tile = summary(parent_synth)    # full RocketTile result of the parent
         self._parent_name = parent_name
         self._config = config
-        self._config_text = config_text
         self._period_ns = period_ns
         self._flow = flow
         self._make_jobs = make_jobs
@@ -254,13 +252,8 @@ class SynthABTool(ChiaTool):
 
     def _run_make(self, job: dict):
         sims = f"{N.CHIPYARD}/sims/verilator"
-        wrote_cfg = False
         t0 = time.time()
         try:
-            if self._config_text:
-                with open(N.AUDIT_CONFIG_FILE, "w") as f:
-                    f.write(self._config_text)
-                wrote_cfg = True
             p = subprocess.Popen(["make", "verilog", f"CONFIG={self._config}", f"-j{self._make_jobs}"], cwd=sims,
                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                  start_new_session=True)
@@ -294,8 +287,6 @@ class SynthABTool(ChiaTool):
         except Exception as e:                                       # noqa: BLE001
             job["error"] = f"{type(e).__name__}: {e}"
         finally:
-            if wrote_cfg and os.path.exists(N.AUDIT_CONFIG_FILE):
-                os.remove(N.AUDIT_CONFIG_FILE)
             if os.path.exists(N.AB_PGID_FILE):
                 os.remove(N.AB_PGID_FILE)
             job["seconds"] = time.time() - t0
