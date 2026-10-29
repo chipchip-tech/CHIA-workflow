@@ -117,9 +117,11 @@ cd ~/xinstall
 ./xsetup -b ConfigGen                     # chọn Vivado, rồi Vivado ML Standard
 # sửa ~/.Xilinx/install_config.txt: Destination=/var/home/<user>/tools/Xilinx;
 #   trong Modules=: Artix-7:1, mọi họ chip khác :0 (bớt dung lượng)
-mkdir -p ~/tools/Xilinx                   # installer không tự tạo thư mục đích ("Cannot write to ...")
+#   CreateProgramGroupShortcuts=0, CreateDesktopShortcuts=0, CreateFileAssociation=0 (không cần,
+#   và tránh lỗi "Program group entry ... already exists" khi cài lại)
+mkdir -p ~/tools/Xilinx                   # phải thuộc $USER (không tạo bằng sudo), nếu không: "Cannot write to ..."
 ./xsetup -a XilinxEULA,3rdPartyEULA -b Install -c ~/.Xilinx/install_config.txt
-ls ~/tools/Xilinx/*/Vivado/bin/vivado ~/tools/Xilinx/Vivado/*/bin/vivado 2>/dev/null
+ls ~/tools/Xilinx/*/Vivado/bin/vivado ~/tools/Xilinx/Vivado/*/bin/vivado 2>/dev/null   # đã cài: 2025.1/Vivado/bin/vivado
 ```
 
 Image và worker:
