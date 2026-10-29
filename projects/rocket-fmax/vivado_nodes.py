@@ -18,10 +18,11 @@ import shutil
 import subprocess
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from chia.base.ChiaFunction import ChiaFunction
 
+RETRY_THREADS = 2
 VIVADO_GLOBS = ["/tools/Xilinx/Vivado/*/bin/vivado", "/tools/Xilinx/*/Vivado/bin/vivado"]
 
 CLOCK_XDC = """\
@@ -71,6 +72,8 @@ class VivadoResult:
     log_tail: str = ""
     version: str = ""
     seconds: float = 0.0
+    threads: int = 0                      # maxThreads of the run that produced the result
+    returncodes: list = field(default_factory=list)  # one per run; two when retried
     error: str = ""
 
 
@@ -133,18 +136,25 @@ def vivado_synth(rtl, period_ns: float, part: str, threads: int = 8, timeout: in
             f.write(black_box_stubs(rtl.stubs) if rtl.stubs else "")
         with open(os.path.join(work, "clock.xdc"), "w") as f:
             f.write(CLOCK_XDC.format(period_ns=period_ns))
-        with open(os.path.join(work, "run.tcl"), "w") as f:
-            f.write(VIVADO_TCL.format(threads=threads, top=rtl.top, part=part,
-                                      files=" ".join(f"rtl/{n}" for n in sorted(rtl.files)),
-                                      stubs="bb_stubs.v"))
         t0 = time.time()
-        try:
-            p = subprocess.run([vivado, "-mode", "batch", "-nojournal", "-log", "vivado.log",
-                                "-source", "run.tcl"], cwd=work, capture_output=True, text=True,
-                               timeout=timeout)
-            rc, out = p.returncode, p.stdout + p.stderr
-        except subprocess.TimeoutExpired:
-            rc, out = -1, ""
+        # A run killed for memory (OOM: returncode 137/-9, no slack) is retried once with
+        # RETRY_THREADS: fewer forked synth workers, lower peak memory.
+        for nthr in [threads] + ([RETRY_THREADS] if threads > RETRY_THREADS else []):
+            with open(os.path.join(work, "run.tcl"), "w") as f:
+                f.write(VIVADO_TCL.format(threads=nthr, top=rtl.top, part=part,
+                                          files=" ".join(f"rtl/{n}" for n in sorted(rtl.files)),
+                                          stubs="bb_stubs.v"))
+            try:
+                p = subprocess.run([vivado, "-mode", "batch", "-nojournal", "-log", "vivado.log",
+                                    "-source", "run.tcl"], cwd=work, capture_output=True, text=True,
+                                   timeout=timeout)
+                rc, out = p.returncode, p.stdout + p.stderr
+            except subprocess.TimeoutExpired:
+                rc, out = -1, ""
+            res.returncodes.append(rc)
+            if rc == -1 or "@@SLACK" in out:
+                break
+        res.threads = nthr
         res.seconds = time.time() - t0
         res.log_tail = out[-20000:]
 
@@ -159,7 +169,8 @@ def vivado_synth(rtl, period_ns: float, part: str, threads: int = 8, timeout: in
         res.ffs = _util(res.utilization, "Slice Registers") or _util(res.utilization, "CLB Registers")
         res.dsps = _util(res.utilization, "DSPs")
         if rc != 0 or res.worst_slack_ns is None:
-            res.error = f"vivado returncode {rc}" + (" (timeout)" if rc == -1 else "") + ", slack not found"
+            res.error = (f"vivado returncode {'/'.join(map(str, res.returncodes))}" + (" (timeout)" if rc == -1 else "")
+                         + (" (killed: OOM?)" if rc in (137, -9) else "") + ", slack not found")
             return res
         res.success = True
         return res

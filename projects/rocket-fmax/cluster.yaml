@@ -100,7 +100,8 @@ available_node_types:
                 - "-v ~/tools/Xilinx:/tools/Xilinx:ro"
                 - --security-opt label=disable
                 - --shm-size=2gb
-                - --memory=14g       # synth_design peaked at ~9.5 GB on RocketTile (forked workers)
+                - --memory=18g       # synth_design peaked at ~9.5 GB at baseline (forked workers); some rounds OOM at 14g
+                - --memory-swap=26g  # + up to 8 GB of host swap (zram on Bazzite) instead of an OOM kill
 
 head_env_commands: ["source ~/.bashrc && conda activate chia_env"]
 head_setup_commands: ["source ~/.bashrc && conda activate chia_env"]

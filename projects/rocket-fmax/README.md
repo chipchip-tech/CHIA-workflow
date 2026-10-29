@@ -239,8 +239,10 @@ docker exec chia-chipyard-$USER-0 bash -lc 'cd /home/ray/chipyard/generators/roc
   - Vivado (29/10/2026): Vivado 2025.1 ML Standard cài ở `~/tools/Xilinx`, image `chia-vivado`, worker `rocket_vivado`,
     `--baseline-only --vivado-part xc7a200tfbg676-2` chạy được: baseline 63,82 MHz (slack -5,670 ns, 2000+ endpoint
     fail), đường găng `dcache/s2_data_reg[34] -> core/mem_reg_wdata_reg[6]` (không phải `core.div` như Yosys),
-    28 750 LUT, 13 214 FF, 25 DSP, 2,2 phút. Bộ nhớ đỉnh ~9,5 GB (tiến trình con của synth song song), nên container
-    để `--memory=14g`.
+    28 750 LUT, 13 214 FF, 25 DSP, 2,2 phút. Bộ nhớ đỉnh ~9,5 GB (tiến trình con của synth song song). Ở đợt 3 vài vòng
+    bị bỏ qua vì hết RAM với `--memory=14g`, nên container nâng lên `--memory=18g --memory-swap=26g`, và Vivado bị kill
+    (không ra slack) thì tự chạy lại 1 lần với 2 luồng (cột `error` của `vivado.csv` ghi "chạy lại ..."; chạy lại mới
+    kiểm bằng mock).
 - **Mới kiểm bằng mock:**
   - `--vivado-part` trong các vòng (ghi `vivado.csv` từng vòng, chờ Vivado ở cuối job, lỗi Vivado không làm dừng loop).
   - Huỷ gate khi synth tile thua, agent debug, gate điểm xuất phát (`--start-patch`).

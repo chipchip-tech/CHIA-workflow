@@ -311,6 +311,7 @@ def vivado_flush(out: Path, wait: bool = False):
             v = get(ref)
         except Exception as e:                                       # noqa: BLE001
             v = V.VivadoResult(success=False, part="", period_ns=0.0, error=f"{type(e).__name__}: {e}"[:500])
+        rcs = getattr(v, "returncodes", [])
         d = out / "runs" / label
         write(d / "vivado_paths.rpt", v.paths)
         write(d / "vivado_timing_summary.rpt", v.summary)
@@ -321,7 +322,7 @@ def vivado_flush(out: Path, wait: bool = False):
                "viv_failing": v.failing_endpoints if v.failing_endpoints is not None else "",
                "viv_luts": v.luts or "", "viv_ffs": v.ffs or "", "viv_dsps": v.dsps if v.dsps is not None else "",
                "viv_min": f"{v.seconds / 60:.1f}", "viv_critical_path": f"{v.crit_start} -> {v.crit_end}",
-               "error": v.error}
+               "error": v.error or (f"chạy lại {v.threads} luồng sau returncode {rcs[0]}" if len(rcs) > 1 else "")}
         if ys is not None:
             row.update(yosys_fmax_mhz=fmt(ys.fmax_mhz, 2), yosys_slack_ns=fmt(ys.worst_slack_ns, 4))
         path = out / "vivado.csv"
