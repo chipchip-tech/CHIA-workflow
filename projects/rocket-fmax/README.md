@@ -53,6 +53,8 @@ synthesis đang chạy bị huỷ.
 | `ab_tool.py` | Tool MCP `synth_ab` (`--ab-tool`): agent elaborate bản sửa rồi synth A/B một module so với bản tốt nhất; `loop_ab`: cùng phép A/B do loop gọi (`--loop-ab`) |
 | `prompts/improve_timing.md` | Prompt của agent (IPC-neutral, không build) |
 | `prompts/improve_timing_ab.md` | Như trên, kèm hướng dẫn dùng `synth_ab` (dùng khi `--ab-tool`) |
+| `prompts/improve_timing_chia.md` | Prompt của `--chia-mode` (theo `timing_opt` của CHIA): một phiên dài, agent tự A/B bằng `synth_ab`, được thêm pipeline |
+| `prompts/fix_failure.md` | Prompt của agent debug (`--chia-mode`) khi bản sửa build được nhưng test fail |
 | `prompts/improve_timing_target.md` | Prompt của phiên sửa ngắn (`--loop-ab`): mục tiêu do loop chọn, kết quả A/B của phiên trước |
 | `prompts/fix_build.md` | Prompt của agent sửa lỗi build (`--build-fixes`) |
 | `prompts/audit_config.md` | Prompt của agent kiểm config (chỉ đọc, ghi `candidates.json`) |
@@ -472,6 +474,8 @@ dùng tool làm nháp. Lần sau chạy với `--edit-timeout 1500`.
 
 Gate `best_cfg` pass. Ở 21,2 ns cùng bản này chỉ đo được 80,3 MHz (xem mục Đo timing). Còn thiếu ~1,3 ns để đạt 100 MHz.
 
+Sau `lab-c5`: dừng `lab-c6` (chưa xong, bỏ kết quả); chuyển sang `--chia-mode` (mục "Theo example `timing_opt` của CHIA"), cho phép mất tối đa 3 % cycle, xuất phát từ `lab-c4` best.
+
 **Lần chạy thật `fmax-lab-c5` (29/10/2026, Claude, 5 vòng, 10 ns, từ `lab-c4` best): không nhận vòng nào.**
 - Cả 5 vòng nhắm `fpuOpt (FPU)` (đường găng `divSqrt_2...sExp_Z` → `regfile_ext.Memory`, −1,1281 ns). Mỗi vòng 4 phiên,
   trong đó 2–3 phiên không sửa gì; mọi A/B đều tệ hơn (−0,02 đến −2,44 ns).
@@ -517,6 +521,31 @@ Gate `best_cfg` pass. Ở 21,2 ns cùng bản này chỉ đo được 80,3 MHz (
 - **Lỗi của loop:** `build_errors` chỉ giữ dòng có `Exception`/`[error]`, nên bỏ mất các stack frame `at ...(FPU.scala:N)`.
   Agent sửa build vì thế không biết lỗi nằm ở dòng nào. Đã sửa: giữ tối đa 12 frame của mã `freechips`/`chipyard`/`testchipip`
   sau mỗi dòng exception.
+
+### Theo example `timing_opt` của CHIA (`--chia-mode`)
+
+Sau `lab-c5` người dùng chọn làm theo `examples/timing_opt` của CHIA (BOOM), nhưng dùng Claude Sonnet medium:
+
+- **Mỗi vòng một phiên agent dài** (`--llm-timeout`, đề xuất 3600 s), prompt `prompts/improve_timing_chia.md`
+  (chuyển từ `improve_timing.md` của example sang Rocket + Yosys). Agent tự đọc báo cáo timing, tự chọn đường, sửa,
+  và tự A/B bằng `synth_ab` (`ab_tool.py`, cùng kiểu start/poll như `timing_experiment` của CHIA). Prompt vẫn kèm
+  vị trí đường găng trong Verilog và Chisel (như `--loop-ab`) làm điểm bắt đầu.
+- **Được thêm tầng pipeline** (phải cập nhật mọi chỗ dùng tín hiệu bị trễ), không được thu nhỏ cấu trúc.
+- **Gate:** riscv-tests phải pass, mọi benchmark phải pass với `minstret` bằng baseline (số lệnh giữ nguyên);
+  mcycle được đổi. `--extra-bench` thêm benchmark (ví dụ có FP: `mm`, `spmv`). Cache gate baseline theo tag
+  `baseline_gate_<extra>`.
+- **Nhận vòng** khi chi phí cycle (trung bình nhân của mcycle / mcycle baseline) ≤ `1 + --max-ipc-loss` (mặc định 3 %,
+  cộng dồn qua các vòng) và `Fmax / chi phí cycle` hơn bản tốt nhất quá `--min-perf-gain` (mặc định 1 %). Synth cả
+  tile chạy trước: nếu Fmax không vượt ngưỡng ngay cả khi không tốn cycle thì huỷ gate.
+- **Test fail** (chức năng) → agent debug (`prompts/fix_failure.md`, `--debug-retries`, mặc định 2) nhận test lỗi và
+  log, sửa, loop build + synth + gate lại (như `debug_failure` của example). Kết quả lần debug k ở `runs/iter<i>/debug<k>/`.
+- Điểm xuất phát (`--start-patch`) được gate một lần (tag `baseline_start_<hash>_gate<extra>`) để có chi phí cycle.
+- `results.csv` thêm `ipc_loss_pct`, `perf_gain_pct`; `best.json` thêm `cycle_cost`, `perf`.
+- Không dùng chung với `--loop-ab`, `--ab-tool`, `--equiv` (cycle đổi thì không kiểm tương đương lockstep được: tính
+  đúng chỉ dựa vào riscv-tests và benchmark).
+- Khác example: không có cây nhánh SQLite (xuất phát từ bản khác bằng `--start-patch`), không có Genus/CACTI/TMA.
+- **Trạng thái:** mới kiểm bằng mock (nhận/loại theo IPC, huỷ gate, agent debug, gate điểm xuất phát). `synth_ab` chưa
+  từng được agent gọi trọn vẹn trong lần chạy thật nào (`fmax-ab-t2` dùng opencode) và lần đầu dùng với Claude.
 
 ### Agent sửa lỗi build (`--build-fixes`)
 

@@ -1,5 +1,5 @@
 Round $ITER of the Rocket timing loop: an agent edited the Chisel of rocket-chip to shorten the
-critical path of `RocketTile` without changing its cycle-by-cycle behaviour. Building
+critical path of `RocketTile`$GOAL_NOTE. Building
 `$CONFIG_DESC` with that edit **failed**. Your job (build fix $FIX of at most $MAX_FIX) is to fix
 the compile errors so the edit builds, while keeping what the edit does.
 
@@ -8,8 +8,7 @@ the compile errors so the edit builds, while keeping what the edit does.
 - Fix the cause of the errors below, in the files the edit touched. Keep the edit's idea and its
   logic structure: do not undo it, do not replace it by the original code, do not gate it behind
   `false`. A fix that reverts the edit wastes the round.
-- The behaviour must stay cycle-identical to $BEST_NAME: no new pipeline stages, no new or removed
-  stall/kill/replay cycles.
+$BEHAVIOUR_RULE
 - Edit only Scala under `/home/ray/chipyard/generators/rocket-chip/src/main/scala/`, with small
   in-place edits (`sed -i`, heredocs). No file with "Config" in its name, no parameters, nothing
   outside rocket-chip.

@@ -18,6 +18,10 @@ Milestones (run from this directory on the head):
   --loop-ab: the loop drives it instead: it picks the target module, the agent only edits
       in short sessions (prompts/improve_timing_target.md), the loop builds and runs the
       A/B, and only an edit that wins the A/B goes on to gate + full synth
+  --chia-mode: as CHIA's timing_opt example: one long session with synth_ab
+      (prompts/improve_timing_chia.md), pipeline stages allowed; accept on Fmax / cycle cost
+      (geomean mcycle vs baseline, at most --max-ipc-loss), a functional failure goes to a
+      debug agent (--debug-retries)
   equivalence of a finished run's best patch vs the baseline (no loop):
       chia job submit --working-dir . -- python rocket_fmax.py --equiv-only --patch-file <best.patch>
 
@@ -58,10 +62,12 @@ PROMPT = HERE / "prompts" / "improve_timing.md"
 PROMPT_AB = HERE / "prompts" / "improve_timing_ab.md"
 PROMPT_FIX = HERE / "prompts" / "fix_build.md"
 PROMPT_TARGET = HERE / "prompts" / "improve_timing_target.md"
+PROMPT_CHIA = HERE / "prompts" / "improve_timing_chia.md"
+PROMPT_DEBUG = HERE / "prompts" / "fix_failure.md"
 BUDGET_DIR = "/home/ray/rocket_fmax_budget"   # on chipyard: BudgetBashTool logs (--loop-ab)
 CSV_FIELDS = ["iter", "accepted", "wns_ns", "tns_ns", "worst_slack_ns", "fmax_mhz", "critical_path",
               "isa_pass", "bench_cycles_match", "reason", "area_um2", "elapsed_min",
-              "target", "ab_delta_ns", "ab_sessions"]
+              "target", "ab_delta_ns", "ab_sessions", "ipc_loss_pct", "perf_gain_pct"]
 SYSTEM_MESSAGE = ("You are a hardware timing engineer working on the Rocket core in Chipyard. "
                   "You only edit Chisel sources through the chipyard_bash tool and never build, "
                   "simulate or synthesize: the surrounding loop does that after you finish.")
@@ -69,6 +75,14 @@ SYSTEM_MESSAGE_AB = ("You are a hardware timing engineer working on the Rocket c
                      "You edit Chisel sources through the chipyard_bash tool and check each edit with the "
                      "synth_ab tool (elaborate, then synthesize a module next to the current best). You never "
                      "run make, sbt, verilator or yosys yourself: the full build and gate run after you finish.")
+SYSTEM_MESSAGE_CHIA = ("You are a hardware timing engineer working on the Rocket core in Chipyard. You raise "
+                       "frequency x IPC: you edit Chisel sources through the chipyard_bash tool (pipeline stages "
+                       "allowed, with every consumer updated) and check each edit with the synth_ab tool. You never "
+                       "run make, sbt, verilator or yosys yourself: the full build, tests and synthesis run after "
+                       "you finish.")
+SYSTEM_MESSAGE_DEBUG = ("You are a Chisel engineer working on the Rocket core in Chipyard. An edit made earlier in this "
+                        "round builds but fails functional tests; you find and fix the bug through the chipyard_bash "
+                        "tool and keep the intent of the edit. You never run make, sbt, verilator or yosys.")
 SYSTEM_MESSAGE_FIX = ("You are a Chisel engineer working on the Rocket core in Chipyard. The build of an edit "
                       "made earlier in this round failed; you fix the compile errors through the chipyard_bash "
                       "tool and keep the intent of the edit. You never run make, sbt, verilator or yosys "
@@ -162,6 +176,20 @@ def parse_args():
                         "(0.05 = 5 %%) and worst slack stays within --wns-tol of the best seen; 0 = off")
     p.add_argument("--wns-tol", type=float, default=0.1,
                    help="--tns-min-gain: how far (ns) worst slack may fall below the best accepted so far")
+    p.add_argument("--chia-mode", action="store_true",
+                   help="as CHIA's timing_opt example: one long agent session per round with the synth_ab tool "
+                        "(prompts/improve_timing_chia.md, --llm-timeout), pipeline stages allowed; accepted when "
+                        "Fmax / cycle cost beats the best by --min-perf-gain and the cycle cost stays within "
+                        "--max-ipc-loss of the baseline; functional failures go to a debug agent (--debug-retries)")
+    p.add_argument("--extra-bench", nargs="*", default=[],
+                   help="more riscv-tests benchmarks for the gate (e.g. mm spmv, with FP), next to "
+                        + ", ".join(N.BENCHMARKS))
+    p.add_argument("--max-ipc-loss", type=float, default=0.03,
+                   help="--chia-mode: cycle cost (geomean of mcycle / baseline mcycle) may be at most 1 + this")
+    p.add_argument("--min-perf-gain", type=float, default=0.01,
+                   help="--chia-mode: Fmax / cycle cost must beat the best by more than this fraction")
+    p.add_argument("--debug-retries", type=int, default=2,
+                   help="--chia-mode: debug-agent sessions after a functional failure of the gate")
     p.add_argument("--equiv", action="store_true",
                    help="after the loop: equivalence check of the best patch vs the baseline")
     p.add_argument("--equiv-only", action="store_true",
@@ -178,6 +206,10 @@ def parse_args():
         p.error("--loop-ab không dùng chung với --ab-tool hay --bypass-llm")
     if a.agent == "claude" and (a.ab_tool or a.bypass_llm):
         p.error("--agent claude chưa hỗ trợ --ab-tool hay --bypass-llm")
+    if a.chia_mode and (a.loop_ab or a.ab_tool or a.bypass_llm or a.equiv):
+        p.error("--chia-mode không dùng chung với --loop-ab, --ab-tool, --bypass-llm hay --equiv "
+                "(đổi cycle thì không kiểm tương đương lockstep được)")
+    a.ab_tool = a.ab_tool or a.chia_mode       # chia-mode: the agent gets synth_ab
     if a.model is None:
         a.model = "sonnet" if a.agent == "claude" else "opencode/big-pickle"
     if a.run_name is None:
@@ -268,7 +300,7 @@ def build_loop(a, name: str):
         get(N.write_audit_config.chia_remote(None))
 
 
-def ensure_start(a, out: Path, snap: dict, base: dict) -> dict:
+def ensure_start(a, out: Path, snap: dict, base: dict, elfs: dict) -> dict:
     """Start point of the rounds when --start-patch/--fragments are given: build +
     synth/STA, cached under baseline_start_<hash>_* (no gate: check it first with
     measure_soc.py, which gates best_cfg)."""
@@ -276,27 +308,43 @@ def ensure_start(a, out: Path, snap: dict, base: dict) -> dict:
     h = hashlib.sha256((patch + "\0" + "\n".join(a.fragments)).encode()).hexdigest()[:10]
     tags = {"rtl": f"baseline_start_{h}_rtl",
             "synth": f"baseline_start_{h}_synth_{a.synth_flow}_p" + f"{a.period_ns:g}".replace(".", "p")}
+    if a.chia_mode:          # its cycle cost is the reference of the first round
+        tags["gate"] = f"baseline_start_{h}_gate{bench_tag(a)}"
     hits = {k: cache_has(t) for k, t in tags.items()}
     print(f"\nstart point ({loop_config(a)}, patch {a.start_patch or '-'}): "
           + ", ".join(f"{tags[k]}={'HIT' if v else 'miss'}" for k, v in hits.items()), flush=True)
     d = out / "runs" / "start"
     write(d / "start.patch", patch)
     art = None
-    if not hits["rtl"]:
+    if not hits["rtl"] or not hits.get("gate", True):
         get(N.reset_rocket.chia_remote(snap["rocket_head"], patch))
         art = build_loop(a, "start")
         save_build(d, art)
         if not art.success:
             raise SystemExit(f"start point build failed:\n{build_errors(art)}")
     rtl = get(N.extract_tile_rtl.chia_remote(art, _chia_tag=tags["rtl"]))
+    gate_ref = N.run_gate.chia_remote(art, elfs, _chia_tag=tags["gate"]) if "gate" in tags else None
     synth = get(N.synth_sta.chia_remote(rtl, a.period_ns, a.synth_flow, _chia_tag=tags["synth"]))
     save_synth(d, synth)
     print_synth("start", synth)
     if not synth.success:
         raise SystemExit(f"start point synth/STA lỗi: {synth.error}")
-    append_row(out / "results.csv", {"iter": "start", "accepted": True, **synth_row(synth),
-                                     "reason": f"start: {loop_config(a)}, patch {a.start_patch or '-'}"})
-    return {"name": "start", "patch": patch, "synth": synth, "rtl": rtl}
+    start = {"name": "start", "patch": patch, "synth": synth, "rtl": rtl}
+    row = {"iter": "start", "accepted": True, **synth_row(synth),
+           "reason": f"start: {loop_config(a)}, patch {a.start_patch or '-'}"}
+    if gate_ref is not None:
+        gate = get(gate_ref)
+        save_gate(d, gate)
+        res = ironlaw(a, base["gate"], gate)
+        write(d / "gate_compare.txt", "\n".join(res["lines"]))
+        print("start gate:\n  " + "\n  ".join(res["lines"]), flush=True)
+        if res["fails"]:
+            raise SystemExit("điểm xuất phát không qua gate:\n  " + "\n  ".join(res["fails"]))
+        start["cyc"] = res["cyc"]
+        row.update(isa_pass=True, bench_cycles_match=res["cyc"] == 1.0,
+                   ipc_loss_pct=f"{(res['cyc'] - 1) * 100:.3f}")
+    append_row(out / "results.csv", row)
+    return start
 
 
 def build_errors(art) -> str:
@@ -361,6 +409,38 @@ def compare_gate(base, cur, exclude=()) -> tuple[bool, bool, list[str]]:
     return not isa_fail, cyc_ok, reasons
 
 
+def bench_tag(a) -> str:
+    """Cache-tag suffix of a gate with --extra-bench (the baseline gate of the 6 keeps its tag)."""
+    return "".join(f"_{n}" for n in a.extra_bench)
+
+
+def ironlaw(a, base_gate, gate) -> dict:
+    """--chia-mode gate: {"fails": functional failures, "cyc": geomean of mcycle / baseline mcycle
+    (None on a failure), "lines": per-benchmark report}. Every ISA test (but --exclude-isa) and
+    benchmark must pass, with the baseline's minstret (same instructions: only cycles may change)."""
+    fails = [f"ISA fail: {n}" for n in base_gate.isa if n not in a.exclude_isa and not gate.isa.get(n, False)]
+    lines, logs, prod = [], 0.0, []
+    for n, b in base_gate.bench.items():
+        c = gate.bench.get(n)
+        if not c or not c["passed"]:
+            fails.append(f"{n}: không pass")
+        elif c["minstret"] != b["minstret"]:
+            fails.append(f"{n}: minstret {b['minstret']} -> {c['minstret']} (số lệnh khác: sai chức năng)")
+        else:
+            prod.append(c["mcycle"] / b["mcycle"])
+            lines.append(f"{n}: mcycle {b['mcycle']} -> {c['mcycle']} ({(prod[-1] - 1) * 100:+.3f} %)")
+    import math
+    cyc = None if fails or not prod else math.exp(sum(math.log(x) for x in prod) / len(prod))
+    if cyc is not None:
+        lines.append(f"cycle cost (geomean mcycle / baseline): {cyc:.5f} ({(cyc - 1) * 100:+.3f} %)")
+    return {"fails": fails, "cyc": cyc, "lines": fails + lines}
+
+
+def perf(p: dict) -> float:
+    """Fmax / cycle cost of an accepted point (--chia-mode)."""
+    return p["synth"].fmax_mhz / p.get("cyc", 1.0)
+
+
 def print_synth(label: str, s):
     print(f"\n===== {label}: flow {s.flow}, period {s.period_ns} ns")
     print(f"worst slack {fmt(s.worst_slack_ns, 4)} ns | WNS {fmt(s.wns_ns, 4)} | TNS {fmt(s.tns_ns, 4)} | "
@@ -378,7 +458,7 @@ def print_synth(label: str, s):
 def ensure_baseline(a, out: Path, elfs: dict, snap: dict) -> dict:
     """Build + gate + synth of the unmodified tree, served from the cache when
     available (tags baseline_rtl / baseline_gate / baseline_synth_<flow>_p<period>)."""
-    tags = {"rtl": "baseline_rtl", "gate": "baseline_gate",
+    tags = {"rtl": "baseline_rtl", "gate": "baseline_gate" + bench_tag(a),
             "synth": f"baseline_synth_{a.synth_flow}_p" + f"{a.period_ns:g}".replace(".", "p")}
     hits = {k: cache_has(t) for k, t in tags.items()}
     print(f"baseline cache: " + ", ".join(f"{tags[k]}={'HIT' if v else 'miss'}" for k, v in hits.items()),
@@ -448,8 +528,17 @@ def ensure_baseline(a, out: Path, elfs: dict, snap: dict) -> dict:
 # agent rounds
 # ---------------------------------------------------------------------------
 
-def render_prompt(a, i: int, best: dict, history: list[str]) -> str:
+def render_prompt(a, i: int, best: dict, history: list[str], target_md: str = "") -> str:
     s = best["synth"]
+    if a.chia_mode:
+        return string.Template(PROMPT_CHIA.read_text()).safe_substitute(
+            ITER=i, MAX_ITERS=a.iters, LLM_MIN=round(a.llm_timeout / 60), CONFIG_DESC=loop_config(a),
+            PERIOD_NS=a.period_ns, BEST_NAME=best["name"], BEST_SLACK=fmt(s.worst_slack_ns, 4),
+            BEST_FMAX=fmt(s.fmax_mhz, 2), BEST_IPC_LOSS=f"{(best.get('cyc', 1.0) - 1) * 100:+.2f} %",
+            BEST_PERF=f"{perf(best):.2f}", MAX_IPC_LOSS=f"{a.max_ipc_loss:.1%}",
+            MIN_PERF_GAIN=f"{a.min_perf_gain:.1%}", DEBUG_RETRIES=a.debug_retries,
+            BENCHES=", ".join((*N.BENCHMARKS, *a.extra_bench)), STAGE_DIR=N.STAGE_DIR, TARGET=target_md,
+            HISTORY="\n\n".join(history) or "(no earlier round)", **tool_text(a))
     return string.Template((PROMPT_AB if a.ab_tool else PROMPT).read_text()).safe_substitute(
         ITER=i, MAX_ITERS=a.iters, CONFIG_DESC=loop_config(a), PERIOD_NS=a.period_ns, BEST_NAME=best["name"],
         BEST_SLACK=fmt(s.worst_slack_ns, 4), BEST_FMAX=fmt(s.fmax_mhz, 2),
@@ -586,14 +675,32 @@ def collect_and_check(out: Path, d: Path, i: int, snap: dict, best: dict) -> tup
     return diff, ""
 
 
+def ab_note(a) -> str:
+    t = tool_text(a)
+    return (f"\n\nYou also have the `synth_ab` tool: `{t['AB_REBUILD']}()` elaborates your current "
+            "sources (1-3 min; call it again while it says `running`) and returns the compile errors, so use it "
+            "to confirm the fix compiles before you finish. Do not start any synthesis.") if a.ab_tool else ""
+
+
 def render_fix_prompt(a, i: int, k: int, errors: str, patch: str, best: dict, notes: str) -> str:
-    ab = ("\n\nYou also have the `synth_ab` tool: `synth_ab_rebuild_verilog()` elaborates your current "
-          "sources (1-3 min; call it again while it says `running`) and returns the compile errors, so use it "
-          "to confirm the fix compiles before you finish. Do not start any synthesis.") if a.ab_tool else ""
+    if a.chia_mode:
+        goal, rule = (" (pipeline stages allowed; the loop maximizes frequency x IPC)",
+                      "- Keep the edit's timing idea and its latency: if it added a pipeline stage, keep the stage "
+                      "and keep every consumer of the delayed signals consistent with it.")
+    else:
+        goal, rule = (" without changing its cycle-by-cycle behaviour",
+                      f"- The behaviour must stay cycle-identical to {best['name']}: no new pipeline stages, no new "
+                      "or removed\n  stall/kill/replay cycles.")
     return string.Template(PROMPT_FIX.read_text()).safe_substitute(
         ITER=i, FIX=k, MAX_FIX=a.build_fixes, CONFIG_DESC=loop_config(a), BEST_NAME=best["name"],
-        ERRORS=errors[-12000:], PATCH=patch[-30000:], STAGE_DIR=N.STAGE_DIR, AB_NOTE=ab,
-        NOTES=notes[-4000:].strip() or "(no summary)", **tool_text(a))
+        ERRORS=errors[-12000:], PATCH=patch[-30000:], STAGE_DIR=N.STAGE_DIR, AB_NOTE=ab_note(a),
+        GOAL_NOTE=goal, BEHAVIOUR_RULE=rule, NOTES=notes[-4000:].strip() or "(no summary)", **tool_text(a))
+
+
+def render_debug_prompt(a, i: int, k: int, fails: str, patch: str, notes: str) -> str:
+    return string.Template(PROMPT_DEBUG.read_text()).safe_substitute(
+        ITER=i, FIX=k, MAX_FIX=a.debug_retries, FAILS=fails[-14000:], PATCH=patch[-30000:], STAGE_DIR=N.STAGE_DIR,
+        AB_NOTE=ab_note(a), NOTES=notes[-4000:].strip() or "(no summary)", **tool_text(a))
 
 
 def after_agent(out: Path, d: Path, i: int, snap: dict, best: dict, r: dict, agent_reason: str,
@@ -671,6 +778,8 @@ def gate_and_judge(a, d: Path, art, rtl, elfs, base: dict, best: dict, r: dict, 
         return r
     gate = get(gate_ref)
     save_gate(d, gate)
+    if a.chia_mode:
+        return judge_chia(a, d, base, best, r, gate)
     isa_ok, cyc_ok, gwhy = compare_gate(base["gate"], gate, a.exclude_isa)
     r["isa_pass"], r["bench_cycles_match"] = isa_ok, cyc_ok
     write(d / "gate_compare.txt", "\n".join(gwhy) or "khớp baseline")
@@ -685,6 +794,14 @@ def judge(a, best: dict, synth) -> tuple[bool, str]:
     """Whole-tile decision of a synth result against the best: (accepted, reason)."""
     if not synth.success:
         return False, f"synth/STA lỗi: {synth.error}"
+    if a.chia_mode:
+        # Fmax / cycle cost can beat the best only if Fmax alone does (cycle cost >= 1)
+        bound, f0 = perf(best) * (1 + a.min_perf_gain), best["synth"].fmax_mhz
+        if synth.fmax_mhz <= bound:
+            return False, (f"Fmax {synth.fmax_mhz:.2f} MHz không vượt {bound:.2f} MHz (hiệu năng {perf(best):.2f} của "
+                           f"{best['name']} + {a.min_perf_gain:.0%}) kể cả khi không tốn cycle; worst slack "
+                           f"{synth.worst_slack_ns:.4f} ns, đường găng {synth.crit_start} -> {synth.crit_end}")
+        return True, f"Fmax {f0:.2f} -> {synth.fmax_mhz:.2f} MHz"
     old, new = best["synth"].worst_slack_ns, synth.worst_slack_ns
     if new > old + a.min_gain_ns:
         return True, f"slack {old:.4f} -> {new:.4f} ns"
@@ -698,6 +815,34 @@ def judge(a, best: dict, synth) -> tuple[bool, str]:
     if tns is not None:
         why += f"; {tns[2]} (cần > {a.tns_min_gain:.0%}, slack >= {tns[1]:.4f})"
     return False, why
+
+
+def judge_chia(a, d: Path, base: dict, best: dict, r: dict, gate) -> dict:
+    """--chia-mode decision once the tile passed judge(): functional gate, cycle cost within
+    --max-ipc-loss of the baseline, Fmax / cycle cost better than the best by --min-perf-gain.
+    A functional failure sets r["functional_fail"] (the text for the debug agent)."""
+    res = ironlaw(a, base["gate"], gate)
+    write(d / "gate_compare.txt", "\n".join(res["lines"]))
+    r["isa_pass"] = not any(f.startswith("ISA") for f in res["fails"])
+    if res["fails"]:
+        r["reason"] = "gate không đạt (chức năng): " + "; ".join(res["fails"][:10])
+        logs = "\n\n".join(f"===== {n}\n{t[-2500:]}" for n, t in list(gate.fail_logs.items())[:6])
+        r["functional_fail"] = "\n".join(res["fails"][:40]) + ("\n\n" + logs if logs else "")
+        return r
+    cyc, synth = res["cyc"], r["synth"]
+    new_perf = synth.fmax_mhz / cyc
+    gain = new_perf / perf(best) - 1
+    r.update(cyc=cyc, bench_cycles_match=all(l.endswith("(+0.000 %)") for l in res["lines"][:-1]),
+             ipc_loss_pct=f"{(cyc - 1) * 100:.3f}", perf_gain_pct=f"{gain * 100:.3f}")
+    text = (f"Fmax {best['synth'].fmax_mhz:.2f} -> {synth.fmax_mhz:.2f} MHz, cycle {(cyc - 1) * 100:+.3f} % "
+            f"so với baseline, hiệu năng {perf(best):.2f} -> {new_perf:.2f} ({gain:+.2%})")
+    if cyc > 1 + a.max_ipc_loss:
+        r["reason"] = f"tốn quá nhiều cycle: {text}; cho phép tối đa +{a.max_ipc_loss:.1%}"
+    elif gain <= a.min_perf_gain:
+        r["reason"] = f"hiệu năng không tăng đủ: {text}; cần > {a.min_perf_gain:+.1%}"
+    else:
+        r["accepted"], r["reason"] = True, text
+    return r
 
 
 def tns_gain(a, best: dict, synth):
@@ -744,7 +889,7 @@ def run_round(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best, histor
 
     get(N.reset_rocket.chia_remote(snap["rocket_head"], best["patch"]))
     get(N.stage_for_agent.chia_remote(stage_files(best, history)))
-    prompt = render_prompt(a, i, best, history)
+    prompt = render_prompt(a, i, best, history, chia_target(best) if a.chia_mode else "")
     write(d / "prompt.md", prompt)
 
     tag = f"m2_iter{i}_llm" if a.bypass_llm else f"agent_{a.run_name}_iter{i}_llm"
@@ -766,7 +911,48 @@ def run_round(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best, histor
     if art is None:
         return r
     rtl = tile_rtl(art, r)
-    return r if rtl is None else gate_and_judge(a, d, art, rtl, elfs, base, best, r)
+    if rtl is None:
+        return r
+    r = gate_and_judge(a, d, art, rtl, elfs, base, best, r)
+    k = 0
+    while r.get("functional_fail") and k < a.debug_retries:
+        # --chia-mode, as debug_failure in CHIA's timing_opt: the edit builds but fails a test
+        k += 1
+        r["debug_fixes"] = k
+        fails = r.pop("functional_fail")
+        print(f"round {i}: test lỗi, gọi agent debug (lần {k}/{a.debug_retries}): {r['reason'][:200]}", flush=True)
+        dprompt = render_debug_prompt(a, i, k, fails, r["patch"], last_response(d))
+        write(d / f"debug{k}_prompt.md", dprompt)
+        debug_llm = make_llm(a, a.fix_model or a.model, SYSTEM_MESSAGE_DEBUG, a.fix_timeout, None)
+        reason = call_agent(a, debug_llm, dprompt, f"agent_{a.run_name}_iter{i}_debug{k}_llm", d, f"debug{k}",
+                            best, a.ab_tool)
+        before, failed = r["patch"], r["reason"]
+        r.update(reason="", synth=None, rtl=None)
+        diff = after_agent(out, d, i, snap, best, r, reason, f"test lỗi, agent debug lần {k}")
+        if diff is None:
+            return r
+        if r["patch"] == before:
+            r["reason"] = f"agent debug lần {k} không sửa gì" + (f" ({reason})" if reason else "") + f"; {failed}"
+            return r
+        art, diff = build_with_fixes(a, i, out, d, fix_llm, snap, best, r, diff, f"_d{k}")
+        if art is None:
+            return r
+        rtl = tile_rtl(art, r)
+        if rtl is None:
+            return r
+        r = gate_and_judge(a, d / f"debug{k}", art, rtl, elfs, base, best, r)
+    r.pop("functional_fail", None)
+    return r
+
+
+def chia_target(best: dict) -> str:
+    """--chia-mode: the worst path located in the Verilog and the Chisel (as for --loop-ab), a
+    starting point for the agent, which still picks what to work on."""
+    target = N.pick_target(best["rtl"], best["synth"])
+    target["report"] = first_path(best["synth"].paths)
+    target["ends"], target["sources"] = N.path_sources(best["rtl"], best["synth"], best["patch"])
+    classes = get(N.find_scala_classes.chia_remote([m for _, m in target["chain"]]))
+    return target_text(target, classes)
 
 
 # ---------------------------------------------------------------------------
@@ -792,9 +978,9 @@ def target_text(target: dict, classes: dict) -> str:
              f"`{target['end_path'] or N.TOP}`.",
              f"- **Target: instance `{target['path'] or N.TOP}` = module `{target['module']}`** "
              "(the smallest instance holding both ends).",
-             f"- **The A/B is decided by the worst slack of the endpoints inside `{target['decide'] or N.TOP}`**"
-             + (" (where the worst path ends), not by the worst path of the whole synthesized module."
-                if target["decide"] != target["path"] else "."),
+             *([f"- **The A/B is decided by the worst slack of the endpoints inside `{target['decide'] or N.TOP}`**"
+                + (" (where the worst path ends), not by the worst path of the whole synthesized module."
+                   if target["decide"] != target["path"] else ".")] if "decide" in target else []),
              "- Instances from the top down (instance -> Verilog module -> Scala files that define it):"]
     for path, mod in target["chain"]:
         files = classes.get(mod) or []
@@ -1117,6 +1303,10 @@ def history_entry(i: int, r: dict, resp_summary: str) -> str:
                      + (f"; A/B: {r['ab_result']}" if r.get("ab_result") else ""))
     if s is not None and s.success:
         lines.append(f"Kết quả: worst slack {s.worst_slack_ns:.4f} ns, đường găng {s.crit_start} -> {s.crit_end}")
+    if r.get("ipc_loss_pct") != "" and r.get("ipc_loss_pct") is not None:
+        lines.append(f"Cycle so với baseline: {r['ipc_loss_pct']} %; hiệu năng so với bản tốt nhất: {r['perf_gain_pct']} %")
+    if r.get("debug_fixes"):
+        lines.append(f"Test lỗi, agent debug {r['debug_fixes']} lần.")
     if r.get("build_fixes"):
         lines.append(f"Build lỗi, agent sửa lỗi build {r['build_fixes']} lần.")
     if resp_summary:
@@ -1144,17 +1334,20 @@ def make_llm(a, model: str, system_message: str, timeout: int, steps: int | None
 def tool_text(a) -> dict:
     """How the prompts name the shell tool (each CLI names MCP tools its own way) and what they
     say about the CLI's own tools."""
+    ab = {f"AB_{k.upper()}": ("mcp__synth_ab__" if a.agent == "claude" else "synth_ab_") + m
+          for k, m in (("rebuild", "rebuild_verilog"), ("list", "list_modules"), ("start", "start_ab"),
+                       ("result", "ab_result"))}
     if a.agent == "claude":
         return {"BASH_TOOL": "mcp__chipyard_bash__chipyard_bash_run_command",
-                "OTHER_TOOLS": " You have no other tool."}
-    return {"BASH_TOOL": "chipyard_bash_chipyard_bash_run_command",
+                "OTHER_TOOLS": " You have no other tool.", **ab}
+    return {**ab, "BASH_TOOL": "chipyard_bash_chipyard_bash_run_command",
             "OTHER_TOOLS": " opencode's own `bash`, `read`, `edit`, `glob`, ... (if you see them) run in another "
                            "container that has no Chipyard: nothing they read or write is the design."}
 
 
 def run(a, out: Path):
     csv_path = out / "results.csv"
-    elfs = get(N.load_test_elfs.chia_remote())
+    elfs = get(N.load_test_elfs.chia_remote(tuple(a.extra_bench)))
     print(f"ELF: {len(elfs['isa'])} ISA tests, benchmarks {list(elfs['bench'])}", flush=True)
     get(N.write_audit_config.chia_remote(None))      # leftover of an interrupted run
     snap = get(N.tree_snapshot.chia_remote())
@@ -1164,12 +1357,12 @@ def run(a, out: Path):
     if a.baseline_only:
         return
 
-    llm = make_llm(a, a.model, SYSTEM_MESSAGE_AB if a.ab_tool else SYSTEM_MESSAGE,
+    llm = make_llm(a, a.model, SYSTEM_MESSAGE_CHIA if a.chia_mode else SYSTEM_MESSAGE_AB if a.ab_tool else SYSTEM_MESSAGE,
                    a.edit_timeout if a.loop_ab else a.llm_timeout, (a.edit_steps or None) if a.loop_ab else None)
     fix_llm = make_llm(a, a.fix_model or a.model, SYSTEM_MESSAGE_FIX, a.fix_timeout, None)
     best = {"name": "baseline", "patch": "", "synth": base["synth"], "rtl": base["rtl"]}
     if a.start_patch or a.fragments:
-        best = ensure_start(a, out, snap, base)
+        best = ensure_start(a, out, snap, base, elfs)
     start = top = best          # top: the accepted point with the best worst slack (Fmax)
     history: list[str] = []
     for i in range(1, a.iters + 1):
@@ -1195,7 +1388,8 @@ def run(a, out: Path):
                               "isa_pass": r["isa_pass"], "bench_cycles_match": r["bench_cycles_match"],
                               "reason": r["reason"].replace("\n", " | ")[:1000],
                               "elapsed_min": f"{r['minutes']:.1f}", "target": r.get("target", ""),
-                              "ab_delta_ns": r.get("ab_delta_ns", ""), "ab_sessions": r.get("ab_sessions", "")})
+                              "ab_delta_ns": r.get("ab_delta_ns", ""), "ab_sessions": r.get("ab_sessions", ""),
+                              "ipc_loss_pct": r.get("ipc_loss_pct", ""), "perf_gain_pct": r.get("perf_gain_pct", "")})
         print(f"round {i}: {'ACCEPT' if r['accepted'] else 'REJECT'} ({r['minutes']:.1f} min) - "
               f"{r['reason'][:400]}", flush=True)
         if not r["accepted"] and r.get("synth") is not None and r["patch"] and r["patch"] != best["patch"]:
@@ -1203,7 +1397,7 @@ def run(a, out: Path):
         if r["accepted"]:
             peak = max(best.get("peak_wns", best["synth"].worst_slack_ns), r["synth"].worst_slack_ns)
             best = {"name": f"iter{i}", "patch": r["patch"], "synth": r["synth"], "rtl": r["rtl"],
-                    "peak_wns": peak}
+                    "peak_wns": peak, **({"cyc": r["cyc"]} if "cyc" in r else {})}
             print_synth(f"new best iter{i}", r["synth"])
             if r["synth"].worst_slack_ns > top["synth"].worst_slack_ns:
                 top = best
@@ -1214,6 +1408,8 @@ def run(a, out: Path):
     write(out / "patches" / "best.patch", best["patch"])
     write(out / "patches" / "best_wns.patch", top["patch"])
     write(out / "best.json", json.dumps({"best": best["name"], **synth_row(best["synth"]),
+                                         **({"cycle_cost": round(best.get("cyc", 1.0), 5),
+                                             "perf": round(perf(best), 3)} if a.chia_mode else {}),
                                          "best_wns": {"name": top["name"], **synth_row(top["synth"])}}, indent=2))
     get(N.reset_rocket.chia_remote(snap["rocket_head"], best["patch"]))
     print(f"\nbest: {best['name']} | " + json.dumps(synth_row(best["synth"]), ensure_ascii=False))

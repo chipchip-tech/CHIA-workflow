@@ -83,8 +83,8 @@ def _sh(cmd: str, cwd: str | None = None, timeout: int = 600, check: bool = True
 # ---------------------------------------------------------------------------
 
 @ChiaFunction(resources={"chipyard": 1})
-def load_test_elfs() -> dict:
-    """riscv-tests ELFs shipped in the chipyard image, as bytes.
+def load_test_elfs(extra_bench: tuple = ()) -> dict:
+    """riscv-tests ELFs shipped in the chipyard image, as bytes: BENCHMARKS + `extra_bench`.
 
     Returns {"isa": {name: bytes}, "bench": {name: bytes}}.
     """
@@ -97,7 +97,11 @@ def load_test_elfs() -> dict:
         with open(f"{root}/isa/{name}", "rb") as f:
             isa[name] = f.read()
     bench = {}
-    for name in BENCHMARKS:
+    have = sorted(n[:-len(".riscv")] for n in os.listdir(f"{root}/benchmarks") if n.endswith(".riscv"))
+    missing = [n for n in extra_bench if n not in have]
+    if missing:
+        raise RuntimeError(f"--extra-bench: không có {missing}; benchmark có sẵn: {have}")
+    for name in (*BENCHMARKS, *extra_bench):
         with open(f"{root}/benchmarks/{name}.riscv", "rb") as f:
             bench[name] = f.read()
     return {"isa": isa, "bench": bench}

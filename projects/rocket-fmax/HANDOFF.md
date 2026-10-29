@@ -126,6 +126,9 @@ kiểm bằng mock:
 - `lab-c5` (29/10/2026, từ `lab-c4` best): 0/5, cả 5 vòng nhắm `fpuOpt`; A/B chấm theo worst path riêng của `FPU`
   (trong divSqrt, −0,733 ns) thay vì đường tile (→ `regfile_ext`). Đã đổi: A/B chấm theo endpoint trong instance nơi đường
   găng kết thúc (`decision_path`; mới kiểm bằng mock). 2–3/4 phiên mỗi vòng không sửa gì (chưa xem lý do).
+- Sau `lab-c5`: dừng `lab-c6`. Người dùng chọn làm theo example `timing_opt` của CHIA với Sonnet medium:
+  **`--chia-mode`** (phiên dài + `synth_ab`, được thêm pipeline, gate theo Fmax / chi phí cycle, tối đa 3 % cycle,
+  `--extra-bench`, agent debug khi test fail), xuất phát từ `lab-c4` best. Xem README mục `--chia-mode`. Mới kiểm bằng mock.
 
 ## Chạy tiếp từ m4
 
