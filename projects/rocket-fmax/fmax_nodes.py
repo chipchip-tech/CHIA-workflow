@@ -1522,6 +1522,9 @@ class GateResult:
 def _bench_info(r) -> dict:
     mc = re.search(r"mcycle\s*=\s*(\d+)", r.log)
     mi = re.search(r"minstret\s*=\s*(\d+)", r.log)
+    # mm prints its own counters as "C0: <n> cycles" / "C0: <n> instructions"
+    mc = mc or re.search(r"^C0:\s*(\d+)\s+cycles\s*$", r.log, re.M)
+    mi = mi or re.search(r"^C0:\s*(\d+)\s+instructions\s*$", r.log, re.M)
     sc = re.search(r"after\s+(\d+)\s+simulation cycles", r.out + r.log)
     seed = next((l for l in (r.out + "\n" + r.log).splitlines() if "random" in l and "seed" in l), "")
     return {"passed": r.returncode == 0 and mc is not None,

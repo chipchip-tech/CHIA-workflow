@@ -410,8 +410,9 @@ def compare_gate(base, cur, exclude=()) -> tuple[bool, bool, list[str]]:
 
 
 def bench_tag(a) -> str:
-    """Cache-tag suffix of a gate with --extra-bench (the baseline gate of the 6 keeps its tag)."""
-    return "".join(f"_{n}" for n in a.extra_bench)
+    """Cache-tag suffix of a gate with --extra-bench (the baseline gate of the 6 keeps its tag).
+    `b2`: mm's "C0: <n> cycles" is parsed since chia-1 (whose cached gate has mm failed)."""
+    return "_b2" + "".join(f"_{n}" for n in a.extra_bench) if a.extra_bench else ""
 
 
 def ironlaw(a, base_gate, gate) -> dict:
