@@ -2,6 +2,7 @@
 #   - verilator_run: 4 slots (4 simulators at once, only while the build is idle)
 #   - hello_claude: Claude Code (claude_creds) for --agent claude
 #   - rocket_eda: Yosys + OpenSTA + sky130hd liberty (image built locally, docker/EdaDockerfile)
+#   - rocket_vivado: Vivado synth_design for --vivado-part (image docker/VivadoDockerfile, Vivado on the host)
 # Node type names match cluster-local.yaml, so this is the same cluster ("default").
 #
 # Before `chia up`:
@@ -83,6 +84,23 @@ available_node_types:
             run_options:
                 - --shm-size=4gb
                 - --memory=10g       # a runaway Yosys kills only this container
+
+    # --vivado-part (vivado_nodes.py): Vivado installed on the head under ~/tools/Xilinx, mounted
+    # read-only. label=disable: SELinux on Bazzite would otherwise need a relabel (:z) of the whole
+    # Vivado tree.
+    rocket_vivado:
+        resources: {"vivado": 1}
+        num_workers: 1
+        compatible_ips: ["${THIS_MACHINE}"]
+        docker:
+            image: "chia-vivado:latest"
+            container_name: "chia-vivado-${USER}"
+            pull_before_run: false   # built locally: docker build -f docker/VivadoDockerfile ...
+            run_options:
+                - "-v ~/tools/Xilinx:/tools/Xilinx:ro"
+                - --security-opt label=disable
+                - --shm-size=2gb
+                - --memory=10g
 
 head_env_commands: ["source ~/.bashrc && conda activate chia_env"]
 head_setup_commands: ["source ~/.bashrc && conda activate chia_env"]

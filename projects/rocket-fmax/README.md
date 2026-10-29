@@ -62,6 +62,7 @@ Số đo ở mức synthesis, dùng để so tương đối giữa các vòng. C
 |---|---|
 | `rocket_fmax.py` | Driver: baseline, các vòng, nhận/loại, ghi kết quả, profiler |
 | `fmax_nodes.py` | Các `@ChiaFunction`: chipyard (ELF, git, kiểm phạm vi), `extract_tile_rtl`, `run_gate`, `synth_sta`; lớp `SalvageClaudeLLM` |
+| `vivado_nodes.py` | `vivado_synth`: Vivado `synth_design` (out-of-context) trên `RocketTile`, đo thêm cho `--vivado-part` |
 | `ab_tool.py` | Tool MCP `synth_ab`: `rebuild_verilog`, `list_modules`, `start_ab`, `ab_result` |
 | `prompts/improve_timing_chia.md` | Prompt phiên tối ưu |
 | `prompts/fix_failure.md` | Prompt agent debug khi test fail |
@@ -70,6 +71,7 @@ Số đo ở mức synthesis, dùng để so tương đối giữa các vòng. C
 | `exp.yaml` | Cache và bypass |
 | `cluster.yaml` | `configs/cluster-local.yaml` + 4 slot `verilator_run` + worker `eda` + `hello_claude` |
 | `docker/EdaDockerfile` | Image `chia-eda-sky130`: chia-cacti + yosys + liberty sky130hd |
+| `docker/VivadoDockerfile` | Image `chia-vivado`: chia-cacti + thư viện Vivado cần; Vivado cài trên host, mount vào |
 
 Code còn giữ các chế độ cũ không dùng trong hướng này: `--loop-ab`, `--ab-tool`, `--bypass-llm`, `--agent opencode`
 (cùng `prompts/improve_timing.md`, `improve_timing_ab.md`, `improve_timing_target.md`), `--equiv` / `--equiv-only`
@@ -95,6 +97,42 @@ chia job submit --working-dir . -- python probe_tools.py --agent claude --models
 # phải in answer_ok=True
 ```
 
+## Vivado: đo timing thêm (tuỳ chọn, `--vivado-part`)
+
+Mỗi điểm được synth bằng Yosys (baseline, điểm xuất phát, mọi vòng có synth) còn được chạy Vivado `synth_design`
+out-of-context trên `RocketTile`, cùng chu kỳ, SRAM `*_ext` là black box, I/O trễ 0. Kết quả ghi vào
+`<run>/vivado.csv` (Fmax/slack Vivado cạnh Fmax/slack Yosys, LUT, FF, DSP, đường găng) và
+`runs/<vòng>/vivado_*.rpt`. **Không dùng để nhận/loại**: chỉ để đối chiếu, nhất là xem độ dao động của số Yosys.
+Worker `vivado` có 1 slot, các lần chạy xếp hàng; loop chỉ chờ Vivado ở cuối job. Baseline và điểm xuất phát được
+cache (`baseline_vivado_<part>_p<chu kỳ>`, `baseline_start_<hash>_vivado_...`).
+
+Cài Vivado ML Standard (miễn phí, cần tài khoản AMD) trên host, chỉ chọn họ Artix-7:
+
+```bash
+# tải "AMD Unified Installer ... Linux Self Extracting Web Installer" (.bin) từ trang download Vivado của AMD
+chmod +x FPGAs_AdaptiveSoCs_Unified_*_Lin64.bin
+./FPGAs_AdaptiveSoCs_Unified_*_Lin64.bin --keep --noexec --target ~/xinstall
+cd ~/xinstall
+./xsetup -b AuthTokenGen                  # email + mật khẩu AMD
+./xsetup -b ConfigGen                     # chọn Vivado, rồi Vivado ML Standard
+# sửa ~/.Xilinx/install_config.txt: Destination=/var/home/<user>/tools/Xilinx;
+#   trong Modules=: Artix-7:1, mọi họ chip khác :0 (bớt dung lượng)
+./xsetup -a XilinxEULA,3rdPartyEULA -b Install -c ~/.Xilinx/install_config.txt
+ls ~/tools/Xilinx/*/Vivado/bin/vivado ~/tools/Xilinx/Vivado/*/bin/vivado 2>/dev/null
+```
+
+Image và worker:
+
+```bash
+cd ~/CHIA-workflow/projects/rocket-fmax/docker
+docker build -f VivadoDockerfile -t chia-vivado:latest .
+chia up ~/CHIA-workflow/projects/rocket-fmax/cluster.yaml -y      # thêm worker rocket_vivado
+docker exec chia-vivado-$USER bash -lc 'v=$(ls /tools/Xilinx/*/Vivado/bin/vivado /tools/Xilinx/Vivado/*/bin/vivado 2>/dev/null | tail -1); $v -version'
+```
+
+Thêm `--vivado-part xc7a200tfbg676-2` vào lệnh chạy (Artix-7 lớn nhất của bản miễn phí; RocketTile vừa).
+Vivado nằm ở chỗ khác thì đặt biến môi trường `VIVADO` trong container.
+
 ## Chạy
 
 Luôn submit **từ thư mục này**: cache lưu dataclass của `fmax_nodes`, nên lúc đọc lại phải import được module này.
@@ -116,7 +154,7 @@ chia job logs -f fmax-v2-r1          # dừng: chia job stop fmax-v2-r1
 - Gói Pro: một phiên dài tốn nhiều token, nên chạy theo đợt khoảng 5 vòng. Gặp "You've hit your limit" thì loop
   chờ tới giờ reset rồi gọi lại (`--quota-retries`, bỏ nếu xa hơn `--quota-max-wait`).
 - Tuỳ chọn khác: `--llm-timeout 1800` (example dùng 3600), `--debug-retries 2`, `--empty-retries 1` (phiên mới khi agent không sửa gì), `--build-fixes 2`,
-  `--fix-timeout 900`, `--make-jobs 16`, `--build-timeout 3600`, `--cache-dir ~/chia_cache`.
+  `--fix-timeout 900`, `--vivado-part <part>` (đo thêm bằng Vivado, xem trên), `--make-jobs 16`, `--build-timeout 3600`, `--cache-dir ~/chia_cache`.
 - `rv64ui-p-ma_data` fail ngay trên baseline (Rocket không hỗ trợ truy cập lệch địa chỉ), nên phải `--exclude-isa`.
 
 ## Baseline (RocketConfig gốc, 10 ns, đo thật 29/10/2026)
@@ -196,5 +234,7 @@ docker exec chia-chipyard-$USER-0 bash -lc 'cd /home/ray/chipyard/generators/roc
   - Probe Claude Code (28/10/2026): Sonnet medium gọi được `chipyard_bash`.
   - Build, gate, synth/STA, `SalvageClaudeLLM`, sửa build: đã dùng ở các lần chạy trước khi bắt đầu lại.
 - **Mới kiểm bằng mock:**
+  - `--vivado-part`: ghi `vivado.csv`, chờ Vivado ở cuối job, lỗi Vivado không làm dừng loop. Script Tcl, Dockerfile,
+    worker `rocket_vivado` và cách cài Vivado **chưa chạy thật**.
   - Huỷ gate khi synth tile thua, agent debug, gate điểm xuất phát (`--start-patch`).
 - Tính đúng chức năng chỉ dựa vào riscv-tests và 8 benchmark (như example), không kiểm tương đương.

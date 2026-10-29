@@ -49,6 +49,7 @@ import ray
 import ab_tool as AB
 import equiv as E
 import fmax_nodes as N
+import vivado_nodes as V
 from chia.base.ChiaFunction import chia_cancel, get
 from chia.base.bypass import Bypass
 from chia.base.cache import start_cache, stop_cache
@@ -108,6 +109,10 @@ def parse_args():
     p.add_argument("--synth-flow", choices=sorted(N.SYNTH_FLOWS), default="v2",
                    help="Yosys flow (see SYNTH_FLOWS in fmax_nodes.py); fixed for a whole run")
     p.add_argument("--baseline-only", action="store_true", help="milestone 1: baseline only")
+    p.add_argument("--vivado-part", default="",
+                   help="also time every synthesized point with Vivado synth_design on this part "
+                        "(e.g. xc7a200tfbg676-2; `vivado` worker), written to vivado.csv; not used to decide")
+    p.add_argument("--vivado-threads", type=int, default=8)
     p.add_argument("--iters", type=int, default=5)
     p.add_argument("--bypass-llm", action="store_true",
                    help="milestone 2: bypass OpenCodeLLM.prompt; the loop applies --patch-file "
@@ -269,6 +274,68 @@ def synth_row(s) -> dict:
             "area_um2": fmt(s.area_um2, 0)}
 
 
+# ---------------------------------------------------------------------------
+# --vivado-part: Vivado synth_design timing of every synthesized point, next to the
+# Yosys numbers (vivado.csv). Not used to accept or reject.
+# ---------------------------------------------------------------------------
+
+VIV_FIELDS = ["iter", "accepted", "yosys_fmax_mhz", "yosys_slack_ns", "viv_fmax_mhz", "viv_slack_ns",
+              "viv_tns_ns", "viv_failing", "viv_luts", "viv_ffs", "viv_dsps", "viv_min", "viv_critical_path",
+              "error"]
+VIV_PENDING: list = []      # (label, ref, yosys SynthResult, accepted), in dispatch order
+
+
+def vivado_tag(a, prefix: str) -> str:
+    return f"{prefix}_vivado_{a.vivado_part}_p" + f"{a.period_ns:g}".replace(".", "p")
+
+
+def vivado_launch(a, label: str, rtl, ysynth, accepted, tag: str | None = None):
+    """Dispatch Vivado on `rtl` (one `vivado` slot: runs queue up behind each other)."""
+    if not a.vivado_part or rtl is None:
+        return
+    kw = {"_chia_tag": tag} if tag else {}
+    ref = V.vivado_synth.chia_remote(rtl, a.period_ns, a.vivado_part, a.vivado_threads, **kw)
+    VIV_PENDING.append((label, ref, ysynth, accepted))
+
+
+def vivado_flush(out: Path, wait: bool = False):
+    """Write the finished Vivado runs (all of them with wait=True) to vivado.csv."""
+    if VIV_PENDING and wait:
+        print(f"chờ Vivado: {', '.join(p[0] for p in VIV_PENDING)}", flush=True)
+    while VIV_PENDING:
+        label, ref, ys, acc = VIV_PENDING[0]
+        if not wait and not ray.wait([ref], timeout=0)[0]:
+            break
+        VIV_PENDING.pop(0)
+        try:
+            v = get(ref)
+        except Exception as e:                                       # noqa: BLE001
+            v = V.VivadoResult(success=False, part="", period_ns=0.0, error=f"{type(e).__name__}: {e}"[:500])
+        d = out / "runs" / label
+        write(d / "vivado_paths.rpt", v.paths)
+        write(d / "vivado_timing_summary.rpt", v.summary)
+        write(d / "vivado_utilization.rpt", v.utilization)
+        write(d / "vivado_log_tail.txt", v.log_tail)
+        row = {"iter": label, "accepted": acc, "viv_fmax_mhz": fmt(v.fmax_mhz, 2),
+               "viv_slack_ns": fmt(v.worst_slack_ns, 3), "viv_tns_ns": fmt(v.tns_ns, 1),
+               "viv_failing": v.failing_endpoints if v.failing_endpoints is not None else "",
+               "viv_luts": v.luts or "", "viv_ffs": v.ffs or "", "viv_dsps": v.dsps if v.dsps is not None else "",
+               "viv_min": f"{v.seconds / 60:.1f}", "viv_critical_path": f"{v.crit_start} -> {v.crit_end}",
+               "error": v.error}
+        if ys is not None:
+            row.update(yosys_fmax_mhz=fmt(ys.fmax_mhz, 2), yosys_slack_ns=fmt(ys.worst_slack_ns, 4))
+        path = out / "vivado.csv"
+        new = not path.exists()
+        with open(path, "a", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=VIV_FIELDS)
+            if new:
+                w.writeheader()
+            w.writerow(row)
+        print(f"vivado {label}: " + (f"Fmax {v.fmax_mhz:.2f} MHz, slack {v.worst_slack_ns:.3f} ns, "
+                                     f"LUT {v.luts}, {v.seconds / 60:.1f} min, {v.crit_start} -> {v.crit_end}"
+                                     if v.success else f"lỗi: {v.error}"), flush=True)
+
+
 def cache_has(tag: str) -> bool:
     from chia.base.cache import get_active_cache
     return bool(get(get_active_cache().has.chia_remote(tag)))
@@ -314,6 +381,7 @@ def ensure_start(a, out: Path, snap: dict, base: dict, elfs: dict) -> dict:
     if not synth.success:
         raise SystemExit(f"start point synth/STA lỗi: {synth.error}")
     start = {"name": "start", "patch": patch, "synth": synth, "rtl": rtl}
+    vivado_launch(a, "start", rtl, synth, True, vivado_tag(a, f"baseline_start_{h}"))
     row = {"iter": "start", "accepted": True, **synth_row(synth),
            "reason": f"start: patch {a.start_patch}"}
     if gate_ref is not None:
@@ -466,6 +534,7 @@ def ensure_baseline(a, out: Path, elfs: dict, snap: dict) -> dict:
     synth_ref = N.synth_sta.chia_remote(rtl, a.period_ns, a.synth_flow, _chia_tag=tags["synth"])
     gate = get(gate_ref)
     synth = get(synth_ref)
+    vivado_launch(a, "baseline", rtl, synth, True, vivado_tag(a, "baseline"))
 
     write(d / "rtl_info.json", json.dumps({"top": rtl.top, "files": len(rtl.files), "modules": rtl.modules,
                                            "blackboxes": list(rtl.blackboxes), "replaced": rtl.replaced},
@@ -1348,6 +1417,7 @@ def run(a, out: Path):
 
     base = ensure_baseline(a, out, elfs, snap)
     if a.baseline_only:
+        vivado_flush(out, wait=True)
         return
 
     llm = make_llm(a, a.model, SYSTEM_MESSAGE_CHIA if a.chia_mode else SYSTEM_MESSAGE_AB if a.ab_tool else SYSTEM_MESSAGE,
@@ -1395,7 +1465,10 @@ def run(a, out: Path):
             if r["synth"].worst_slack_ns > top["synth"].worst_slack_ns:
                 top = best
         history.append(history_entry(i, r, resp_summary))
+        vivado_launch(a, f"iter{i}", r.get("rtl"), r.get("synth"), r["accepted"])
+        vivado_flush(out)
 
+    vivado_flush(out, wait=True)
     # best.patch: the last accepted point (rounds accepted on TNS may lower worst slack);
     # best_wns.patch: the accepted point with the best worst slack, i.e. the Fmax to report
     write(out / "patches" / "best.patch", best["patch"])

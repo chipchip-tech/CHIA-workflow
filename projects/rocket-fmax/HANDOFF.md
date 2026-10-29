@@ -23,8 +23,13 @@ File này dành cho session Claude Code tiếp quản project. Đọc cùng `CLA
 
 ## Việc tiếp theo
 
-1. Người dùng chọn hướng sau đợt 2 (xem trả lời cuối của session): chạy tiếp, giảm nhiễu đo, hay đổi model.
-   Đợt kế tiếp dùng `--start-patch ~/rocket-fmax-v2/chia-fmax-r2/patches/best.patch`.
+1. Sau đợt 2, người dùng chọn đo thêm timing bằng Vivado (song song, không dùng để nhận/loại; `synth_design`; Vivado ML
+   Standard miễn phí, part Artix-7). Đã viết `vivado_nodes.py`, `--vivado-part`, `docker/VivadoDockerfile`, worker
+   `rocket_vivado` (README, mục Vivado); mới kiểm bằng mock. Việc: người dùng cài Vivado, build image, kiểm
+   `vivado -version` trong container, chạy `--baseline-only --vivado-part xc7a200tfbg676-2`, rồi đợt 3 với
+   `--start-patch ~/rocket-fmax-v2/chia-fmax-r2/patches/best.patch --vivado-part ...`.
+   Flow Yosys `v4` (giữ ranh giới khối) đã thử viết rồi bỏ: người dùng chỉ giữ thay đổi cải thiện được cả Vivado lẫn
+   Yosys; dùng số Vivado để đánh giá độ nhiễu của Yosys trước.
 2. Đọc log: baseline phải HIT cache; xem phiên agent có gọi `synth_ab` trọn vẹn không, có vòng nào được nhận,
    agent debug có chạy khi test fail không. Sửa loop theo log.
 3. Ghi kết quả từng đợt vào bảng "Kết quả" của `README.md`. Đợt sau dùng `--start-patch` từ `best.patch` của đợt trước.
