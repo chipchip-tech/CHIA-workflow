@@ -16,10 +16,15 @@ File này dành cho session Claude Code tiếp quản project. Đọc cùng `CLA
 - Đợt 1 `chia-fmax-r1` (29/10/2026) xong: 4/5 vòng nhận, 47,13 → 81,91 MHz, cycle +0,405 %. Vòng 5 dừng sau
   0,3 phút: Sonnet bỏ cuộc sau 1 lượt, không gọi tool. Đã sửa prompt và thêm `--empty-retries 1`. Kết quả ở
   `~/rocket-fmax-v2/chia-fmax-r1/` trên máy người dùng.
+- Đợt 2 `chia-fmax-r2` (29/10/2026) xong: 1/5 vòng nhận, 81,91 → 84,37 MHz, cycle vẫn +0,405 %. Vòng 2–3 ra
+  netlist trùng iter1 (WNS/TNS trùng tới 4 chữ số); vòng 4–5 agent không sửa gì (retry ở vòng 5 chỉ thử 1 sửa).
+  Đường găng còn nhiều họ sát nhau (`dfma`, `sfma`, `core.mem_reg_wdata`, `core.div`), và synth cả tile (flatten,
+  một lần ABC) dao động 1–2 ns khi sửa một khối khác. Kết quả ở `~/rocket-fmax-v2/chia-fmax-r2/`.
 
 ## Việc tiếp theo
 
-1. Đợt 2: `--start-patch ~/rocket-fmax-v2/chia-fmax-r1/patches/best.patch --run-name chia-fmax-r2`.
+1. Người dùng chọn hướng sau đợt 2 (xem trả lời cuối của session): chạy tiếp, giảm nhiễu đo, hay đổi model.
+   Đợt kế tiếp dùng `--start-patch ~/rocket-fmax-v2/chia-fmax-r2/patches/best.patch`.
 2. Đọc log: baseline phải HIT cache; xem phiên agent có gọi `synth_ab` trọn vẹn không, có vòng nào được nhận,
    agent debug có chạy khi test fail không. Sửa loop theo log.
 3. Ghi kết quả từng đợt vào bảng "Kết quả" của `README.md`. Đợt sau dùng `--start-patch` từ `best.patch` của đợt trước.

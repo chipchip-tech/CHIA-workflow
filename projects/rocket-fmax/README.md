@@ -137,6 +137,7 @@ Cache: `baseline_rtl`, `baseline_synth_v2_p10`, `baseline_gate_b2_mm_spmv` (cach
 |---|---|---|---|---|
 | baseline | | 47,13 MHz | 1,000 | đường găng `core.div` |
 | `chia-fmax-r1` (29/10/2026) | 4/5 | 47,13 → 59,80 → 72,94 → 79,42 → **81,91 MHz** | +0,405 % | hiệu năng +73,1 %; diện tích +1,5 %; vòng 5 agent không sửa gì (0,3 phút) |
+| `chia-fmax-r2` (29/10/2026) | 1/5 | 81,91 → **84,37 MHz** | +0,405 % | hiệu năng 81,58 → 84,03 (+3,0 %); diện tích +1,5 % so với baseline; vòng 2–5 loại |
 
 Chi tiết `chia-fmax-r1` (gate riscv-tests pass ở mọi vòng nhận):
 
@@ -147,6 +148,16 @@ Chi tiết `chia-fmax-r1` (gate riscv-tests pass ở mọi vòng nhận):
 | 3 | 79,42 | −2,59 | +0,405 % | +8,9 % | `fpuOpt.ifpu` | 21,1 |
 | 4 | 81,91 | −2,21 | +0,405 % | +3,1 % | `dcache.s2_req_addr` → `core.mem_reg_wdata` | 28,9 |
 | 5 | loại | | | | agent không thay đổi gì | 0,3 |
+
+Chi tiết `chia-fmax-r2` (xuất phát từ `best.patch` của `chia-fmax-r1`, gate lại điểm xuất phát):
+
+| Vòng | Fmax (MHz) | Worst slack (ns) | Cycle | Hiệu năng | Đường găng / lý do loại | Phút |
+|---|---|---|---|---|---|---|
+| 1 | 84,37 | −1,85 | +0,405 % | +3,0 % | `fpuOpt.dfma.in_in2` → `mulAddResult_pph_pipe_b` | 27,8 |
+| 2 | loại | −1,85 | | | patch khác iter1 nhưng WNS/TNS trùng iter1 tới 4 chữ số | 9,8 |
+| 3 | loại | −1,85 | | | như vòng 2 | 10,8 |
+| 4 | loại | | | | agent không thay đổi gì | 9,6 |
+| 5 | loại | | | | không sửa gì; phiên retry thử 1 sửa (dfma cắt 4 lát, A/B tile −2,05 ns), tự hoàn tác | 8,7 |
 
 ## Đầu ra: `<out-dir>/<run>/`
 
@@ -177,7 +188,11 @@ docker exec chia-chipyard-$USER-0 bash -lc 'cd /home/ray/chipyard/generators/roc
   - Vòng `--chia-mode` (`chia-fmax-r1`, 29/10/2026): 4 vòng được nhận, gate và nhận/loại theo chi phí cycle chạy
     đúng; baseline HIT cache. Claude gọi `synth_ab` ở cả 4 vòng nhận (2–10 lần/vòng, có A/B cả `RocketTile`).
     Vòng 5: Sonnet bỏ cuộc sau 1 lượt, 7 giây, không gọi tool (prompt cũ cho phép "vòng trống"). Đã sửa prompt và
-    thêm `--empty-retries` (phiên mới khi agent không sửa gì); phần này mới kiểm bằng mock.
+    thêm `--empty-retries` (phiên mới khi agent không sửa gì).
+  - `chia-fmax-r2` (29/10/2026): `--start-patch` gate lại điểm xuất phát (81,91 MHz, khớp đợt 1); `--empty-retries`
+    chạy thật ở vòng 5 (phiên retry có sửa và A/B, nhưng chỉ 1 sửa rồi bỏ). A/B cả `RocketTile` dao động mạnh: sửa
+    `dfma` mà đường găng con nhảy sang `sfma` (−3,9 ns so với −1,85 ns), nên nhận/loại theo một lần synth có nhiễu
+    lớn hơn ngưỡng 1 % (~0,12 ns).
   - Probe Claude Code (28/10/2026): Sonnet medium gọi được `chipyard_bash`.
   - Build, gate, synth/STA, `SalvageClaudeLLM`, sửa build: đã dùng ở các lần chạy trước khi bắt đầu lại.
 - **Mới kiểm bằng mock:**
