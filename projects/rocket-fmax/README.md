@@ -130,7 +130,7 @@ Image và worker:
 cd ~/CHIA-workflow/projects/rocket-fmax/docker
 docker build -f VivadoDockerfile -t chia-vivado:latest .
 chia up ~/CHIA-workflow/projects/rocket-fmax/cluster.yaml -y      # thêm worker rocket_vivado
-docker exec chia-vivado-$USER bash -lc 'v=$(ls /tools/Xilinx/*/Vivado/bin/vivado /tools/Xilinx/Vivado/*/bin/vivado 2>/dev/null | tail -1); $v -version'
+docker exec chia-vivado-$USER-0 bash -lc 'v=$(ls /tools/Xilinx/*/Vivado/bin/vivado /tools/Xilinx/Vivado/*/bin/vivado 2>/dev/null | tail -1); $v -version'
 ```
 
 Thêm `--vivado-part xc7a200tfbg676-2` vào lệnh chạy (Artix-7 lớn nhất của bản miễn phí; RocketTile vừa).
