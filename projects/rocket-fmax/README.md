@@ -117,6 +117,7 @@ cd ~/xinstall
 ./xsetup -b ConfigGen                     # chọn Vivado, rồi Vivado ML Standard
 # sửa ~/.Xilinx/install_config.txt: Destination=/var/home/<user>/tools/Xilinx;
 #   trong Modules=: Artix-7:1, mọi họ chip khác :0 (bớt dung lượng)
+mkdir -p ~/tools/Xilinx                   # installer không tự tạo thư mục đích ("Cannot write to ...")
 ./xsetup -a XilinxEULA,3rdPartyEULA -b Install -c ~/.Xilinx/install_config.txt
 ls ~/tools/Xilinx/*/Vivado/bin/vivado ~/tools/Xilinx/Vivado/*/bin/vivado 2>/dev/null
 ```
