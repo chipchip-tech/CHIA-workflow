@@ -26,7 +26,20 @@ File này dành cho session Claude Code tiếp quản project. Đọc cùng `CLA
   dù retry đã liệt kê các sửa đổi đã đo (commit `680e7f8`; chưa đọc `retry*_prompt.md` để xác nhận). Hai thước đo
   lệch nhau; chưa quyết hướng B (B1 chấm A/B theo họ endpoint, B2 thêm Vivado vào A/B) và đích ASIC hay FPGA.
 
+- **30/10/2026: đổi mốc.** Mốc 1 = Fmax > 100 MHz **post-route Vivado** trên Arty A7-100T (`xc7a100tcsg324-1`,
+  speed grade -1); mốc 2 = > 100 MHz post-route ORFS sky130. Phỏng vấn người dùng chốt: nhận/loại chỉ theo Vivado
+  post-route (Yosys ghi để đối chiếu); SRAM dùng model hành vi → BRAM; giữ cycle +3 %; giữ mục tiêu 100 MHz và đánh giá
+  tiến độ từng đợt (Chipyard Arty100T chạy Rocket ở 50 MHz, nên kẹt nhiều đợt thì bàn lại mục tiêu/giới hạn cycle);
+  `synth_ab` đổi sang Vivado `synth_design`; chống nhiễu P&R bằng vài chiến lược song song, lấy tốt nhất; đợt đầu
+  xuất phát từ `best.patch` của r3b. `--vivado-accept` (commit `e2065fd`) không dùng nữa, lệnh `fmax-r4` với nó đã bỏ.
+- Bước 0 (đang làm): `vivado_impl` + `--vivado-impl-probe` (README, mục "Post-route"), mới kiểm bằng mock. Cần đo
+  thật: flow chạy được không (BRAM có được suy ra không), thời gian place + route, RAM khi 3 lần song song, độ dao
+  động giữa các chiến lược, Fmax post-route của baseline và start.
+
 ## Việc tiếp theo
+
+0. Đọc `vivado_impl.csv` của Bước 0, rồi viết Bước 1: loop nhận/loại theo post-route (`vivado_impl` của vòng chạy
+   song song với gate), `synth_ab` dùng Vivado `synth_design`, prompt nêu đường găng post-route và đặc thù FPGA.
 
 1. Sau đợt 2, người dùng chọn đo thêm timing bằng Vivado (song song, không dùng để nhận/loại; `synth_design`; Vivado ML
    Standard miễn phí, part Artix-7). Đã viết `vivado_nodes.py`, `--vivado-part`, `docker/VivadoDockerfile`, worker

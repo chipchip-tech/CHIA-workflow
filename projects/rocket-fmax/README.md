@@ -1,7 +1,17 @@
 # rocket-fmax: agent tối ưu Fmax của Rocket theo example `timing_opt` của CHIA
 
-Mục tiêu: **Fmax của `RocketTile` > 100 MHz** (Chipyard `RocketConfig`, sky130hd, Yosys + OpenSTA, chu kỳ 10 ns),
-mất tối đa 3 % cycle so với RocketConfig gốc.
+Mục tiêu: **Fmax của `RocketTile` > 100 MHz**, chu kỳ 10 ns, mất tối đa 3 % cycle so với RocketConfig gốc.
+
+Mốc (đổi ngày 30/10/2026):
+
+| Mốc | Thước đo | Trạng thái |
+|---|---|---|
+| 1 (hiện tại) | Vivado **post-route**, `xc7a100tcsg324-1` (Arty A7-100T), out-of-context, SRAM thành BRAM | Bước 0: đo baseline và điểm xuất phát (`--vivado-impl-probe`), chưa chạy thật |
+| 2 | ORFS sky130 post-route | Chưa bắt đầu |
+
+Ba đợt đầu (r1, r2, r3b) nhận/loại theo Yosys + OpenSTA sky130hd ở mức synth (bảng "Kết quả"). Từ mốc 1, loop sẽ
+nhận/loại theo Fmax post-route Vivado (lấy tốt nhất của vài chiến lược place/route), `synth_ab` của agent đo bằng
+Vivado `synth_design`; Yosys chỉ ghi để đối chiếu. Phần sửa loop này chưa viết, chờ số đo của Bước 0.
 
 Loop chạy theo `examples/timing_opt` của CHIA (`--chia-mode`). Agent là Claude Code (Sonnet, effort medium).
 Bắt đầu lại từ đầu ngày 29/10/2026: xuất phát từ RocketConfig gốc, mọi kết quả trước đó bị bỏ. Lịch sử cũ có
@@ -62,7 +72,7 @@ Số đo ở mức synthesis, dùng để so tương đối giữa các vòng. C
 |---|---|
 | `rocket_fmax.py` | Driver: baseline, các vòng, nhận/loại, ghi kết quả, profiler |
 | `fmax_nodes.py` | Các `@ChiaFunction`: chipyard (ELF, git, kiểm phạm vi), `extract_tile_rtl`, `run_gate`, `synth_sta`; lớp `SalvageClaudeLLM` |
-| `vivado_nodes.py` | `vivado_synth`: Vivado `synth_design` (out-of-context) trên `RocketTile`, đo thêm cho `--vivado-part` |
+| `vivado_nodes.py` | `vivado_synth`: Vivado `synth_design` (out-of-context) trên `RocketTile`, đo thêm cho `--vivado-part`; `vivado_impl`: post-route nhiều chiến lược |
 | `ab_tool.py` | Tool MCP `synth_ab`: `rebuild_verilog`, `list_modules`, `start_ab`, `ab_result` |
 | `prompts/improve_timing_chia.md` | Prompt phiên tối ưu |
 | `prompts/fix_failure.md` | Prompt agent debug khi test fail |
@@ -142,6 +152,22 @@ docker exec chia-vivado-$USER-0 bash -lc 'v=$(ls /tools/Xilinx/*/Vivado/bin/viva
 Thêm `--vivado-part xc7a200tfbg676-2` vào lệnh chạy (Artix-7 lớn nhất của bản miễn phí; RocketTile vừa).
 Vivado nằm ở chỗ khác thì đặt biến môi trường `VIVADO` trong container.
 
+### Post-route (`--vivado-impl-probe`, mốc 1, mới kiểm bằng mock)
+
+`vivado_impl` (`vivado_nodes.py`): `synth_design` out-of-context với SRAM `*_ext` là model hành vi Chipyard sinh cho
+mô phỏng (`rtl.blackboxes`) để Vivado suy ra BRAM/LUTRAM, ghi checkpoint; rồi từ checkpoint đó chạy một lần
+`opt_design` → `place_design` → `phys_opt_design` → `route_design` (→ `phys_opt_design` nếu còn âm) cho mỗi chiến lược
+`--vivado-impl-strategies` (`default`, `explore`, `extratiming`; xem `IMPL_STRATEGIES`), tối đa
+`--vivado-impl-parallel` lần cùng lúc, mỗi lần `--vivado-impl-threads` luồng. Lần nào bị kill vì hết RAM (137/-9)
+được chạy lại một mình. Clock coi như đến từ BUFG (`HD.CLK_SRC BUFGCTRL_X0Y0`). Kết quả là chiến lược có worst slack
+post-route tốt nhất.
+
+`--vivado-impl-probe` (cần `--vivado-part`) không chạy vòng nào: place + route baseline và `--start-patch`, ghi
+`<run>/vivado_impl.csv` (mỗi điểm một dòng `synth` và một dòng mỗi chiến lược: slack sau place, slack/Fmax sau route,
+LUT, LUTRAM, FF, BRAM, DSP, phút, đường găng) và `runs/<điểm>/impl_<chiến lược>/vivado_*.rpt`. Cache theo
+`<prefix>_vivimpl_<part>_p<chu kỳ>_<chiến lược>`. Với `--chia-mode` và cùng `--extra-bench`, gate của điểm xuất phát
+chạy luôn và được cache cho đợt sau.
+
 ## Chạy
 
 Luôn submit **từ thư mục này**: cache lưu dataclass của `fmax_nodes`, nên lúc đọc lại phải import được module này.
@@ -163,7 +189,8 @@ chia job logs -f fmax-v2-r1          # dừng: chia job stop fmax-v2-r1
 - Gói Pro: một phiên dài tốn nhiều token, nên chạy theo đợt khoảng 5 vòng. Gặp "You've hit your limit" thì loop
   chờ tới giờ reset rồi gọi lại (`--quota-retries`, bỏ nếu xa hơn `--quota-max-wait`).
 - Tuỳ chọn khác: `--llm-timeout 1800` (example dùng 3600), `--debug-retries 2`, `--empty-retries 1` (phiên mới khi agent không sửa gì), `--build-fixes 2`,
-  `--fix-timeout 900`, `--vivado-part <part>` (đo thêm bằng Vivado, xem trên), `--vivado-accept <tol ns>` (Vivado vào điều kiện nhận), `--make-jobs 16`, `--build-timeout 3600`, `--cache-dir ~/chia_cache`.
+  `--fix-timeout 900`, `--vivado-part <part>` (đo thêm bằng Vivado, xem trên), `--vivado-accept <tol ns>` (Vivado vào điều kiện nhận),
+  `--vivado-impl-probe` (chỉ place + route baseline và điểm xuất phát), `--vivado-impl-strategies`, `--vivado-impl-parallel`, `--vivado-impl-threads`, `--make-jobs 16`, `--build-timeout 3600`, `--cache-dir ~/chia_cache`.
 - `rv64ui-p-ma_data` fail ngay trên baseline (Rocket không hỗ trợ truy cập lệch địa chỉ), nên phải `--exclude-isa`.
 
 ## Baseline (RocketConfig gốc, 10 ns, đo thật 29/10/2026)

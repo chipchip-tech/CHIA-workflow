@@ -127,6 +127,14 @@ def parse_args():
                    help="with --vivado-part: a round the Yosys numbers accept is also timed with Vivado, and "
                         "kept only if its Vivado worst slack >= the best one's - TOL_NS (0 = no worse, "
                         "-0.05 = at least 0.05 ns better); off by default")
+    p.add_argument("--vivado-impl-probe", action="store_true",
+                   help="no rounds: Vivado place + route (vivado_impl, SRAMs as BRAM) of the baseline and of "
+                        "--start-patch on --vivado-part, one run per --vivado-impl-strategies; vivado_impl.csv")
+    p.add_argument("--vivado-impl-strategies", nargs="+", default=["default", "explore", "extratiming"],
+                   choices=sorted(V.IMPL_STRATEGIES))
+    p.add_argument("--vivado-impl-parallel", type=int, default=3,
+                   help="place + route runs at the same time (memory: the vivado container has --memory=18g)")
+    p.add_argument("--vivado-impl-threads", type=int, default=4, help="maxThreads of each place + route run")
     p.add_argument("--iters", type=int, default=5)
     p.add_argument("--bypass-llm", action="store_true",
                    help="milestone 2: bypass OpenCodeLLM.prompt; the loop applies --patch-file "
@@ -241,13 +249,15 @@ def parse_args():
                 "(đổi cycle thì không kiểm tương đương lockstep được)")
     if a.vivado_accept is not None and not (a.vivado_part and a.chia_mode):
         p.error("--vivado-accept cần --vivado-part và --chia-mode")
+    if a.vivado_impl_probe and not a.vivado_part:
+        p.error("--vivado-impl-probe cần --vivado-part")
     if a.start_patch and not Path(a.start_patch).expanduser().is_file():
         p.error(f"không thấy --start-patch {a.start_patch}")
     a.ab_tool = a.ab_tool or a.chia_mode       # chia-mode: the agent gets synth_ab
     if a.model is None:
         a.model = "sonnet" if a.agent == "claude" else "opencode/big-pickle"
     if a.run_name is None:
-        mode = ("equiv" if a.equiv_only else "baseline" if a.baseline_only
+        mode = ("equiv" if a.equiv_only else "vivimpl" if a.vivado_impl_probe else "baseline" if a.baseline_only
                 else "m2" if a.bypass_llm else "agent")
         a.run_name = f"{mode}-{datetime.now().strftime('%Y%m%d-%H%M')}"
     a.out_dir = os.path.expanduser(a.out_dir)
@@ -383,6 +393,93 @@ def vivado_flush(out: Path, wait: bool = False):
         print(f"vivado {label}: " + (f"Fmax {v.fmax_mhz:.2f} MHz, slack {v.worst_slack_ns:.3f} ns, "
                                      f"LUT {v.luts}, {v.seconds / 60:.1f} min, {v.crit_start} -> {v.crit_end}"
                                      if v.success else f"lỗi: {v.error}"), flush=True)
+
+
+# --vivado-impl-probe: Vivado post-route timing (vivado_impl), one row per strategy.
+IMPL_FIELDS = ["point", "strategy", "best", "yosys_fmax_mhz", "synth_fmax_mhz", "place_slack_ns", "viv_fmax_mhz",
+               "viv_slack_ns", "viv_tns_ns", "viv_failing", "viv_luts", "viv_lutram", "viv_ffs", "viv_brams",
+               "viv_dsps", "viv_min", "viv_critical_path", "error"]
+
+
+def vivado_impl_launch(a, rtl, tag: str):
+    return V.vivado_impl.chia_remote(rtl, a.period_ns, a.vivado_part, tuple(a.vivado_impl_strategies),
+                                     a.vivado_threads, a.vivado_impl_threads, a.vivado_impl_parallel,
+                                     _chia_tag=tag)
+
+
+def impl_tag(a, prefix: str) -> str:
+    return (f"{prefix}_vivimpl_{a.vivado_part}_p" + f"{a.period_ns:g}".replace(".", "p")
+            + "_" + "-".join(a.vivado_impl_strategies))
+
+
+def save_impl(out: Path, label: str, ys, res) -> str:
+    """runs/<label>/impl_*/ reports and vivado_impl.csv rows; returns a one-line summary."""
+    d = out / "runs" / label
+    rows = []
+    syn = res.synth
+    if syn is not None:
+        write(d / "impl_synth" / "vivado_paths.rpt", syn.paths)
+        write(d / "impl_synth" / "vivado_utilization.rpt", syn.utilization)
+        write(d / "impl_synth" / "vivado_log_tail.txt", syn.log_tail)
+        rows.append({"strategy": "synth", "viv_fmax_mhz": fmt(syn.fmax_mhz, 2),
+                     "viv_slack_ns": fmt(syn.worst_slack_ns, 3), "viv_min": f"{syn.seconds / 60:.1f}",
+                     "viv_critical_path": f"{syn.crit_start} -> {syn.crit_end}", "error": syn.error, "_r": syn})
+    for n, r in res.runs.items():
+        write(d / f"impl_{n}" / "vivado_paths.rpt", r.paths)
+        write(d / f"impl_{n}" / "vivado_timing_summary.rpt", r.summary)
+        write(d / f"impl_{n}" / "vivado_utilization.rpt", r.utilization)
+        write(d / f"impl_{n}" / "vivado_log_tail.txt", r.log_tail)
+        rows.append({"strategy": n, "best": n == res.best, "place_slack_ns": fmt(res.place_slack.get(n), 3),
+                     "viv_fmax_mhz": fmt(r.fmax_mhz, 2), "viv_slack_ns": fmt(r.worst_slack_ns, 3),
+                     "viv_tns_ns": fmt(r.tns_ns, 1),
+                     "viv_failing": r.failing_endpoints if r.failing_endpoints is not None else "",
+                     "viv_min": f"{r.seconds / 60:.1f}", "viv_critical_path": f"{r.crit_start} -> {r.crit_end}",
+                     "error": r.error + (f" (returncodes {r.returncodes})" if len(r.returncodes) > 1 else ""),
+                     "_r": r})
+    if not rows:
+        rows.append({"strategy": "", "error": res.error, "_r": None})
+    path = out / "vivado_impl.csv"
+    new = not path.exists()
+    with open(path, "a", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=IMPL_FIELDS)
+        if new:
+            w.writeheader()
+        for row in rows:
+            r = row.pop("_r")
+            if r is not None:
+                row.update(viv_luts=r.luts or "", viv_lutram=r.lutram if r.lutram is not None else "",
+                           viv_ffs=r.ffs or "", viv_brams=r.brams if r.brams is not None else "",
+                           viv_dsps=r.dsps if r.dsps is not None else "")
+            w.writerow({"point": label, "yosys_fmax_mhz": fmt(ys.fmax_mhz, 2) if ys is not None else "",
+                        "synth_fmax_mhz": fmt(syn.fmax_mhz, 2) if syn is not None else "", **row})
+    b = res.result
+    return (f"post-route {b.fmax_mhz:.2f} MHz ({res.best}, slack {b.worst_slack_ns:.3f} ns, "
+            f"{b.crit_start} -> {b.crit_end}); synth {syn.fmax_mhz:.2f} MHz, BRAM {b.brams}, LUTRAM {b.lutram}"
+            if res.success and syn is not None and syn.fmax_mhz is not None else f"lỗi: {res.error}")
+
+
+def run_impl_probe(a, out: Path, snap: dict, base: dict, elfs: dict):
+    """--vivado-impl-probe: place + route of the baseline and the start point (queued on the
+    one `vivado` slot), cached under <prefix>_vivimpl_<part>_p<period>_<strategies>. The
+    start point is built (and gated with --chia-mode) while the baseline is placed."""
+    pts = [("baseline", base["synth"], vivado_impl_launch(a, base["rtl"], impl_tag(a, "baseline")))]
+    start = ensure_start(a, out, snap, base, elfs) if a.start_patch else None
+    if start is not None:
+        h = hashlib.sha256((start["patch"] + "\0").encode()).hexdigest()[:10]
+        pts.append(("start", start["synth"], vivado_impl_launch(a, start["rtl"], impl_tag(a, f"baseline_start_{h}"))))
+    print(f"\nVivado place + route ({a.vivado_part}, {a.period_ns:g} ns, {', '.join(a.vivado_impl_strategies)}, "
+          f"{a.vivado_impl_parallel} song song): {', '.join(p[0] for p in pts)}", flush=True)
+    for label, ys, ref in pts:
+        try:
+            res = get(ref)
+        except Exception as e:                                       # noqa: BLE001
+            res = V.VivadoImplResult(success=False, part=a.vivado_part, period_ns=a.period_ns,
+                                     error=f"{type(e).__name__}: {e}"[:500])
+        print(f"vivado impl {label}: {save_impl(out, label, ys, res)}", flush=True)
+        for n, r in res.runs.items():
+            print(f"  {n:12s} place {fmt(res.place_slack.get(n), 3)} ns -> route "
+                  + (f"{r.worst_slack_ns:.3f} ns ({r.fmax_mhz:.2f} MHz)" if r.success else f"lỗi: {r.error}")
+                  + f", {r.seconds / 60:.1f} min", flush=True)
 
 
 def cache_has(tag: str) -> bool:
@@ -1531,6 +1628,10 @@ def run(a, out: Path):
 
     base = ensure_baseline(a, out, elfs, snap)
     if a.baseline_only:
+        vivado_flush(out, wait=True)
+        return
+    if a.vivado_impl_probe:
+        run_impl_probe(a, out, snap, base, elfs)
         vivado_flush(out, wait=True)
         return
 
