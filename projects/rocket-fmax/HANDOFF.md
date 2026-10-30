@@ -62,16 +62,24 @@ File này dành cho session Claude Code tiếp quản project. Đọc cùng `CLA
   - Định vị đường găng cho prompt: tên Vivado (`dcache/s2_data_reg[13]/C`) → `vivado_nodes.dotted` → `pick_target`,
     `path_sources` (dòng Chisel theo `@[...]`).
 
+- **Đợt `fmax-r4` (30/10/2026) xong, lần đầu Bước 1 chạy thật**: 1/5 vòng nhận, post-route 61,06 → **63,61 MHz**
+  (explore), cycle +0,405 %, hiệu năng +4,18 %. Vòng 2 loại vì cycle +4,07 % (place + route bị huỷ đúng); vòng 3 cycle
+  +1,91 %, post-route 63,05 MHz (synth tốt hơn iter1 nhưng post-route kém); vòng 4 không sửa; vòng 5 ra Verilog trùng
+  vòng 3 (mọi số Vivado trùng), mất 33 phút. Vòng đầy đủ 33–37 phút. Đường găng post-route chuyển sang
+  `frontend.icache.s2_tag_hit_*` → `frontend.fq` / `core.ex_reg_rs_msb_0`; 2000 endpoint âm, TNS ~ −10 000 ns.
+  Bảng ở README, mục "Kết quả".
+- Sau r4: loop loại ngay vòng có Verilog `RocketTile` trùng bản đã đo (`rtl_hash`, `seen`), không gate, không place +
+  route (mới kiểm bằng mock).
+
 ## Việc tiếp theo
 
-1. Người dùng chép file, `docker rm -f` hai worker cũ, `chia up`, rồi chạy đợt `fmax-r4` (lệnh ở README, mục
-   "Chạy"; `--start-patch` = `best.patch` của r3b). Đầu job: start place + route chạy lại (~23 phút, `vivimpl4`
-   miss), RTL/gate HIT.
-2. Đọc log r4: `synth_ab` bản Vivado có chạy không (thời gian, RAM khi 2 sub-block cùng lúc), agent có đọc được
-   `route_paths.rpt`, thời gian mỗi vòng, huỷ place + route khi gate fail có để lại Vivado không (`docker exec
-   chia-vivado-$USER-0 pgrep -fa vivado`). Sửa loop theo log.
-3. Ghi kết quả từng đợt vào bảng "Kết quả" của `README.md`. Đợt sau dùng `--start-patch` từ `best.patch` của đợt
-   trước. Kẹt nhiều đợt thì bàn lại mục tiêu/giới hạn cycle với người dùng.
+1. Người dùng chép `rocket_fmax.py` mới, chạy `fmax-r5` (README, mục "Chạy"; `--start-patch` = `best.patch` của r4).
+2. Chưa xác nhận từ r4: `synth_ab` bản Vivado (thời gian, RAM khi 2 sub-block cùng lúc), agent có đọc
+   `route_paths.rpt`, không còn Vivado sót sau khi huỷ (`docker exec chia-vivado-$USER-0 pgrep -fa vivado`). Xin
+   `runs/iter*/agent_ab_experiments.jsonl` và `agent_response.md` của r4.
+3. Tiến độ chậm (+2,55 MHz/đợt, cách 100 MHz ~5,7 ns trên rất nhiều đường). Sau r5 bàn lại với người dùng: mục tiêu
+   100 MHz, giới hạn cycle 3 %, model/effort của agent (agent + build chỉ ~10 phút mỗi vòng, `--llm-timeout` 30 phút).
+4. Ghi kết quả từng đợt vào bảng "Kết quả" của `README.md`.
 
 ## Quy ước làm việc
 

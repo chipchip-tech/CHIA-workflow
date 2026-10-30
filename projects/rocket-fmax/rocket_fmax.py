@@ -203,6 +203,16 @@ def patch_hash(patch: str) -> str:
     return hashlib.sha256((patch + "\0").encode()).hexdigest()[:10]
 
 
+def rtl_hash(rtl) -> str:
+    """Hash of the tile's Verilog (what Vivado and the gate see), to spot a round that rebuilt a
+    netlist already measured (fmax-r4 round 5 repeated round 3: same Vivado numbers)."""
+    h = hashlib.sha256()
+    for name in sorted(rtl.files):
+        h.update(name.encode() + b"\0" + rtl.files[name].encode() + b"\0")
+    h.update(rtl.sram_models.encode())
+    return h.hexdigest()[:16]
+
+
 def cache_has(tag: str) -> bool:
     from chia.base.cache import get_active_cache
     return bool(get(get_active_cache().has.chia_remote(tag)))
@@ -689,12 +699,18 @@ def tile_rtl(art, r: dict):
         return None
 
 
-def gate_and_judge(a, out: Path, label: str, art, rtl, elfs, base: dict, best: dict, r: dict) -> dict:
+def gate_and_judge(a, out: Path, label: str, art, rtl, elfs, base: dict, best: dict, r: dict,
+                   seen: dict) -> dict:
     """Gate and place + route of a built round, in parallel, then the decision. A functional
     failure (r["functional_fail"]: the text for the debug agent) or a cycle cost above
-    --max-ipc-loss cancels place + route."""
+    --max-ipc-loss cancels place + route. Verilog identical to one already measured (`seen`:
+    rtl_hash -> label) is rejected without either."""
     d = out / "runs" / label
-    r["rtl"] = rtl
+    r["rtl"], r["rtl_hash"] = rtl, rtl_hash(rtl)
+    if r["rtl_hash"] in seen:
+        r["reason"] = (f"Verilog {N.TOP} trùng hệt {seen[r['rtl_hash']]} (đã đo); "
+                       "bỏ qua gate và place + route")
+        return r
     t0 = time.time()
     impl_ref = impl_launch(a, rtl)
     gate = get(N.run_gate.chia_remote(art, elfs))
@@ -802,7 +818,7 @@ def new_round() -> dict:
     return {"accepted": False, "reason": "", "impl": None, "rtl": None, "patch": "", "isa_pass": "", "build_fixes": 0}
 
 
-def run_round(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best, history) -> dict:
+def run_round(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best, history, seen) -> dict:
     """One round. Returns {"accepted", "reason", "impl", "rtl", "patch", "cyc", ...}."""
     d = out / "runs" / f"iter{i}"
     r = new_round()
@@ -836,7 +852,7 @@ def run_round(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best, histor
     rtl = tile_rtl(art, r)
     if rtl is None:
         return r
-    r = gate_and_judge(a, out, f"iter{i}", art, rtl, elfs, base, best, r)
+    r = gate_and_judge(a, out, f"iter{i}", art, rtl, elfs, base, best, r, seen)
     k = 0
     while r.get("functional_fail") and k < a.debug_retries:
         # as debug_failure in CHIA's timing_opt: the edit builds but fails a test
@@ -862,7 +878,7 @@ def run_round(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best, histor
         rtl = tile_rtl(art, r)
         if rtl is None:
             return r
-        r = gate_and_judge(a, out, f"iter{i}/debug{k}", art, rtl, elfs, base, best, r)
+        r = gate_and_judge(a, out, f"iter{i}/debug{k}", art, rtl, elfs, base, best, r, seen)
     r.pop("functional_fail", None)
     return r
 
@@ -898,11 +914,12 @@ def run(a, out: Path):
     llm = make_llm(a, a.model, SYSTEM_MESSAGE, a.llm_timeout)
     fix_llm = make_llm(a, a.fix_model or a.model, SYSTEM_MESSAGE_FIX, a.fix_timeout)
     history: list[str] = []
+    seen = {rtl_hash(best["rtl"]): best["name"]}                    # Verilog already measured
     for i in range(1, a.iters + 1):
         t0 = time.time()
         print(f"\n######## round {i}/{a.iters}", flush=True)
         try:
-            r = run_round(a, i, out, llm, fix_llm, elfs, snap, base, best, history)
+            r = run_round(a, i, out, llm, fix_llm, elfs, snap, base, best, history, seen)
         except SystemExit:
             raise
         except Exception as e:                                       # noqa: BLE001
@@ -922,6 +939,8 @@ def run(a, out: Path):
                     "elapsed_min": f"{r['minutes']:.1f}", "impl_min": fmt(r.get("impl_min"), 1)})
         print(f"round {i}: {'ACCEPT' if r['accepted'] else 'REJECT'} ({r['minutes']:.1f} min) - {r['reason'][:400]}",
               flush=True)
+        if r.get("rtl_hash"):
+            seen.setdefault(r["rtl_hash"], f"iter{i}")
         if r["accepted"]:
             best = {"name": f"iter{i}", "patch": r["patch"], "rtl": r["rtl"], "impl": r["impl"], "cyc": r["cyc"]}
         history.append(history_entry(i, r, resp_summary))
