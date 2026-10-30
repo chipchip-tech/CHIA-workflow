@@ -35,6 +35,9 @@ File này dành cho session Claude Code tiếp quản project. Đọc cùng `CLA
 - Bước 0 (đang làm): `vivado_impl` + `--vivado-impl-probe` (README, mục "Post-route"), mới kiểm bằng mock. Cần đo
   thật: flow chạy được không (BRAM có được suy ra không), thời gian place + route, RAM khi 3 lần song song, độ dao
   động giữa các chiến lược, Fmax post-route của baseline và start.
+  Lần chạy thật đầu (`viv-impl0`, 30/10): `synth_design` của `vivado_impl` lỗi sau 0,5 phút ở cả baseline và start
+  (chưa xem log). Nghi model SRAM là SystemVerilog (Yosys cũng đọc bằng `-sv`) mà Vivado đọc không `-sv`: đã thêm `-sv`,
+  đổi tag sang `vivimpl2` (kết quả lỗi đã nằm trong cache). Synth-level trên a100t -1: baseline 52,58, start 56,19 MHz.
 
 ## Việc tiếp theo
 

@@ -408,7 +408,8 @@ def vivado_impl_launch(a, rtl, tag: str):
 
 
 def impl_tag(a, prefix: str) -> str:
-    return (f"{prefix}_vivimpl_{a.vivado_part}_p" + f"{a.period_ns:g}".replace(".", "p")
+    # v2: SRAM models read with -sv (v1 failed in synth_design; failures are cached under their tag)
+    return (f"{prefix}_vivimpl2_{a.vivado_part}_p" + f"{a.period_ns:g}".replace(".", "p")
             + "_" + "-".join(a.vivado_impl_strategies))
 
 

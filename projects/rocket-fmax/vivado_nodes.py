@@ -38,7 +38,7 @@ set_output_delay 0 -clock clk [get_ports -filter {{DIRECTION == OUT}}]
 VIVADO_TCL = """\
 set_param general.maxThreads {threads}
 read_verilog -sv {files}
-read_verilog {stubs}
+read_verilog -sv {stubs}
 read_xdc clock.xdc
 synth_design -top {top} -part {part} -mode out_of_context
 report_timing_summary -max_paths 10 -file timing_summary.rpt
