@@ -1,23 +1,21 @@
 """Nodes for the Rocket Fmax loop (projects/rocket-fmax).
 
 Every node passes data (str/bytes/dataclass) and never file paths: the chipyard,
-verilator, eda and opencode containers do not share a filesystem.
+verilator, claude and vivado containers do not share a filesystem.
 
   chipyard (resource "chipyard"):  load_test_elfs, tree_snapshot, reset_rocket,
-                                   collect_diff, restore_outside, apply_edit,
-                                   stage_for_agent, ab_cleanup,
-                                   find_scala_classes, round_diff
+                                   collect_diff, restore_outside, stage_for_agent,
+                                   read_text, ab_cleanup, find_scala_classes,
+                                   read_source_lines, round_diff
+  claude (resource "claude_creds"): read_text_claude (SalvageClaudeLLM runs there)
   any node (no resource):          extract_tile_rtl, run_gate (fans out to
                                    VerilatorRunNode on "verilator_run")
-  eda (resource "eda"):            synth_sta (Yosys + OpenSTA, sky130hd tt),
-                                   equiv_formal
-  chipyard, after the loop:        equiv_sim (Verilator lockstep)
+Vivado (synth_ab A/B, place + route) is in vivado_nodes.py.
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 import shlex
@@ -26,16 +24,10 @@ import subprocess
 import tempfile
 import threading
 import time
-from dataclasses import dataclass, field
-
-from types import SimpleNamespace
+from dataclasses import dataclass
 
 from chia.base.ChiaFunction import ChiaFunction, get
-from chia.base.tools.BashTool import BashTool
 from chia.models.claude import ClaudeCodeLLM, ClaudeCodeQueryResult, parse_rate_limit_event
-from chia.models.opencode import OpenCodeLLM, parse_session_id
-
-import equiv as E
 
 CHIPYARD = "/home/ray/chipyard"
 ROCKET = f"{CHIPYARD}/generators/rocket-chip"
@@ -46,7 +38,7 @@ STAGE_DIR = "/home/ray/rocket_fmax"          # on chipyard: what the agent may r
 SIM_WORK_DIR = "/home/ray/rocket_fmax_sim"   # on verilator_run
 # Written by the loop scripts and the A/B tool (never by an agent), removed after use.
 AB_PGID_FILE = "/home/ray/rocket_fmax_ab.pgid"   # process group of the A/B tool's make verilog
-LLM_PARTIAL_FILE = "/home/ray/rocket_fmax_llm_partial.txt"  # on opencode/claude: transcript of a cut-off run
+LLM_PARTIAL_FILE = "/home/ray/rocket_fmax_llm_partial.txt"  # on claude: transcript of a cut-off run
 
 ISA_SUITES = ("rv64ui", "rv64um", "rv64ua", "rv64uf", "rv64ud")
 BENCHMARKS = ("dhrystone", "median", "multiply", "qsort", "towers", "vvadd")
@@ -55,9 +47,6 @@ BENCHMARKS = ("dhrystone", "median", "multiply", "qsort", "towers", "vvadd")
 # file whose name says it holds configs (cache sizes, FPU on/off, ...).
 EDITABLE_PREFIX = "src/main/scala/"
 FORBIDDEN_FILE_RE = re.compile(r"Config", re.IGNORECASE)
-
-# Cells ORFS marks dont_use for sky130hd (flow/platforms/sky130hd/config.mk).
-DONT_USE_RE = re.compile(r"^sky130_fd_sc_hd__(probe_p_8|probec_p_8|lpflow_\w+)$")
 
 # EICG_wrapper is a latch-based clock gate; for a synthesis-only estimate it is
 # replaced by a wire so the gated registers stay clocked by `clock`.
@@ -187,24 +176,6 @@ def restore_outside(outside_before: dict) -> dict:
 
 
 @ChiaFunction(resources={"chipyard": 1}, max_retries=0)
-def apply_edit(patch: str | None, marker_file: str, marker: str) -> str:
-    """Milestone 2 stand-in for the agent: apply `patch` on top of the tree, or,
-    when no patch is given, append the comment `marker` to `marker_file`
-    (a comment-only edit: same RTL, so the round must be rejected)."""
-    if patch:
-        with tempfile.NamedTemporaryFile("w", suffix=".patch", delete=False) as f:
-            f.write(patch)
-        try:
-            _sh(f"git -C {ROCKET} apply --whitespace=nowarn {f.name}")
-        finally:
-            os.unlink(f.name)
-    else:
-        with open(os.path.join(ROCKET, marker_file), "a") as f:
-            f.write(f"\n// {marker}\n")
-    return _sh(f"git -C {ROCKET} status --short")
-
-
-@ChiaFunction(resources={"chipyard": 1}, max_retries=0)
 def stage_for_agent(files: dict, root: str = STAGE_DIR) -> str:
     """Write {relative path: text} under `root` (wiped first)."""
     shutil.rmtree(root, ignore_errors=True)
@@ -236,28 +207,28 @@ def _read_local(path: str, remove: bool) -> str | None:
     return text
 
 
-@ChiaFunction(resources={"opencode_creds": 1}, max_retries=0)
-def read_text_opencode(path: str, remove: bool = False) -> str | None:
-    """Same as read_text on the opencode worker: opencode's built-in bash runs there, so an
-    agent that used it instead of chipyard_bash left its output there. `remove` deletes it."""
-    return _read_local(path, remove)
-
-
 @ChiaFunction(resources={"claude_creds": 0.01}, max_retries=0)
 def read_text_claude(path: str, remove: bool = False) -> str | None:
-    """Same as read_text_opencode on the claude worker (SalvageClaudeLLM's LLM_PARTIAL_FILE)."""
+    """A file on the claude worker (SalvageClaudeLLM's LLM_PARTIAL_FILE); `remove` deletes it."""
     return _read_local(path, remove)
+
+
+def _kill(proc):
+    try:
+        os.killpg(proc.pid, 9)
+    except (ProcessLookupError, PermissionError):
+        proc.kill()
+    proc.wait()
 
 
 class SalvageClaudeLLM(ClaudeCodeLLM):
-    """ClaudeCodeLLM (`claude --print`) for the loop, in place of SalvageOpenCodeLLM (--agent claude).
+    """ClaudeCodeLLM (`claude --print`) for the loop.
 
     - Claude's own tools (Bash, Read, Edit, ...) would run in the claude container, which has no
       Chipyard: `--tools ""` removes them all and `--strict-mcp-config` loads only the MCP tools
-      the loop passes (chipyard_bash). Unlike opencode's free models, nothing breaks without them.
-    - `effort` is `--effort` (low/medium/high/xhigh/max); `max_turns` is `--max-turns`, the
-      counterpart of opencode's `steps`, but claude then stops without a final answer, so it is
-      only a safety net behind BudgetBashTool's HARD limit.
+      the loop passes (chipyard_bash, synth_ab).
+    - `effort` is `--effort` (low/medium/high/xhigh/max); `max_turns` is `--max-turns` (claude
+      then stops without a final answer).
     - The stock streaming run waits on `claude` with no time limit (timeout_seconds only applies
       without log_stream). Here it is killed after timeout_seconds, and the event stream of a
       run that timed out, failed or hit the usage limit is written to LLM_PARTIAL_FILE on the
@@ -314,7 +285,7 @@ class SalvageClaudeLLM(ClaudeCodeLLM):
         try:
             proc.wait(timeout=self.timeout_seconds)
         except subprocess.TimeoutExpired:
-            SalvageOpenCodeLLM._kill(proc)
+            _kill(proc)
             for t in threads:
                 t.join(10)
             self._salvage(stream_parts, f"hết {self.timeout_seconds} s")
@@ -337,144 +308,6 @@ class SalvageClaudeLLM(ClaudeCodeLLM):
                 f.write(f"[claude {why}]\n\n{''.join(stream_parts)}")
         except OSError as e:
             self.logger.warning("could not salvage claude run: %s", e)
-
-
-class SalvageOpenCodeLLM(OpenCodeLLM):
-    """OpenCodeLLM that keeps the transcript of a run cut off by timeout_seconds.
-
-    The stock prompt() turns a timeout into an empty result, so nothing shows what the
-    agent did. Here a timed-out `opencode run` is exported (or its raw event stream kept)
-    to LLM_PARTIAL_FILE on the opencode worker; the loop reads it with read_text_opencode.
-
-    builtin_tools picks what is left of opencode's own tools (bash, read, edit, ...). They run in
-    the opencode container, which has no Chipyard (fmax-ab1: 142 such bash calls hunting for the
-    workspace), but switching them all off ("off") makes opencode's free models answer "Free usage
-    limit reached" at once (probe-tools, 27/10/2026: off failed, on worked, same model, minutes
-    apart). So:
-      "on"       all of them (m3/m4);
-      "off"      none, only the MCP tools;
-      "deny"     all listed, but permission bash/edit/webfetch = deny;
-      "readonly" only read/grep/glob/list/lsp (no bash, edit, write, web, subagents).
-
-    A provider error ("stream error" in opencode's log) does not end `opencode run`: it hung
-    until the timeout (fmax-ab-t1: 45 min). Its log (INFO, which also logs every agent step)
-    therefore always goes to stderr, and a run whose last log line is that error, with nothing
-    after it for ERROR_GRACE s, is killed and returned as failed.
-
-    max_steps sets the agent's `steps` in opencode's config: after that many steps the model is
-    told to stop calling tools and answer in text (--loop-ab edit sessions, see BudgetBashTool)."""
-
-    BUILTIN_TOOLS = ("bash", "read", "edit", "write", "patch", "multiedit", "grep", "glob", "list",
-                     "lsp", "task", "webfetch", "websearch", "codesearch")
-    READONLY_TOOLS = ("read", "grep", "glob", "list", "lsp")
-    MODES = ("on", "off", "deny", "readonly")
-    ERROR_GRACE = 60
-
-    def __init__(self, *args, builtin_tools: bool | str = True, max_steps: int | None = None, **kwargs):
-        super().__init__(*args, **kwargs)
-        mode = {True: "on", False: "off"}.get(builtin_tools, builtin_tools)
-        if mode not in self.MODES:
-            raise ValueError(f"builtin_tools must be one of {self.MODES}, not {builtin_tools!r}")
-        self.builtin_tools = mode
-        self.max_steps = max_steps     # opencode agent `steps`: after that many, a text-only answer
-        if "--print-logs" not in (self.extra_cli_args or []):
-            self.extra_cli_args = list(self.extra_cli_args or []) + ["--print-logs", "--log-level", "INFO"]
-
-    def _build_config(self, tools):
-        cfg = super()._build_config(tools)
-        mode = self.builtin_tools
-        if mode in ("off", "readonly"):
-            keep = self.READONLY_TOOLS if mode == "readonly" else ()
-            sel = {t: t in keep for t in self.BUILTIN_TOOLS}
-            cfg["tools"] = sel
-            cfg["agent"][self.agent_name]["tools"] = dict(sel)
-        if mode != "on":
-            cfg["permission"] = {**cfg.get("permission", {}), "bash": "deny", "edit": "deny", "webfetch": "deny"}
-        if self.max_steps:
-            cfg["agent"][self.agent_name]["steps"] = self.max_steps
-        return cfg
-
-    def _capture(self, cmd, env):
-        if cmd[1:2] != ["run"]:
-            return super()._capture(cmd, env)
-        fd, out_path = tempfile.mkstemp(prefix="opencode_out_", suffix=".out")
-        efd, err_path = tempfile.mkstemp(prefix="opencode_err_", suffix=".log")
-        try:
-            with os.fdopen(fd, "w") as out_fh, os.fdopen(efd, "w") as err_fh:
-                proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=out_fh, stderr=err_fh,
-                                        text=True, env=env, start_new_session=True)
-                rc, t0, last_size, last_change = None, time.time(), -1, time.time()
-                while rc is None:
-                    try:
-                        rc = proc.wait(timeout=5)
-                        break
-                    except subprocess.TimeoutExpired:
-                        pass
-                    now = time.time()
-                    size = os.path.getsize(err_path)
-                    if size != last_size:
-                        last_size, last_change = size, now
-                    if now - t0 > self.timeout_seconds:
-                        self._kill(proc)
-                        self._salvage(out_path, env, self._read(err_path))
-                        raise subprocess.TimeoutExpired(cmd, self.timeout_seconds)
-                    if now - last_change > self.ERROR_GRACE:
-                        err = self._read(err_path)
-                        tail = err.rstrip().rsplit("\n", 1)[-1]
-                        if "level=ERROR" in tail and "stream error" in tail:
-                            self._kill(proc)
-                            self.logger.warning("opencode: provider error, killed after %d s silence: %s",
-                                                self.ERROR_GRACE, self._last_error(err))
-                            self._salvage(out_path, env, err, why="lỗi provider")
-                            rc = -9
-            with open(out_path) as f:
-                stdout = f.read()
-            return SimpleNamespace(returncode=rc, stdout=stdout, stderr=self._read(err_path))
-        finally:
-            for path in (out_path, err_path):
-                try:
-                    os.unlink(path)
-                except OSError:
-                    pass
-
-    @staticmethod
-    def _kill(proc):
-        try:
-            os.killpg(proc.pid, 9)
-        except (ProcessLookupError, PermissionError):
-            proc.kill()
-        proc.wait()
-
-    @staticmethod
-    def _read(path: str) -> str:
-        with open(path, errors="replace") as f:
-            return f.read()
-
-    @staticmethod
-    def _last_error(err: str) -> str:
-        lines = [ln for ln in err.splitlines() if "level=ERROR" in ln]
-        m = re.search(r'error\.error="([^"]*)"', lines[-1]) if lines else None
-        return m.group(1) if m else (lines[-1][-300:] if lines else "")
-
-    def _salvage(self, out_path: str, env: dict, stderr=None, why: str | None = None) -> None:
-        try:
-            with open(out_path, errors="replace") as f:
-                raw = f.read()
-            sid = parse_session_id(raw)
-            stream = ""
-            if sid:
-                try:
-                    stream = self._extract_from_export(self._run_export(sid, env))[2]
-                except Exception as e:                               # noqa: BLE001
-                    self.logger.warning("export of %s failed: %s", sid, e)
-            with open(LLM_PARTIAL_FILE, "w") as f:
-                head = why or f"hết {self.timeout_seconds} s"
-                f.write(f"[opencode run {head}, session {sid}]\n\n{stream or raw}")
-                if stderr:   # empty stdout (fmax-ab-t1: no event in 45 min) -> stderr is all there is
-                    err = stderr.decode(errors="replace") if isinstance(stderr, bytes) else stderr
-                    f.write(f"\n\n----- stderr (cuối) -----\n{err[-20000:]}")
-        except Exception as e:                                       # noqa: BLE001
-            self.logger.warning("could not salvage timed-out run: %s", e)
 
 
 @ChiaFunction(resources={"chipyard": 1}, max_retries=0)
@@ -520,6 +353,15 @@ def _split_modules(text: str) -> dict[str, str]:
     return out
 
 
+def modules_of(files: dict) -> dict[str, str]:
+    """{module: text} over several files (the first definition of a name wins)."""
+    mods: dict[str, str] = {}
+    for _, text in sorted(files.items()):
+        for name, mtext in _split_modules(text).items():
+            mods.setdefault(name, mtext)
+    return mods
+
+
 def _port_stub(module_text: str) -> str:
     """Empty module with the same ports, for STA: header up to `);` plus any
     non-ANSI port declarations."""
@@ -534,8 +376,8 @@ def _port_stub(module_text: str) -> str:
 class TileRTL:
     top: str
     files: dict             # {filename: text} defining the modules under `top`
-    blackboxes: dict        # {sram module: original text}, read with -lib by Yosys
-    stubs: str              # empty port-only modules of the blackboxes, for STA
+    blackboxes: dict        # {sram module: original text} (*_ext)
+    stubs: str              # empty port-only modules of the blackboxes (unused since Yosys left)
     modules: list           # modules in the hierarchy (blackboxes included)
     replaced: list          # modules swapped for a synthesis stub (EICG_wrapper)
     mems_conf: str = ""
@@ -600,7 +442,7 @@ def extract_tile_rtl(artifact) -> TileRTL:
 
 # ---------------------------------------------------------------------------
 # instance paths: which module a flattened name like fpuOpt.dfma.fma.x_reg is in
-# (--loop-ab picks the target module and the A/B module from them)
+# (the worst path located for the prompt)
 # ---------------------------------------------------------------------------
 
 _INST_PATH_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s+(?:#\s*\(.*?\)\s*)?([A-Za-z_]\w*)\s*\(", re.M | re.S)
@@ -609,7 +451,7 @@ _INST_PATH_RE = re.compile(r"^\s*([A-Za-z_]\w*)\s+(?:#\s*\(.*?\)\s*)?([A-Za-z_]\
 def instance_paths(rtl: TileRTL) -> dict[str, str]:
     """{instance path below rtl.top: module}; "" is rtl.top itself, "fpuOpt.dfma" the
     instance dfma inside instance fpuOpt. Black boxes are leaves."""
-    mods = E.modules_of(rtl.files)
+    mods = modules_of(rtl.files)
     known = set(mods) | set(rtl.blackboxes)
     kids = {m: [(i, c) for c, i in _INST_PATH_RE.findall(t) if c in known] for m, t in mods.items()}
     out: dict[str, str] = {}
@@ -656,8 +498,8 @@ def path_chain(path: str) -> list[str]:
 
 
 def pick_target(rtl: TileRTL, synth) -> dict:
-    """Target of a --loop-ab round: the smallest instance holding both ends of the
-    worst path of `synth`, with its module and the chain of modules above it."""
+    """The smallest instance holding both ends of the worst path of `synth` (crit_start /
+    crit_end as dotted names, see vivado_nodes.dotted), with its module and the chain above it."""
     paths = instance_paths(rtl)
     start, end = inst_prefix(synth.crit_start, paths), inst_prefix(synth.crit_end, paths)
     path = common_path([start, end])
@@ -692,7 +534,7 @@ def find_scala_classes(modules: list[str]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# --loop-ab: the Chisel at the ends of the worst path, quoted in the prompt
+# the Chisel at the ends of the worst path, quoted in the prompt
 # (lab-t2: the agent spent 24 of its 40 tool calls finding it)
 # ---------------------------------------------------------------------------
 
@@ -727,7 +569,7 @@ def rocket_file(path: str) -> str | None:
 
 
 def reg_name(flat: str, inst: str) -> str:
-    """Register of a flattened Yosys name: ("fpuOpt.dfma.in_in2[53]_reg", "fpuOpt.dfma") -> "in_in2"."""
+    """Register of a dotted cell name: ("core.mem_reg_wdata_reg", "core") -> "mem_reg_wdata"."""
     name = flat.lstrip("\\")
     if inst and name.startswith(inst + "."):
         name = name[len(inst) + 1:]
@@ -752,7 +594,7 @@ def path_end_locs(rtl: TileRTL, synth) -> list[dict]:
     """The worst path's start and end registers with the Scala lines firtool points to:
     [{"end": "start"|"end", "inst", "module", "reg", "locs": [(file, line)]}]."""
     paths = instance_paths(rtl)
-    texts = E.modules_of(rtl.files)
+    texts = modules_of(rtl.files)
     out = []
     for end, flat in (("start", synth.crit_start), ("end", synth.crit_end)):
         inst = inst_prefix(flat, paths)
@@ -858,153 +700,6 @@ def path_sources(rtl: TileRTL, synth, best_patch: str, context: int = 40) -> tup
     return ends, format_sources(ends, lines, patch_added_lines(best_patch), spans)
 
 
-# ---------------------------------------------------------------------------
-# --loop-ab: chipyard_bash with an edit budget
-# ---------------------------------------------------------------------------
-
-_HEREDOC_RE = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1[^\n]*\n(.*?)^[ \t]*\2[ \t]*$", re.M | re.S)
-_INLINE_RE = re.compile(r"\b(python3?|bash|sh)\s+-c\s+(['\"])(.*?)(?<!\\)\2", re.S)
-_WORK_RE = re.compile(r"\b(sed|grep|rg|git|nl|awk|perl|find|ls|cat|wc|diff|patch|cp|mv|rm|echo|printf|tee|"
-                      r"head|tail|sort|uniq|make|sbt|mill)\b")
-_PY_EFFECT_RE = re.compile(r"\b(print|open|write|subprocess|os|sys|shutil|Path|exec|eval)\b")
-
-
-_WRITE_RE = re.compile(r"\bsed\b[^|;&\n]*\s-i|\bperl\b[^|;&\n]*\s-\w*i|\bopen\([^)]*,\s*['\"][wa]|write_text\(|"
-                       r">\s*\S*\.scala\b|\btee\b[^|;&\n]*\.scala\b")
-_APPLY_RE = re.compile(r"\bgit\b[^|;&\n]*\bapply\b|\bpatch\s+-p")
-
-
-def edit_command(cmd: str) -> bool:
-    """A command that tries to write a Scala file (lab-t3: the planned edit, a python3 heredoc
-    rewriting FPU.scala, came as command 36 and was not run: a session must never stop it)."""
-    return bool(_APPLY_RE.search(cmd) or (".scala" in cmd and _WRITE_RE.search(cmd)))
-
-
-def _empty_script(body: str, python: bool) -> bool:
-    """Nothing but `pass`, comments and blank lines; for Python also: no output, no file
-    written (lab-t2: "w = 107 / # try ... / pass")."""
-    keep = [ln.strip() for ln in body.replace("\\n", "\n").splitlines()]
-    keep = [ln for ln in keep if ln and ln != "pass" and not ln.startswith(("#", "//"))]
-    return not keep or (python and not _PY_EFFECT_RE.search("\n".join(keep)))
-
-
-def noop_command(cmd: str) -> bool:
-    """A command whose scripts (heredocs, `python3 -c ...`) do nothing (empty_script), and
-    which does nothing else (lab-t2: 16 of its 40 calls were such notes)."""
-    scripts = []
-    for m in _HEREDOC_RE.finditer(cmd):
-        lead = re.split(r"[\n;|&]", cmd[:m.start()])[-1]
-        scripts.append((m.group(3), "python" in lead and ">" not in lead))
-    scripts += [(m.group(3), m.group(1).startswith("python")) for m in _INLINE_RE.finditer(cmd)]
-    if not scripts or not all(_empty_script(b, py) for b, py in scripts):
-        return False
-    rest = _INLINE_RE.sub(" ", _HEREDOC_RE.sub(" ", cmd))
-    rest = re.sub(r"\bcat\s*>>?\s*\S+", " ", rest)                     # writing the empty heredoc
-    rest = re.sub(r"\|\s*(tail|head)\b[^|;&]*", " ", rest)              # and trimming its output
-    rest = re.sub(r"\S*/\S*", " ", rest)                                # paths (".../scala/tile")
-    return not _WORK_RE.search(rest)
-
-
-def tree_hash() -> str:
-    """Hash of the rocket-chip edits (tracked diff + new files under src/main/scala)."""
-    d = subprocess.run(f"cd {ROCKET} && git diff HEAD && git ls-files --others --exclude-standard -z "
-                       f"-- {EDITABLE_PREFIX} | xargs -0 -r sha1sum", shell=True, capture_output=True,
-                       text=True).stdout
-    return hashlib.sha256(d.encode()).hexdigest()[:12]
-
-
-class BudgetBashTool(BashTool):
-    """chipyard_bash for a --loop-ab edit session, which must end with an edit (lab-t1, lab-t2:
-    40 calls, no edit). Calls are counted; while the tree has no edit of this session:
-      - a call with only empty scripts (noop_command) is not run;
-      - after `soft` calls every answer carries a budget note;
-      - after `read_only` calls the output of a command that changed no file is withheld
-        (a script written to /tmp and run in a later call still works);
-      - after `hard` calls nothing is run: the agent is told to stop and answer with its plan.
-    A command that tries to write a Scala file (edit_command) is always run with its output
-    shown; if it changed nothing the agent is told so and gets `grace` more calls to fix it.
-    An edit lifts all of it (undoing the edit puts it back). Each call goes to `log_file` (jsonl),
-    an edit attempt in full."""
-
-    def __init__(self, name: str, work_dir: str, soft: int, read_only: int, hard: int, log_file: str,
-                 timeout_seconds: int = 120, task_options: dict | None = None, grace: int = 5):
-        # Set before BashTool.__init__: its __post_init__ pickles this object into the actor.
-        self.soft, self.read_only, self.hard, self.log_file = soft, read_only, hard, log_file
-        self.grace = grace
-        self._n, self._start, self._edited, self._grace_until = 0, None, False, 0
-        self._lock = threading.Lock()
-        super().__init__(name, work_dir, timeout_seconds=timeout_seconds, task_options=task_options)
-
-    def __getstate__(self):
-        state = super().__getstate__()
-        state.pop("_lock", None)
-        return state
-
-    def __setstate__(self, state):
-        super().__setstate__(state)
-        self._lock = threading.Lock()
-
-    def _log(self, entry: dict):
-        try:
-            os.makedirs(os.path.dirname(self.log_file), exist_ok=True)
-            with open(self.log_file, "a") as f:
-                f.write(json.dumps({"t": time.strftime("%H:%M:%S"), **entry}, ensure_ascii=False) + "\n")
-        except OSError:
-            pass
-
-    def run_command(self, command: str) -> str:
-        """Run a bash command and return combined stdout/stderr."""
-        with self._lock:
-            if self._start is None:
-                self._start = tree_hash()
-                if os.path.exists(self.log_file):      # left by an earlier run of the same name
-                    os.remove(self.log_file)
-            self._n += 1
-            n = self._n
-            self._edited = tree_hash() != self._start
-            attempt = edit_command(command)
-            entry = {"n": n, "cmd": command[:20000] if attempt else command[:400]}
-            if attempt:
-                entry["attempt"] = True
-            relaxed = attempt or n <= self._grace_until
-            if noop_command(command):
-                entry["action"] = "noop"
-                out = ("[loop] Not run: this command only holds an empty script (`pass`, an empty heredoc, "
-                       "comments). Do not use tools as a notepad: think in your reply, then edit the Scala "
-                       "file directly (`sed -i`, or a python3 heredoc that rewrites the lines).")
-            elif not self._edited and n > self.hard and not relaxed:
-                entry["action"] = "stop"
-                out = (f"[loop] Session over: {self.hard} commands without an edit. Do not call any more "
-                       "tools. Reply now with the edit you planned: file, line numbers, the exact new Chisel "
-                       "code, and why it shortens the path and keeps every cycle the same. The next session "
-                       "starts from your answer.")
-            else:
-                out = super().run_command(command)
-                self._edited = tree_hash() != self._start
-                entry["edited"] = self._edited
-                if attempt and not self._edited:
-                    entry["action"] = "edit_failed"
-                    self._grace_until = n + self.grace
-                    out = (out[-3000:] + "\n\n[loop] This command changed no file under rocket-chip: the Scala "
-                           "file is exactly as before. A `str.replace`/`sed` whose old text does not match "
-                           "changes nothing and reports no error. Check the exact current lines (`sed -n`/"
-                           f"`grep -n`), then edit again; {self.grace} more commands are allowed for that.")
-                elif not self._edited and n > self.read_only and not relaxed:
-                    entry["action"] = "withheld"
-                    err = out[-1500:] if "[exit code:" in out else ""
-                    out = (f"[loop] Output withheld: {n} commands used and this one changed no file under "
-                           f"rocket-chip. Only edits are allowed now (`sed -i`, or a python3 script that "
-                           f"rewrites the Scala file); {max(self.hard - n, 0)} commands left."
-                           + (f"\n\nIt failed:\n{err}" if err else ""))
-                elif not self._edited and n > self.soft:
-                    entry["action"] = "warned"
-                    out += (f"\n\n[loop] Budget: {n} commands used, no edit yet. After command "
-                            f"{self.read_only} only commands that change a Scala file show their output; "
-                            f"after command {self.hard} the session ends. Make your edit now.")
-            self._log(entry)
-            return out
-
-
 @ChiaFunction(resources={"chipyard": 1}, max_retries=0)
 def round_diff(rocket_head: str, base_patch: str) -> str:
     """Diff of the rocket-chip working tree against `rocket_head` + `base_patch`: the
@@ -1042,303 +737,6 @@ def _round_diff(rocket_head: str, base_patch: str) -> str:
     finally:
         if os.path.exists(idx):
             os.remove(idx)
-
-
-# ---------------------------------------------------------------------------
-# eda: Yosys + OpenSTA
-# ---------------------------------------------------------------------------
-
-# Synthesis flows; the name is part of the baseline cache tag, so add a new
-# name instead of changing an existing flow.
-#   v1 (gone): abc -D without -constr: no buffering/sizing, ~80 ns of unbuffered fanout.
-#   v2: abc -D -constr (ABC's default script then adds buffer; upsize; dnsize).
-#       $lcu is Brent-Kung (techmap.v default), $mul is Yosys' array multiplier.
-#   v3 (gone): -booth + +/choices/kogge-stone.v; that file only exists from Yosys 0.40
-#       and the eda image has 0.38.
-SYNTH_FLOWS = {
-    "v2": "synth -flatten -top {top}",
-}
-
-# Same driver/load as ORFS sky130hd (ABC_DRIVER_CELL, ABC_LOAD_IN_FF).
-ABC_CONSTR = "set_driving_cell sky130_fd_sc_hd__buf_1\nset_load 5\n"
-
-YOSYS_SCRIPT = """\
-read_liberty -lib {lib}
-{read_blackboxes}
-read_verilog -sv -DSYNTHESIS {files}
-hierarchy -check -top {top}
-{synth}
-rename -wire -suffix _reg t:*DFF*
-dfflibmap -liberty {lib}
-abc -D {period_ps} -liberty {lib} -constr abc.constr
-opt_clean -purge
-setundef -zero
-hilomap -singleton -hicell sky130_fd_sc_hd__conb_1 HI -locell sky130_fd_sc_hd__conb_1 LO
-opt_clean -purge
-tee -o {stat} stat -liberty {lib}
-write_verilog -noattr -noexpr -nohex -nodec {netlist}
-"""
-
-STA_SCRIPT = """\
-read_liberty {lib}
-{read_stubs}
-read_verilog {netlist}
-link_design {top}
-create_clock -name clk -period {period_ns} [get_ports clock]
-set_input_delay 0 -clock clk [lsearch -inline -all -not -exact [all_inputs] [get_ports clock]]
-set_output_delay 0 -clock clk [all_outputs]
-puts "@@WORST"
-report_worst_slack -max -digits 4
-puts "@@WNS"
-report_wns -digits 4
-puts "@@TNS"
-report_tns -digits 4
-puts "@@ENDPOINTS"
-report_checks -path_delay max -group_count 2000 -format end -digits 3
-puts "@@PATHS"
-report_checks -path_delay max -group_count 10 -fields {{slew cap input_pins nets fanout}} -digits 3
-puts "@@END"
-"""
-
-
-@dataclass
-class SynthResult:
-    success: bool
-    period_ns: float
-    flow: str = ""
-    worst_slack_ns: float | None = None   # report_worst_slack (can be > 0)
-    wns_ns: float | None = None           # report_wns (0 when nothing fails)
-    tns_ns: float | None = None
-    fmax_mhz: float | None = None         # 1000 / (period - worst_slack)
-    crit_start: str = ""
-    crit_end: str = ""
-    endpoints: str = ""                   # worst 2000 endpoints with slack (one line each)
-    families: str = ""                    # endpoints grouped by register (bit index removed)
-    paths: str = ""                       # top-10 full path reports
-    area_um2: float | None = None
-    yosys_log_tail: str = ""
-    stat: str = ""
-    sta_log: str = ""
-    yosys_seconds: float = 0.0
-    sta_seconds: float = 0.0
-    error: str = ""
-    lib_sha256: str = ""
-    removed_cells: list = field(default_factory=list)
-
-
-def filter_liberty(text: str, dont_use: re.Pattern = DONT_USE_RE) -> tuple[str, list[str]]:
-    """Drop `cell (name) {...}` groups whose name matches `dont_use`."""
-    out, removed, pos = [], [], 0
-    for m in re.finditer(r'^\s*cell\s*\(\s*"?([\w$]+)"?\s*\)\s*\{', text, re.M):
-        if m.start() < pos or not dont_use.match(m.group(1)):
-            continue
-        depth, i = 1, m.end()
-        while depth:
-            j = min(k for k in (text.find("{", i), text.find("}", i)) if k >= 0)
-            depth += 1 if text[j] == "{" else -1
-            i = j + 1
-        out.append(text[pos:m.start()])
-        pos = i
-        removed.append(m.group(1))
-    out.append(text[pos:])
-    return "".join(out), removed
-
-
-def _section(log: str, name: str) -> str:
-    m = re.search(rf"@@{name}\n(.*?)(?=\n@@|\Z)", log, re.S)
-    return m.group(1).strip() if m else ""
-
-
-def _num(pattern: str, text: str) -> float | None:
-    m = re.search(pattern, text)
-    return float(m.group(1)) if m else None
-
-
-def parse_sta(log: str, period_ns: float) -> dict:
-    worst = _num(r"worst slack(?:\s+max)?\s+(-?[\d.]+(?:e-?\d+)?)", _section(log, "WORST"))
-    wns = _num(r"wns(?:\s+max)?\s+(-?[\d.]+(?:e-?\d+)?)", _section(log, "WNS"))
-    tns = _num(r"tns(?:\s+max)?\s+(-?[\d.]+(?:e-?\d+)?)", _section(log, "TNS"))
-    paths = _section(log, "PATHS")
-    start = re.search(r"Startpoint:\s*(\S+)", paths)
-    end = re.search(r"Endpoint:\s*(\S+)", paths)
-    fmax = 1000.0 / (period_ns - worst) if worst is not None and period_ns - worst > 0 else None
-    return dict(worst_slack_ns=worst, wns_ns=wns, tns_ns=tns, fmax_mhz=fmax,
-                crit_start=start.group(1) if start else "", crit_end=end.group(1) if end else "",
-                endpoints=_section(log, "ENDPOINTS"), paths=paths)
-
-
-def endpoint_families(endpoints: str, n: int = 15) -> str:
-    """Group `report_checks -format end` lines by register name without the
-    bit index: worst slack, number of failing bits, one example endpoint."""
-    fam: dict[str, list] = {}
-    for line in endpoints.splitlines():
-        m = re.match(r"\s*(\S+)\s.*?(-?\d+\.\d+)\s*(?:\(VIOLATED\)|\(MET\))?\s*$", line)
-        if not m:
-            continue
-        pin, slack = m.group(1), float(m.group(2))
-        key = re.sub(r"\[\d+\]", "[*]", pin.rsplit("/", 1)[0])
-        key = re.sub(r"_\d+(?=_reg$)", "_*", key)
-        f = fam.setdefault(key, [slack, 0, pin])
-        f[1] += 1
-        if slack < f[0]:
-            f[0], f[2] = slack, pin
-    rows = sorted(fam.items(), key=lambda kv: kv[1][0])[:n]
-    out = [f"{'worst slack':>11}  {'bits':>4}  register (bit index -> [*])"]
-    out += [f"{v[0]:11.3f}  {v[1]:4d}  {k}" for k, v in rows]
-    return "\n".join(out)
-
-
-def parse_area(stat: str) -> float | None:
-    vals = re.findall(r"Chip area for (?:top )?module '?\\?[\w$.]*'?:\s*([\d.]+)", stat)
-    return float(vals[-1]) if vals else None
-
-
-@ChiaFunction(resources={"eda": 1}, num_cpus=2, max_retries=0)
-def synth_sta(rtl: TileRTL, period_ns: float, flow: str = "v2",
-              yosys_timeout: int = 4 * 3600) -> SynthResult:
-    """Yosys (synth -flatten, dfflibmap, abc -D) + OpenSTA on rtl.top at a fixed
-    clock period. SRAM *_ext modules stay black boxes (their pins are
-    unconstrained), I/O get 0 delay against `clock`."""
-    res = SynthResult(success=False, period_ns=period_ns, flow=flow)
-    lib_src = os.environ.get("SKY130HD_LIB", "/home/ray/pdk/sky130hd/sky130_fd_sc_hd__tt_025C_1v80.lib")
-    with open(lib_src) as f:
-        lib_text = f.read()
-    res.lib_sha256 = hashlib.sha256(lib_text.encode()).hexdigest()
-    work = tempfile.mkdtemp(prefix="rocket_fmax_synth_")
-    try:
-        # Scripts use paths relative to `work` (the cwd of yosys and sta).
-        lib = "sky130hd_filtered.lib"
-        filtered, res.removed_cells = filter_liberty(lib_text)
-        with open(os.path.join(work, lib), "w") as f:
-            f.write(filtered)
-        os.makedirs(os.path.join(work, "rtl"))
-        for name, text in rtl.files.items():
-            with open(os.path.join(work, "rtl", name), "w") as f:
-                f.write(text)
-        bb_paths = []
-        for name, text in rtl.blackboxes.items():
-            bb_paths.append(f"bb_{name}.v")
-            with open(os.path.join(work, bb_paths[-1]), "w") as f:
-                f.write(text + "\n")
-        stubs, netlist, stat = "bb_stubs.v", "netlist.v", "stat.txt"
-        with open(os.path.join(work, stubs), "w") as f:
-            f.write(rtl.stubs)
-        ys = YOSYS_SCRIPT.format(
-            lib=lib, top=rtl.top, period_ps=int(round(period_ns * 1000)),
-            synth=SYNTH_FLOWS[flow].format(top=rtl.top),
-            read_blackboxes="\n".join(f"read_verilog -lib -sv {p}" for p in bb_paths),
-            files=" ".join(f"rtl/{n}" for n in sorted(rtl.files)),
-            stat=stat, netlist=netlist)
-        with open(os.path.join(work, "synth.ys"), "w") as f:
-            f.write(ys)
-        with open(os.path.join(work, "abc.constr"), "w") as f:
-            f.write(ABC_CONSTR)
-        t0 = time.time()
-        try:
-            y = subprocess.run(["yosys", "-q", "-l", "yosys.log", "-s", "synth.ys"],
-                               cwd=work, capture_output=True, text=True, timeout=yosys_timeout)
-            rc, yerr = y.returncode, y.stdout + y.stderr
-        except subprocess.TimeoutExpired:
-            rc, yerr = -1, ""
-        res.yosys_seconds = time.time() - t0
-        ylog_path = os.path.join(work, "yosys.log")
-        ylog = open(ylog_path, errors="replace").read() if os.path.exists(ylog_path) else ""
-        res.yosys_log_tail = ylog[-20000:] + (f"\n[yosys stdout/stderr]\n{yerr[-5000:]}" if yerr else "")
-        if rc != 0 or not os.path.exists(os.path.join(work, netlist)):
-            res.error = f"yosys returncode {rc}" + (" (timeout)" if rc == -1 else "")
-            return res
-        stat_path = os.path.join(work, stat)
-        res.stat = open(stat_path).read() if os.path.exists(stat_path) else ""
-        res.area_um2 = parse_area(res.stat)
-
-        with open(os.path.join(work, "sta.tcl"), "w") as f:
-            f.write(STA_SCRIPT.format(lib=lib, netlist=netlist, top=rtl.top, period_ns=period_ns,
-                                      read_stubs=f"read_verilog {stubs}" if rtl.stubs else ""))
-        t0 = time.time()
-        s = subprocess.run(["sta", "-no_init", "-no_splash", "-exit", "sta.tcl"], cwd=work,
-                           capture_output=True, text=True, timeout=3600)
-        res.sta_seconds = time.time() - t0
-        res.sta_log = s.stdout + ("\nSTDERR:\n" + s.stderr if s.stderr else "")
-        for k, v in parse_sta(s.stdout, period_ns).items():
-            setattr(res, k, v)
-        res.families = endpoint_families(res.endpoints)
-        if s.returncode != 0 or res.worst_slack_ns is None:
-            res.error = f"sta returncode {s.returncode}, worst slack not found"
-            return res
-        res.success = True
-        return res
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
-
-
-# ---------------------------------------------------------------------------
-# equivalence of the best patch vs the baseline (see equiv.py)
-# ---------------------------------------------------------------------------
-
-def _write_unit(work: str, unit) -> None:
-    for name, text in (("gold.sv", unit.gold), ("gate.sv", unit.gate), ("shared.sv", unit.shared),
-                       ("tb.sv", E.tb_verilog(unit)), ("tb.cpp", E.tb_cpp(unit)),
-                       ("eq.ys", E.formal_script(unit))):
-        with open(os.path.join(work, name), "w") as f:
-            f.write(text)
-
-
-@ChiaFunction(resources={"eda": 1}, num_cpus=2, max_retries=0)
-def equiv_formal(unit, timeout_s: int = 1800) -> dict:
-    """Yosys equiv_* on one unit. status: proven / unproven / timeout / error."""
-    work = tempfile.mkdtemp(prefix="rocket_fmax_equiv_")
-    t0 = time.time()
-    try:
-        _write_unit(work, unit)
-        try:
-            y = subprocess.run(["yosys", "-q", "-l", "formal.log", "-s", "eq.ys"], cwd=work,
-                               capture_output=True, text=True, timeout=timeout_s)
-            rc, err = y.returncode, y.stdout + y.stderr
-        except subprocess.TimeoutExpired:
-            rc, err = None, ""
-        log_path, st_path = os.path.join(work, "formal.log"), os.path.join(work, "equiv_status.txt")
-        log = open(log_path, errors="replace").read() if os.path.exists(log_path) else ""
-        st = E.parse_equiv_status(open(st_path).read()) if os.path.exists(st_path) else {}
-        if rc is None:
-            status = "timeout"
-        elif rc != 0 or st.get("unproven") is None:
-            status = "error"
-        else:
-            status = "proven" if st["unproven"] == 0 and st["total"] else "unproven"
-        return {"unit": unit.top, "status": status, "counts": st, "returncode": rc,
-                "seconds": time.time() - t0, "log_tail": log[-8000:] + err[-2000:]}
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
-
-
-@ChiaFunction(resources={"chipyard": 1}, max_retries=0)
-def equiv_sim(unit, cycles: int = 10_000_000, seed: int = 1, jobs: int = 8,
-              timeout_s: int = 3600) -> dict:
-    """Verilator lockstep of the baseline and patched unit (random inputs,
-    every output compared). status: pass / mismatch / error."""
-    work = tempfile.mkdtemp(prefix="rocket_fmax_equivsim_")
-    t0 = time.time()
-    try:
-        _write_unit(work, unit)
-        env = (f"[ -f {CHIPYARD}/env.sh ] && source {CHIPYARD}/env.sh >/dev/null 2>&1; "
-               f"export PATH=$PATH:{CHIPYARD}/.conda-env/bin; cd {work}")
-        vcmd = E.VERILATOR_CMD.format(jobs=jobs, shared="shared.sv" if unit.shared else "")
-        b = subprocess.run(["bash", "-lc", f"{env} && {vcmd}"], capture_output=True, text=True,
-                           timeout=timeout_s)
-        build_log = (b.stdout + b.stderr)[-6000:]
-        if b.returncode != 0:
-            return {"unit": unit.top, "status": "error", "error": "verilator build lỗi",
-                    "build_log": build_log, "seconds": time.time() - t0}
-        r = subprocess.run(["bash", "-lc", f"{env} && obj/equiv_sim {cycles} {seed}"],
-                           capture_output=True, text=True, timeout=timeout_s)
-        p = E.parse_sim(r.stdout)
-        status = ("pass" if r.returncode == 0 and p["bad_cycles"] == 0
-                  else "mismatch" if p["bad_cycles"] else "error")
-        return {"unit": unit.top, "status": status, **p, "returncode": r.returncode,
-                "output_tail": (r.stdout + r.stderr)[-4000:], "build_log": build_log,
-                "seconds": time.time() - t0}
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1430,11 +828,3 @@ def cache_hit_cond(tag, data_path, *args, **kwargs):
     """Bypass only when `tag` is really in the cache; otherwise run for real."""
     from chia.base.cache import get_active_cache
     return get(get_active_cache().has.chia_remote(tag))
-
-
-def canned_llm_result(tag, data_path, *args, **kwargs):
-    """Milestone 2: stands in for OpenCodeLLM.prompt; the edit itself is made
-    by apply_edit on the chipyard worker."""
-    from chia.base.llm_call import QueryResult
-    return QueryResult(result=f"[bypass {tag}] LLM skipped; the loop applies the milestone-2 edit.",
-                       returncode=0, stderr="", stream_result="", success=True)

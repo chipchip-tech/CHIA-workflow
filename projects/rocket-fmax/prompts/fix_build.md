@@ -12,7 +12,7 @@ $BEHAVIOUR_RULE
 - Edit only Scala under `/home/ray/chipyard/generators/rocket-chip/src/main/scala/`, with small
   in-place edits (`sed -i`, heredocs). No file with "Config" in its name, no parameters, nothing
   outside rocket-chip.
-- Do NOT run `make`, `sbt`, `verilator` or `yosys` through `chipyard_bash` (each command is limited
+- Do NOT run `make`, `sbt`, `verilator`, `yosys` or `vivado` through `chipyard_bash` (each command is limited
   to 120 s). Do not `git commit`, `git stash` or `git checkout` the edited files.
 - Keep Chisel legal: `:=` for connections, keep existing imports, Scala `if` for elaboration-time
   choices and `when` for hardware, explicit widths where Chisel cannot infer them. Scala does not

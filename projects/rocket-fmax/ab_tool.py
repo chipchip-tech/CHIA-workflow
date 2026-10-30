@@ -1,14 +1,15 @@
-"""A/B synthesis tool for the agent of rocket_fmax.py (`--ab-tool`).
+"""A/B synthesis tool for the agent of rocket_fmax.py (synth_ab).
 
 Modeled on TimingExperimentTool of examples/timing_opt in CHIA (BOOM): while it
 edits, the agent re-elaborates its Chisel to Verilog and synthesizes one module
 of the edited RTL (child) next to the same module of the current best (parent),
 so it can see whether an edit shortens the path before the loop pays for the
-full build + gate + synth. Here synthesis is Yosys + OpenSTA (synth_sta of
-fmax_nodes, same flow and period as the loop), so a sub-block takes about a
-minute and RocketTile itself about 3-4 minutes.
+full build + gate + place and route. Synthesis is Vivado synth_design
+(vivado_nodes.vivado_synth, same part and period as the loop, SRAMs as their
+behavioral models): a sub-block takes about a minute, RocketTile 2-3 minutes.
+The loop judges post-route numbers; synth_design only estimates the wires.
 
-MCP methods (opencode shows them as synth_ab_<method>):
+MCP methods (claude shows them as mcp__synth_ab__<method>):
 
   rebuild_verilog(max_wait_seconds)   start `make verilog` (unless one is running), wait
   list_modules(pattern, only_changed) modules under RocketTile, with size and changed flag
@@ -16,15 +17,12 @@ MCP methods (opencode shows them as synth_ab_<method>):
   ab_result(handle, max_wait_seconds) result: slack of both sides and the delta
 
 Every call returns within max_wait_seconds (<= MAX_WAIT): long work runs in a
-thread (make) or as Ray tasks (synth_sta on "eda"), and the agent polls.
+thread (make) or as Ray tasks (vivado_synth on "vivado"), and the agent polls.
 
 The tool actor runs on the chipyard worker next to chipyard_bash (the two share
 the "chipyard" slot, 0.5 each), so `make verilog` sees the agent's edits and the
 reports land where chipyard_bash can read them. The loop calls ab_cleanup
 (fmax_nodes) after stopping the tool: it kills a `make verilog` still running.
-
-loop_ab is the same A/B driven by the loop instead of the agent (`--loop-ab`): the
-loop builds the round, picks the module and passes the report to the agent.
 """
 
 from __future__ import annotations
@@ -45,12 +43,13 @@ from chia.base.ChiaFunction import get
 from chia.base.tools.ChiaTool import ChiaTool
 
 import fmax_nodes as N
+import vivado_nodes as V
 
 AB_DIR = f"{N.STAGE_DIR}/ab"                 # reports for the agent, wiped every round
 LOG_FILE = f"{AB_DIR}/experiments.jsonl"     # read back by the loop after the agent
 MAX_WAIT = 60                                 # seconds a call may block (MCP round trip)
 REBUILD_TIMEOUT = 1500
-SUB_BLOCK_EDA = 0.5                           # two sub-block synths at once on "eda"
+SUB_BLOCK_VIVADO = 0.5                        # two sub-block synths at once on "vivado"
 NOISE_NS = 0.1
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -60,6 +59,8 @@ _LOC_RE = re.compile(r"\s*//\s*@\[[^\]]*\]")   # firtool source locators move wh
 def tile_sources(rtl: N.TileRTL) -> list:
     """(name, text) sources of a TileRTL, as tile_rtl_from_sources takes them."""
     src = list(rtl.files.items()) + [(f"bb_{m}.v", t) for m, t in rtl.blackboxes.items()]
+    if rtl.sram_models:      # the split_*_ext pieces the *_ext models instantiate
+        src.append(("sram_models.v", rtl.sram_models))
     if rtl.mems_conf:
         src.append(("tile.top.mems.conf", rtl.mems_conf))
     return src
@@ -88,13 +89,13 @@ def make_errors(log: str, n: int = 40) -> str:
 
 
 def summary(s) -> dict:
-    """Small dict of a SynthResult (what the agent and the log need)."""
+    """Small dict of a VivadoResult (what the agent and the log need)."""
     if s is None:
         return {"ok": False, "error": "no result"}
     if not s.success:
         return {"ok": False, "error": s.error or "synth failed"}
     return {"ok": True, "slack_ns": round(s.worst_slack_ns, 4), "path_ns": round(s.period_ns - s.worst_slack_ns, 4),
-            "area_um2": round(s.area_um2 or 0), "crit": f"{s.crit_start} -> {s.crit_end}"}
+            "luts": s.luts, "crit": f"{s.crit_start} -> {s.crit_end}"}
 
 
 def report_files(child, parent) -> dict:
@@ -110,9 +111,9 @@ def report_files(child, parent) -> dict:
 def ab_lines(parent_name: str, p: dict, c: dict, child) -> tuple[list, Optional[float]]:
     """Report lines of one A/B (summaries `p`, `c`) and the delta child - parent in ns."""
     lines = [f"parent ({parent_name}): " + (f"worst slack {p['slack_ns']:+.3f} ns, path {p['path_ns']:.3f} ns, "
-                                            f"area {p['area_um2']}, {p['crit']}" if p["ok"] else p["error"]),
+                                            f"LUT {p['luts']}, {p['crit']}" if p["ok"] else p["error"]),
              "child (your edit):   " + (f"worst slack {c['slack_ns']:+.3f} ns, path {c['path_ns']:.3f} ns, "
-                                        f"area {c['area_um2']}, {c['crit']}" if c["ok"] else c["error"])]
+                                        f"LUT {c['luts']}, {c['crit']}" if c["ok"] else c["error"])]
     delta = round(c["slack_ns"] - p["slack_ns"], 4) if c["ok"] and p["ok"] else None
     if delta is not None:
         verdict = ("better" if delta > NOISE_NS else "worse" if delta < -NOISE_NS
@@ -123,90 +124,20 @@ def ab_lines(parent_name: str, p: dict, c: dict, child) -> tuple[list, Optional[
     return lines, delta
 
 
-_END_RE = re.compile(r"\s*(\S+)\s.*?(-?\d+\.\d+)\s*(?:\(VIOLATED\)|\(MET\))?\s*$")
-
-
-def target_slack(s, rel: str) -> Optional[float]:
-    """Worst slack of the endpoints of SynthResult `s` inside instance `rel` (a path relative
-    to the synthesized module; "" = the whole module). None when none is among the reported
-    endpoints (the worst 2000)."""
-    if s is None or not s.success:
-        return None
-    if not rel:
-        return s.worst_slack_ns
-    vals = [float(m.group(2)) for m in map(_END_RE.match, s.endpoints.splitlines())
-            if m and m.group(1).startswith(rel + ".")]
-    return min(vals) if vals else None
-
-
-def loop_ab(parent_rtl: N.TileRTL, parent_synth, parent_name: str, child_rtl: N.TileRTL, path: str,
-            period_ns: float, flow: str, parent_cache: dict, target: str = "") -> dict:
-    """A/B run by the loop (--loop-ab), not by the agent: synthesize the module at
-    instance `path` of the round's build (child) and of the best (parent). Module
-    names may differ on both sides (firtool dedup suffixes), the instance path does
-    not. path "" (or a path missing on one side) = the whole tile, compared with the
-    best's full result; the child's result is then the round's full synth.
-    `parent_cache` ({parent module: SynthResult}) lives for one round.
-
-    With `target` (an instance path inside `path`) the decision delta is that of the worst
-    endpoint inside the target, not of the whole module: lab-c1 synthesized FPU for an edit
-    of dfma, and FPU's worst path on its own (divSqrt, +8.44 ns) was below dfma's slack in the
-    tile (+8.75 ns), so no dfma edit could ever have won."""
-    pp, cp = N.instance_paths(parent_rtl), N.instance_paths(child_rtl)
-    whole = path == "" or path not in pp or path not in cp
-    if whole:
-        path, pm, cm = "", N.TOP, N.TOP
-    else:
-        pm, cm = pp[path], cp[path]
-    t0 = time.time()
-    res = {"resources": {"eda": 1 if whole else SUB_BLOCK_EDA}}
-    child_ref = N.synth_sta.options(**res).chia_remote(
-        child_rtl if whole else N.tile_rtl_from_sources(tile_sources(child_rtl), cm), period_ns, flow)
-    parent = None
-    if not whole:
-        parent = parent_cache.get(pm)
-        if parent is None:
-            parent = parent_cache[pm] = get(N.synth_sta.options(**res).chia_remote(
-                N.tile_rtl_from_sources(tile_sources(parent_rtl), pm), period_ns, flow))
-    child = get(child_ref)
-    c, p = summary(child), summary(parent_synth if whole else parent)
-    lines, delta = ab_lines(parent_name, p, c, child)
-    module_delta = delta
-    rel = target if not path else target[len(path) + 1:] if target.startswith(path + ".") else ""
-    if rel and delta is not None:
-        pt, ct = target_slack(parent_synth if whole else parent, rel), target_slack(child, rel)
-        if pt is not None and ct is not None:
-            delta = round(ct - pt, 4)
-            verdict = ("better" if delta > NOISE_NS else "worse" if delta < -NOISE_NS
-                       else f"no clear change (|delta| <= {NOISE_NS} ns is synthesis noise)")
-            i = next(k for k, l in enumerate(lines) if l.startswith("delta (child - parent)"))
-            lines[i] = lines[i].replace("delta (child - parent)", "module delta (child - parent, all paths)")
-            lines.insert(i + 1, f"target {rel} (worst endpoint inside it; this decides the A/B): parent {pt:+.3f} ns, "
-                                f"child {ct:+.3f} ns, delta {delta:+.3f} ns -> {verdict}")
-        else:
-            lines.append(f"target {rel}: no endpoint among the reported ones on "
-                         f"{'both sides' if pt is None and ct is None else 'one side'}; the module delta decides")
-    where = "whole tile, parent = full result of the best" if whole else f"instance {path}"
-    lines.insert(0, f"A/B of module {cm} ({where}; parent module {pm}), {time.time() - t0:.0f} s")
-    return {"path": path, "module": cm, "parent_module": pm, "whole": whole, "child": child,
-            "parent": parent_synth if whole else parent, "c": c, "p": p, "delta": delta,
-            "module_delta": module_delta,
-            "text": "\n".join(lines), "files": report_files(child, None if whole else parent)}
-
-
 class SynthABTool(ChiaTool):
 
     def __init__(self, name: str, parent_rtl: N.TileRTL, parent_synth, parent_name: str, config: str,
-                 period_ns: float, flow: str, make_jobs: int = 16, base_patch: str = "",
+                 period_ns: float, part: str, threads: int = 8, make_jobs: int = 16, base_patch: str = "",
                  task_options: Optional[dict] = None):
         super().__init__(name, task_options=task_options)
         # Set before __post_init__: it pickles this object into the actor.
         self._parent_rtl = parent_rtl
-        self._parent_tile = summary(parent_synth)    # full RocketTile result of the parent
+        self._parent_tile = summary(parent_synth)    # synth_design of the parent's RocketTile (its impl run)
         self._parent_name = parent_name
         self._config = config
         self._period_ns = period_ns
-        self._flow = flow
+        self._part = part
+        self._threads = threads
         self._make_jobs = make_jobs
         self._base_patch = base_patch                # the parent's patch: the logged diffs are the edits on top of it
         self._lock = threading.Lock()
@@ -215,7 +146,6 @@ class SynthABTool(ChiaTool):
         self._parent_refs: dict = {}                # module -> ref (parent never changes)
         self._jobs: dict = {}                       # handle -> A/B job
         self._n = 0
-        # opencode prefixes the server name: the agent sees synth_ab_rebuild_verilog, ...
         self.mcp.add_tool(self.rebuild_verilog, name="rebuild_verilog")
         self.mcp.add_tool(self.list_modules, name="list_modules")
         self.mcp.add_tool(self.start_ab, name="start_ab")
@@ -358,12 +288,13 @@ class SynthABTool(ChiaTool):
 
     def start_ab(self, module: str) -> str:
         """Synthesize `module` of your last rebuild (child) and of the current best (parent)
-        with the loop's Yosys + OpenSTA flow and period. Returns a handle for ab_result.
+        with Vivado synth_design (the loop's part and period). Returns a handle for ab_result.
 
         Sub-blocks (Rocket, FPU, FPUFMAPipe, MulDiv, DCache, ...) take about 1-2 min and their
         ports get 0 input/output delay, so only paths inside the module count. module=RocketTile
-        synthesizes the whole tile (3-4 min, one at a time) and compares it with the best's
-        full result: that is the number the loop judges.
+        synthesizes the whole tile (2-3 min, one at a time) and compares it with the best's
+        synth_design of the whole tile. The loop judges the post-route numbers, which follow
+        the synth_design ones only roughly (wires are estimated before placement).
         """
         if self._rebuild is not None and not self._rebuild.get("done"):
             return "ERROR: a rebuild is running. Call synth_ab_rebuild_verilog until it says ok first."
@@ -381,17 +312,18 @@ class SynthABTool(ChiaTool):
             close = [m for m in child["rtl"].modules if module.lower() in m.lower()][:15]
             return f"ERROR: module {module!r} is not under {N.TOP}. Similar: {close or '(none)'}; see list_modules."
         if not whole and module in child["rtl"].blackboxes:
-            return f"ERROR: {module} is an SRAM black box; pick the module that instantiates it."
-        res = {"resources": {"eda": 1 if whole else SUB_BLOCK_EDA}}
+            return f"ERROR: {module} is an SRAM model; pick the module that instantiates it."
+        res = {"resources": {"vivado": 1 if whole else SUB_BLOCK_VIVADO}}
         with self._lock:
             self._n += 1
             handle = f"ab{self._n}"
             job = {"module": module, "started": time.time(), "whole": whole, "diff": child.get("diff", ""),
-                   "child": N.synth_sta.options(**res).chia_remote(c_rtl, self._period_ns, self._flow)}
+                   "child": V.vivado_synth.options(**res).chia_remote(c_rtl, self._period_ns, self._part,
+                                                                      self._threads)}
             if not whole:
                 if module not in self._parent_refs:
-                    self._parent_refs[module] = N.synth_sta.options(**res).chia_remote(
-                        p_rtl, self._period_ns, self._flow)
+                    self._parent_refs[module] = V.vivado_synth.options(**res).chia_remote(
+                        p_rtl, self._period_ns, self._part, self._threads)
                 job["parent"] = self._parent_refs[module]
             self._jobs[handle] = job
         return (f"started: handle={handle}, module={module} ({len(c_rtl.modules)} modules, "

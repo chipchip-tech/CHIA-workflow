@@ -123,14 +123,14 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
 - Project hiện có: `project/ascon-secureboot` (RoCC Ascon-Hash256, secure boot; xong M1–M4).
   Nhánh `temp` cũ đã đổi tên thành nhánh này.
 - `project/rocket-fmax` (`projects/rocket-fmax/`): **session mới đọc `projects/rocket-fmax/HANDOFF.md` trước.**
-  Loop CHIA tối ưu Fmax của `RocketTile` (Chipyard `RocketConfig`), đo bằng Yosys + OpenSTA sky130hd
-  (worker `eda` tự build), mục tiêu > 100 MHz ở chu kỳ 10 ns. **Bắt đầu lại từ đầu ngày 29/10/2026**: mọi kết
+  Loop CHIA tối ưu Fmax của `RocketTile` (Chipyard `RocketConfig`), mục tiêu > 100 MHz ở chu kỳ 10 ns
+  (r1–r3b đo bằng Yosys + OpenSTA sky130hd, nay bằng Vivado post-route). **Bắt đầu lại từ đầu ngày 29/10/2026**: mọi kết
   quả trước bị bỏ (lịch sử chỉ còn trong git, trước commit `ab43d94`), code config audit đã gỡ. Hướng duy nhất là
   `--chia-mode` theo `examples/timing_opt` của CHIA: mỗi vòng một phiên Claude Code (Sonnet, effort medium, gói
   Pro) tự A/B bằng `synth_ab`, được thêm pipeline; nhận khi Fmax / chi phí cycle tăng > 1 % và cycle tăng ≤ 3 %
   so với baseline; gate riscv-tests + 8 benchmark (`--extra-bench mm spmv`), agent debug khi test fail; không
   equiv. Baseline 10 ns đo thật: 47,13 MHz, đường găng `core.div`, gate 18,9 phút. Đợt 1 `chia-fmax-r1` (29/10): 4/5
-  vòng nhận, 81,91 MHz, cycle +0,405 %. Đợt 2 `chia-fmax-r2`: 1/5 vòng nhận, 84,37 MHz, cycle +0,405 %. Đợt 3 `chia-fmax-r3b` (30/10): 1/5 vòng nhận, 90,57 MHz Yosys, cycle +0,405 %; Vivado (đo song song, Artix-7) đứng yên 67,53 MHz. **Đổi mốc 30/10/2026**: mốc 1 = > 100 MHz post-route Vivado trên Arty A7-100T (`xc7a100tcsg324-1`), nhận/loại chỉ theo post-route, SRAM → BRAM, giữ cycle +3 %; mốc 2 = ORFS sky130 post-route. Bước 0 xong (`viv-impl2`): post-route baseline 58,67, start 61,06 MHz, 48 BRAM, mỗi chiến lược P&R 5–12 phút, chạy 1 Vivado một lúc; tiếp theo Bước 1 (loop nhận theo post-route). Ghi nhớ kỹ thuật: build RocketConfig 1,3–1,7 phút, Yosys trên RocketTile ~3–4 phút; `abc -D` phải có
+  vòng nhận, 81,91 MHz, cycle +0,405 %. Đợt 2 `chia-fmax-r2`: 1/5 vòng nhận, 84,37 MHz, cycle +0,405 %. Đợt 3 `chia-fmax-r3b` (30/10): 1/5 vòng nhận, 90,57 MHz Yosys, cycle +0,405 %; Vivado (đo song song, Artix-7) đứng yên 67,53 MHz. **Đổi mốc 30/10/2026**: mốc 1 = > 100 MHz post-route Vivado trên Arty A7-100T (`xc7a100tcsg324-1`), nhận/loại chỉ theo post-route, SRAM → BRAM, giữ cycle +3 %; mốc 2 = ORFS sky130 post-route. Bước 0 xong (`viv-impl2`): post-route baseline 58,67, start 61,06 MHz, 48 BRAM, mỗi chiến lược P&R 5–12 phút, chạy 1 Vivado một lúc. Bước 1 (30/10, mới kiểm bằng mock): loop nhận theo post-route (`explore` + `extratiming`, song song gate, ngưỡng 2 %), `synth_ab` bằng Vivado `synth_design`; đã gỡ Yosys/worker `eda`, opencode, `--loop-ab`, equiv; cluster còn 4 worker. Ghi nhớ kỹ thuật: build RocketConfig 1,3–1,7 phút, Yosys trên RocketTile ~3–4 phút; `abc -D` phải có
   `-constr` và chu kỳ đặt ở mục tiêu (chu kỳ rộng làm Fmax đo thấp hơn); `rv64ui-p-ma_data` fail ở baseline
   (`--exclude-isa`); image `eda` có Yosys 0.38. Claude không tự viết patch Chisel: mọi chỉnh sửa Chisel do loop
   (agent) làm.
