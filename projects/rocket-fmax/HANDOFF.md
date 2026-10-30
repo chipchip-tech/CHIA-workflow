@@ -33,15 +33,19 @@ File này dành cho session Claude Code tiếp quản project. Đọc cùng `CLA
   `synth_ab` đổi sang Vivado `synth_design`; chống nhiễu P&R bằng vài chiến lược song song, lấy tốt nhất; đợt đầu
   xuất phát từ `best.patch` của r3b. `--vivado-accept` (commit `e2065fd`) không dùng nữa, lệnh `fmax-r4` với nó đã bỏ.
 - Bước 0 (đang làm): `vivado_impl` + `--vivado-impl-probe` (README, mục "Post-route"), mới kiểm bằng mock. Cần đo
-  thật: flow chạy được không (BRAM có được suy ra không), thời gian place + route, RAM khi 3 lần song song, độ dao
+  thật: flow chạy được không (BRAM có được suy ra không), thời gian place + route, RAM khi chạy song song, độ dao
   động giữa các chiến lược, Fmax post-route của baseline và start.
   `viv-impl0` và `viv-impl1` (30/10): `synth_design` của `vivado_impl` lỗi sau 0,5 phút ở cả baseline và start.
   Log: `[Synth 8-439] module 'split_rockettile_dcache_tag_array_ext' not found`. Model `*_ext` của SRAM gọi các module
   con `split_*_ext`, mà `rtl.blackboxes` chỉ giữ chính `*_ext` (Yosys đọc `-lib` nên không cần con). Đã sửa: `TileRTL`
   có thêm `sram_models` (các `*_ext` cùng mọi module chúng gọi), tag RTL đổi `rtl` → `rtl2` (baseline và start build lại
-  ~1,5 phút mỗi điểm, gate/synth vẫn HIT), tag impl `vivimpl3`, mặc định `--vivado-impl-parallel 2` (người dùng muốn 2
-  Vivado song song; RAM viv-impl1 < 10 GB nhưng mới chỉ chạy synth). (`-sv` thêm ở `vivimpl2` không phải nguyên nhân,
+  ~1,5 phút mỗi điểm, gate/synth vẫn HIT), tag impl `vivimpl3`. (`-sv` thêm ở `vivimpl2` không phải nguyên nhân,
   vẫn giữ.) Synth-level trên a100t -1: baseline 52,58, start 56,19 MHz.
+  **`viv-impl2` (30/10) chạy được** (bảng ở README, mục "Post-route"): post-route baseline 58,67 MHz (`extratiming`),
+  start 61,06 MHz (`explore`); 48 BRAM được suy ra; mỗi chiến lược 5,5–11,6 phút; 2 lần song song dùng gần 10 GB RAM,
+  người dùng chọn chỉ chạy 1 Vivado một lúc → mặc định `--vivado-impl-parallel 1` (không đổi tag, kết quả không phụ
+  thuộc số lần song song). `default` không lần nào tốt nhất. Ba chiến lược chênh tới 5 MHz trên cùng netlist. Đường găng
+  post-route: `dcache.s2_data`/`s2_req_addr`/`s2_req_size` → `core.mem_reg_wdata`, kế đến `fpuOpt.sfma` → `fpuOpt.regfile`.
 
 ## Việc tiếp theo
 

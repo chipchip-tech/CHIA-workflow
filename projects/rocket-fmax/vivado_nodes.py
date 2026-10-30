@@ -256,7 +256,7 @@ def _impl_run(vivado: str, d: str, timeout: int) -> subprocess.Popen:
 
 @ChiaFunction(resources={"vivado": 1}, num_cpus=4, max_retries=0)
 def vivado_impl(rtl, period_ns: float, part: str, strategies=("default", "explore", "extratiming"),
-                threads: int = 8, impl_threads: int = 4, parallel: int = 2,
+                threads: int = 8, impl_threads: int = 4, parallel: int = 1,
                 timeout: int = 4 * 3600) -> VivadoImplResult:
     """synth_design (SRAMs as behavioral models), then one place + route per strategy, at
     most `parallel` at a time from the same checkpoint; a run killed for memory is redone

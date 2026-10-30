@@ -132,7 +132,7 @@ def parse_args():
                         "--start-patch on --vivado-part, one run per --vivado-impl-strategies; vivado_impl.csv")
     p.add_argument("--vivado-impl-strategies", nargs="+", default=["default", "explore", "extratiming"],
                    choices=sorted(V.IMPL_STRATEGIES))
-    p.add_argument("--vivado-impl-parallel", type=int, default=2,
+    p.add_argument("--vivado-impl-parallel", type=int, default=1,
                    help="place + route runs at the same time (memory: the vivado container has --memory=18g)")
     p.add_argument("--vivado-impl-threads", type=int, default=4, help="maxThreads of each place + route run")
     p.add_argument("--iters", type=int, default=5)

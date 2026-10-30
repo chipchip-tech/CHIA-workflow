@@ -152,13 +152,13 @@ docker exec chia-vivado-$USER-0 bash -lc 'v=$(ls /tools/Xilinx/*/Vivado/bin/viva
 Thêm `--vivado-part xc7a200tfbg676-2` vào lệnh chạy (Artix-7 lớn nhất của bản miễn phí; RocketTile vừa).
 Vivado nằm ở chỗ khác thì đặt biến môi trường `VIVADO` trong container.
 
-### Post-route (`--vivado-impl-probe`, mốc 1, mới kiểm bằng mock)
+### Post-route (`--vivado-impl-probe`, mốc 1, chạy thật 30/10/2026)
 
 `vivado_impl` (`vivado_nodes.py`): `synth_design` out-of-context với SRAM `*_ext` là model hành vi Chipyard sinh cho
 mô phỏng, kèm các module con `split_*_ext` mà chúng gọi (`rtl.sram_models`), để Vivado suy ra BRAM/LUTRAM, ghi checkpoint; rồi từ checkpoint đó chạy một lần
 `opt_design` → `place_design` → `phys_opt_design` → `route_design` (→ `phys_opt_design` nếu còn âm) cho mỗi chiến lược
 `--vivado-impl-strategies` (`default`, `explore`, `extratiming`; xem `IMPL_STRATEGIES`), tối đa
-`--vivado-impl-parallel` lần cùng lúc (mặc định 2), mỗi lần `--vivado-impl-threads` luồng. Lần nào bị kill vì hết RAM (137/-9)
+`--vivado-impl-parallel` lần cùng lúc (mặc định 1: 2 lần song song dùng gần 10 GB), mỗi lần `--vivado-impl-threads` luồng. Lần nào bị kill vì hết RAM (137/-9)
 được chạy lại một mình. Clock coi như đến từ BUFG (`HD.CLK_SRC BUFGCTRL_X0Y0`). Kết quả là chiến lược có worst slack
 post-route tốt nhất.
 
@@ -167,6 +167,19 @@ post-route tốt nhất.
 LUT, LUTRAM, FF, BRAM, DSP, phút, đường găng) và `runs/<điểm>/impl_<chiến lược>/vivado_*.rpt`. Cache theo
 `<prefix>_vivimpl3_<part>_p<chu kỳ>_<chiến lược>`; RTL của baseline/start theo `baseline_rtl2` / `baseline_start_<hash>_rtl2`. Với `--chia-mode` và cùng `--extra-bench`, gate của điểm xuất phát
 chạy luôn và được cache cho đợt sau.
+
+`viv-impl2` (30/10/2026, `xc7a100tcsg324-1`, 10 ns, 2 lần song song, RAM gần 10 GB): BRAM được suy ra (48 BRAM,
+104–107 LUTRAM).
+
+| Điểm | Yosys | Vivado synth | `default` | `explore` | `extratiming` | Đường găng post-route tốt nhất |
+|---|---|---|---|---|---|---|
+| baseline | 47,13 | 52,58 | 56,15 (5,5 ph) | 58,14 (11,6 ph) | **58,67** (10,9 ph) | `dcache.s2_req_addr` (replica) → `core.mem_reg_wdata` |
+| start (r3b) | 90,57 | 56,19 | 56,13 (5,6 ph) | **61,06** (9,9 ph) | 58,89 (9,7 ph) | `dcache.s2_data` → `core.mem_reg_wdata` |
+
+(MHz post-route, phút mỗi chiến lược; synth thêm ~2,4 phút.) Ba đợt Yosys (+92 %) chỉ cho +4,1 % post-route. Ba chiến
+lược của cùng một netlist chênh tới 5 MHz (~8 %), nên best-of-3 vẫn nhiễu cỡ vài %. Các đường găng khác: `fpuOpt.sfma`
+→ `fpuOpt.regfile` (baseline `explore`), `dcache.s2_req_size` → `core.mem_reg_wdata`. Mốc 1 cần slack từ −6,38 ns về 0
+(chu kỳ đường găng giảm ~39 %).
 
 ## Chạy
 
@@ -275,6 +288,7 @@ docker exec chia-chipyard-$USER-0 bash -lc 'cd /home/ray/chipyard/generators/roc
 ## Trạng thái kiểm chứng
 
 - **Chạy thật:**
+  - `--vivado-impl-probe` (`viv-impl2`, 30/10/2026): số liệu ở mục "Post-route".
   - Baseline 10 ns với `--extra-bench mm spmv` (`fmax-chia-2`, 29/10/2026); số liệu ở bảng trên.
   - Vòng `--chia-mode` (`chia-fmax-r1`, 29/10/2026): 4 vòng được nhận, gate và nhận/loại theo chi phí cycle chạy
     đúng; baseline HIT cache. Claude gọi `synth_ab` ở cả 4 vòng nhận (2–10 lần/vòng, có A/B cả `RocketTile`).
