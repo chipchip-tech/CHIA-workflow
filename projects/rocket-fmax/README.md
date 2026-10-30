@@ -179,6 +179,7 @@ Cache: `baseline_rtl`, `baseline_synth_v2_p10`, `baseline_gate_b2_mm_spmv` (cach
 | baseline | | 47,13 MHz | 1,000 | đường găng `core.div` |
 | `chia-fmax-r1` (29/10/2026) | 4/5 | 47,13 → 59,80 → 72,94 → 79,42 → **81,91 MHz** | +0,405 % | hiệu năng +73,1 %; diện tích +1,5 %; vòng 5 agent không sửa gì (0,3 phút) |
 | `chia-fmax-r2` (29/10/2026) | 1/5 | 81,91 → **84,37 MHz** | +0,405 % | hiệu năng 81,58 → 84,03 (+3,0 %); diện tích +1,5 % so với baseline; vòng 2–5 loại |
+| `chia-fmax-r3b` (30/10/2026) | 1/5 | 84,37 → **90,57 MHz** | +0,405 % | hiệu năng 84,03 → 90,20 (+7,35 %); diện tích −0,1 % so với baseline; Vivado không đổi (67,53 MHz) |
 
 Chi tiết `chia-fmax-r1` (gate riscv-tests pass ở mọi vòng nhận):
 
@@ -199,6 +200,22 @@ Chi tiết `chia-fmax-r2` (xuất phát từ `best.patch` của `chia-fmax-r1`, 
 | 3 | loại | −1,85 | | | như vòng 2 | 10,8 |
 | 4 | loại | | | | agent không thay đổi gì | 9,6 |
 | 5 | loại | | | | không sửa gì; phiên retry thử 1 sửa (dfma cắt 4 lát, A/B tile −2,05 ns), tự hoàn tác | 8,7 |
+
+Chi tiết `chia-fmax-r3b` (xuất phát từ `best.patch` của `chia-fmax-r2`, `--empty-retries 2`, prompt retry liệt kê
+các sửa đổi đã đo; `chia-fmax-r3` trước đó dừng tay sau 2 vòng không sửa). Cột Vivado đo song song, không dùng để nhận/loại:
+
+| Vòng | Fmax Yosys (MHz) | Worst slack (ns) | Vivado (MHz) | Đường găng Yosys / lý do loại | Phút |
+|---|---|---|---|---|---|
+| start | 84,37 | −1,85 | 67,53 | `fpuOpt.dfma` | |
+| 1 | loại | | | agent không thay đổi gì | 15,4 |
+| 2 | loại | | | agent không thay đổi gì | 13,6 |
+| 3 | 90,57 | −1,04 | 67,53 | `core.div.divisor` → `core.div.remainder` (gate pass, hiệu năng +7,35 %) | 31,0 |
+| 4 | loại (80,09) | −2,49 | 68,73 | Fmax thấp hơn iter3; đường găng `dcache.s2_req_addr` → `core.mem_reg_wdata` | 13,7 |
+| 5 | loại | | | agent không thay đổi gì so với iter3 | 14,9 |
+
+Yosys và Vivado không cùng xu hướng: vòng 3 tăng 7,35 % theo Yosys nhưng Vivado giữ nguyên 67,53 MHz (đường găng
+Vivado vẫn `dcache.s2_data` → `core.mem_reg_wdata` từ baseline). Vòng 4 bị Yosys loại nhưng Vivado lại tăng
+(68,73 MHz, LUT +3,7 %, DSP 30 → 17).
 
 ## Đầu ra: `<out-dir>/<run>/`
 

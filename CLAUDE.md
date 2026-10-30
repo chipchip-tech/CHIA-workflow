@@ -130,7 +130,7 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   Pro) tự A/B bằng `synth_ab`, được thêm pipeline; nhận khi Fmax / chi phí cycle tăng > 1 % và cycle tăng ≤ 3 %
   so với baseline; gate riscv-tests + 8 benchmark (`--extra-bench mm spmv`), agent debug khi test fail; không
   equiv. Baseline 10 ns đo thật: 47,13 MHz, đường găng `core.div`, gate 18,9 phút. Đợt 1 `chia-fmax-r1` (29/10): 4/5
-  vòng nhận, 81,91 MHz, cycle +0,405 %. Đợt 2 `chia-fmax-r2`: 1/5 vòng nhận, 84,37 MHz, cycle +0,405 %. Ghi nhớ kỹ thuật: build RocketConfig 1,3–1,7 phút, Yosys trên RocketTile ~3–4 phút; `abc -D` phải có
+  vòng nhận, 81,91 MHz, cycle +0,405 %. Đợt 2 `chia-fmax-r2`: 1/5 vòng nhận, 84,37 MHz, cycle +0,405 %. Đợt 3 `chia-fmax-r3b` (30/10): 1/5 vòng nhận, 90,57 MHz Yosys, cycle +0,405 %; Vivado (đo song song, Artix-7) đứng yên 67,53 MHz. Ghi nhớ kỹ thuật: build RocketConfig 1,3–1,7 phút, Yosys trên RocketTile ~3–4 phút; `abc -D` phải có
   `-constr` và chu kỳ đặt ở mục tiêu (chu kỳ rộng làm Fmax đo thấp hơn); `rv64ui-p-ma_data` fail ở baseline
   (`--exclude-isa`); image `eda` có Yosys 0.38. Claude không tự viết patch Chisel: mọi chỉnh sửa Chisel do loop
   (agent) làm.

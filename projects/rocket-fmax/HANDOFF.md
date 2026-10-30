@@ -20,6 +20,11 @@ File này dành cho session Claude Code tiếp quản project. Đọc cùng `CLA
   netlist trùng iter1 (WNS/TNS trùng tới 4 chữ số); vòng 4–5 agent không sửa gì (retry ở vòng 5 chỉ thử 1 sửa).
   Đường găng còn nhiều họ sát nhau (`dfma`, `sfma`, `core.mem_reg_wdata`, `core.div`), và synth cả tile (flatten,
   một lần ABC) dao động 1–2 ns khi sửa một khối khác. Kết quả ở `~/rocket-fmax-v2/chia-fmax-r2/`.
+- Đợt 3 `chia-fmax-r3b` (30/10/2026) xong, có Vivado song song: 1/5 vòng nhận (vòng 3), 84,37 → 90,57 MHz Yosys,
+  cycle +0,405 %, đường găng Yosys về `core.div`. Vivado: start và iter3 cùng 67,53 MHz (đường găng
+  `dcache.s2_data -> core.mem_reg_wdata`), iter4 bị Yosys loại thì Vivado 68,73 MHz. Vòng 1, 2, 5 agent không sửa gì
+  dù retry đã liệt kê các sửa đổi đã đo (commit `680e7f8`; chưa đọc `retry*_prompt.md` để xác nhận). Hai thước đo
+  lệch nhau; chưa quyết hướng B (B1 chấm A/B theo họ endpoint, B2 thêm Vivado vào A/B) và đích ASIC hay FPGA.
 
 ## Việc tiếp theo
 
