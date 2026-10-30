@@ -132,7 +132,7 @@ def parse_args():
                         "--start-patch on --vivado-part, one run per --vivado-impl-strategies; vivado_impl.csv")
     p.add_argument("--vivado-impl-strategies", nargs="+", default=["default", "explore", "extratiming"],
                    choices=sorted(V.IMPL_STRATEGIES))
-    p.add_argument("--vivado-impl-parallel", type=int, default=3,
+    p.add_argument("--vivado-impl-parallel", type=int, default=2,
                    help="place + route runs at the same time (memory: the vivado container has --memory=18g)")
     p.add_argument("--vivado-impl-threads", type=int, default=4, help="maxThreads of each place + route run")
     p.add_argument("--iters", type=int, default=5)
@@ -401,6 +401,10 @@ IMPL_FIELDS = ["point", "strategy", "best", "yosys_fmax_mhz", "synth_fmax_mhz", 
                "viv_dsps", "viv_min", "viv_critical_path", "error"]
 
 
+# TileRTL cache tag: rtl2 = with sram_models (Vivado P&R needs the split_*_ext modules)
+RTL_TAG = "rtl2"
+
+
 def vivado_impl_launch(a, rtl, tag: str):
     return V.vivado_impl.chia_remote(rtl, a.period_ns, a.vivado_part, tuple(a.vivado_impl_strategies),
                                      a.vivado_threads, a.vivado_impl_threads, a.vivado_impl_parallel,
@@ -408,8 +412,9 @@ def vivado_impl_launch(a, rtl, tag: str):
 
 
 def impl_tag(a, prefix: str) -> str:
-    # v2: SRAM models read with -sv (v1 failed in synth_design; failures are cached under their tag)
-    return (f"{prefix}_vivimpl2_{a.vivado_part}_p" + f"{a.period_ns:g}".replace(".", "p")
+    # v3: SRAM models with their split_*_ext pieces (v1, v2 failed in synth_design;
+    # failures are cached under their tag)
+    return (f"{prefix}_vivimpl3_{a.vivado_part}_p" + f"{a.period_ns:g}".replace(".", "p")
             + "_" + "-".join(a.vivado_impl_strategies))
 
 
@@ -504,7 +509,7 @@ def ensure_start(a, out: Path, snap: dict, base: dict, elfs: dict) -> dict:
     with --chia-mode), cached under baseline_start_<hash>_*."""
     patch = Path(a.start_patch).expanduser().read_text()
     h = hashlib.sha256((patch + "\0").encode()).hexdigest()[:10]
-    tags = {"rtl": f"baseline_start_{h}_rtl",
+    tags = {"rtl": f"baseline_start_{h}_{RTL_TAG}",
             "synth": f"baseline_start_{h}_synth_{a.synth_flow}_p" + f"{a.period_ns:g}".replace(".", "p")}
     if a.chia_mode:          # its cycle cost is the reference of the first round
         tags["gate"] = f"baseline_start_{h}_gate{bench_tag(a)}"
@@ -657,8 +662,8 @@ def print_synth(label: str, s):
 
 def ensure_baseline(a, out: Path, elfs: dict, snap: dict) -> dict:
     """Build + gate + synth of the unmodified tree, served from the cache when
-    available (tags baseline_rtl / baseline_gate / baseline_synth_<flow>_p<period>)."""
-    tags = {"rtl": "baseline_rtl", "gate": "baseline_gate" + bench_tag(a),
+    available (tags baseline_rtl2 / baseline_gate / baseline_synth_<flow>_p<period>)."""
+    tags = {"rtl": f"baseline_{RTL_TAG}", "gate": "baseline_gate" + bench_tag(a),
             "synth": f"baseline_synth_{a.synth_flow}_p" + f"{a.period_ns:g}".replace(".", "p")}
     hits = {k: cache_has(t) for k, t in tags.items()}
     print(f"baseline cache: " + ", ".join(f"{tags[k]}={'HIT' if v else 'miss'}" for k, v in hits.items()),
@@ -1758,14 +1763,14 @@ def run_equiv(a, out: Path, base_rtl, best_rtl, label: str, ref: str = "baseline
 
 def run_equiv_only(a, out: Path):
     snap = get(N.tree_snapshot.chia_remote())
-    if cache_has("baseline_rtl"):
-        base_rtl = get(N.extract_tile_rtl.chia_remote(None, _chia_tag="baseline_rtl"))
+    if cache_has(f"baseline_{RTL_TAG}"):
+        base_rtl = get(N.extract_tile_rtl.chia_remote(None, _chia_tag=f"baseline_{RTL_TAG}"))
     else:
         get(N.reset_rocket.chia_remote(snap["rocket_head"], ""))
         art = get(build(a, "equiv-baseline"))
         if not art.success:
             raise SystemExit(f"baseline build failed:\n{build_errors(art)}")
-        base_rtl = get(N.extract_tile_rtl.chia_remote(art, _chia_tag="baseline_rtl"))
+        base_rtl = get(N.extract_tile_rtl.chia_remote(art, _chia_tag=f"baseline_{RTL_TAG}"))
     patch = Path(a.patch_file).expanduser().read_text()
     write(out / "patches" / "checked.patch", patch)
     get(N.reset_rocket.chia_remote(snap["rocket_head"], patch))

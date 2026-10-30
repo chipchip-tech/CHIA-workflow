@@ -155,17 +155,17 @@ Vivado nằm ở chỗ khác thì đặt biến môi trường `VIVADO` trong co
 ### Post-route (`--vivado-impl-probe`, mốc 1, mới kiểm bằng mock)
 
 `vivado_impl` (`vivado_nodes.py`): `synth_design` out-of-context với SRAM `*_ext` là model hành vi Chipyard sinh cho
-mô phỏng (`rtl.blackboxes`) để Vivado suy ra BRAM/LUTRAM, ghi checkpoint; rồi từ checkpoint đó chạy một lần
+mô phỏng, kèm các module con `split_*_ext` mà chúng gọi (`rtl.sram_models`), để Vivado suy ra BRAM/LUTRAM, ghi checkpoint; rồi từ checkpoint đó chạy một lần
 `opt_design` → `place_design` → `phys_opt_design` → `route_design` (→ `phys_opt_design` nếu còn âm) cho mỗi chiến lược
 `--vivado-impl-strategies` (`default`, `explore`, `extratiming`; xem `IMPL_STRATEGIES`), tối đa
-`--vivado-impl-parallel` lần cùng lúc, mỗi lần `--vivado-impl-threads` luồng. Lần nào bị kill vì hết RAM (137/-9)
+`--vivado-impl-parallel` lần cùng lúc (mặc định 2), mỗi lần `--vivado-impl-threads` luồng. Lần nào bị kill vì hết RAM (137/-9)
 được chạy lại một mình. Clock coi như đến từ BUFG (`HD.CLK_SRC BUFGCTRL_X0Y0`). Kết quả là chiến lược có worst slack
 post-route tốt nhất.
 
 `--vivado-impl-probe` (cần `--vivado-part`) không chạy vòng nào: place + route baseline và `--start-patch`, ghi
 `<run>/vivado_impl.csv` (mỗi điểm một dòng `synth` và một dòng mỗi chiến lược: slack sau place, slack/Fmax sau route,
 LUT, LUTRAM, FF, BRAM, DSP, phút, đường găng) và `runs/<điểm>/impl_<chiến lược>/vivado_*.rpt`. Cache theo
-`<prefix>_vivimpl_<part>_p<chu kỳ>_<chiến lược>`. Với `--chia-mode` và cùng `--extra-bench`, gate của điểm xuất phát
+`<prefix>_vivimpl3_<part>_p<chu kỳ>_<chiến lược>`; RTL của baseline/start theo `baseline_rtl2` / `baseline_start_<hash>_rtl2`. Với `--chia-mode` và cùng `--extra-bench`, gate của điểm xuất phát
 chạy luôn và được cache cho đợt sau.
 
 ## Chạy

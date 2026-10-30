@@ -10,8 +10,9 @@ black boxes (their pins are unconstrained), I/O with 0 delay against `clock`.
 Out-of-context synthesis, so the part's I/O count does not matter.
 
 vivado_impl goes on to place and route (--vivado-impl-probe). Black boxes cannot be
-placed, so there the SRAM *_ext modules are their behavioral models (rtl.blackboxes,
-the text Chipyard generates for simulation), which Vivado maps to BRAM / LUTRAM.
+placed, so there the SRAM *_ext modules are their behavioral models (rtl.sram_models:
+the *_ext texts Chipyard generates for simulation plus the split_*_ext modules they
+instantiate), which Vivado maps to BRAM / LUTRAM.
 """
 from __future__ import annotations
 
@@ -255,7 +256,7 @@ def _impl_run(vivado: str, d: str, timeout: int) -> subprocess.Popen:
 
 @ChiaFunction(resources={"vivado": 1}, num_cpus=4, max_retries=0)
 def vivado_impl(rtl, period_ns: float, part: str, strategies=("default", "explore", "extratiming"),
-                threads: int = 8, impl_threads: int = 4, parallel: int = 3,
+                threads: int = 8, impl_threads: int = 4, parallel: int = 2,
                 timeout: int = 4 * 3600) -> VivadoImplResult:
     """synth_design (SRAMs as behavioral models), then one place + route per strategy, at
     most `parallel` at a time from the same checkpoint; a run killed for memory is redone
@@ -275,8 +276,11 @@ def vivado_impl(rtl, period_ns: float, part: str, strategies=("default", "explor
         for name, text in rtl.files.items():
             with open(os.path.join(work, "rtl", name), "w") as f:
                 f.write(text)
+        if not getattr(rtl, "sram_models", ""):
+            res.error = "rtl has no sram_models (TileRTL cached before the field existed: bump its tag)"
+            return res
         with open(os.path.join(work, "mems.v"), "w") as f:
-            f.write("\n\n".join(rtl.blackboxes.values()))
+            f.write(rtl.sram_models)
         with open(os.path.join(work, "clock.xdc"), "w") as f:
             f.write(CLOCK_XDC.format(period_ns=period_ns))
         with open(os.path.join(work, "run.tcl"), "w") as f:

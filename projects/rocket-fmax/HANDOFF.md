@@ -35,9 +35,13 @@ File này dành cho session Claude Code tiếp quản project. Đọc cùng `CLA
 - Bước 0 (đang làm): `vivado_impl` + `--vivado-impl-probe` (README, mục "Post-route"), mới kiểm bằng mock. Cần đo
   thật: flow chạy được không (BRAM có được suy ra không), thời gian place + route, RAM khi 3 lần song song, độ dao
   động giữa các chiến lược, Fmax post-route của baseline và start.
-  Lần chạy thật đầu (`viv-impl0`, 30/10): `synth_design` của `vivado_impl` lỗi sau 0,5 phút ở cả baseline và start
-  (chưa xem log). Nghi model SRAM là SystemVerilog (Yosys cũng đọc bằng `-sv`) mà Vivado đọc không `-sv`: đã thêm `-sv`,
-  đổi tag sang `vivimpl2` (kết quả lỗi đã nằm trong cache). Synth-level trên a100t -1: baseline 52,58, start 56,19 MHz.
+  `viv-impl0` và `viv-impl1` (30/10): `synth_design` của `vivado_impl` lỗi sau 0,5 phút ở cả baseline và start.
+  Log: `[Synth 8-439] module 'split_rockettile_dcache_tag_array_ext' not found`. Model `*_ext` của SRAM gọi các module
+  con `split_*_ext`, mà `rtl.blackboxes` chỉ giữ chính `*_ext` (Yosys đọc `-lib` nên không cần con). Đã sửa: `TileRTL`
+  có thêm `sram_models` (các `*_ext` cùng mọi module chúng gọi), tag RTL đổi `rtl` → `rtl2` (baseline và start build lại
+  ~1,5 phút mỗi điểm, gate/synth vẫn HIT), tag impl `vivimpl3`, mặc định `--vivado-impl-parallel 2` (người dùng muốn 2
+  Vivado song song; RAM viv-impl1 < 10 GB nhưng mới chỉ chạy synth). (`-sv` thêm ở `vivimpl2` không phải nguyên nhân,
+  vẫn giữ.) Synth-level trên a100t -1: baseline 52,58, start 56,19 MHz.
 
 ## Việc tiếp theo
 

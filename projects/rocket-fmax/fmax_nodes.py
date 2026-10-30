@@ -539,6 +539,7 @@ class TileRTL:
     modules: list           # modules in the hierarchy (blackboxes included)
     replaced: list          # modules swapped for a synthesis stub (EICG_wrapper)
     mems_conf: str = ""
+    sram_models: str = ""   # blackboxes + the modules they instantiate (split_*_ext), for Vivado P&R
 
 
 def tile_rtl_from_sources(generated_src_files: list, top: str = TOP, stub_modules=()) -> TileRTL:
@@ -572,6 +573,13 @@ def tile_rtl_from_sources(generated_src_files: list, top: str = TOP, stub_module
         todo.extend(children - seen)
 
     blackboxes = {m: defined[m][1] for m in sorted(seen & srams)}
+    models, todo = [], sorted(blackboxes)
+    while todo:              # an SRAM *_ext may instantiate split_*_ext pieces
+        mod = todo.pop()
+        if mod in models:
+            continue
+        models.append(mod)
+        todo.extend(c for c in _INST_RE.findall(defined[mod][1]) if c in defined and c not in models)
     replaced = sorted(seen & {"EICG_wrapper"})
     keep_files = sorted({defined[m][0] for m in seen - srams - set(replaced)})
     out_files = {f: files[f] for f in keep_files}
@@ -579,7 +587,8 @@ def tile_rtl_from_sources(generated_src_files: list, top: str = TOP, stub_module
         out_files["EICG_wrapper_synth_stub.v"] = EICG_STUB
     return TileRTL(top=top, files=out_files, blackboxes=blackboxes,
                    stubs="\n".join(_port_stub(t) for t in blackboxes.values()),
-                   modules=sorted(seen), replaced=replaced, mems_conf=mems_conf)
+                   modules=sorted(seen), replaced=replaced, mems_conf=mems_conf,
+                   sram_models="\n\n".join(defined[m][1] for m in sorted(models)))
 
 
 @ChiaFunction(max_retries=0)
