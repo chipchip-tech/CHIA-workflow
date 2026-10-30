@@ -197,7 +197,7 @@ def loop_ab(parent_rtl: N.TileRTL, parent_synth, parent_name: str, child_rtl: N.
 class SynthABTool(ChiaTool):
 
     def __init__(self, name: str, parent_rtl: N.TileRTL, parent_synth, parent_name: str, config: str,
-                 period_ns: float, flow: str, make_jobs: int = 16,
+                 period_ns: float, flow: str, make_jobs: int = 16, base_patch: str = "",
                  task_options: Optional[dict] = None):
         super().__init__(name, task_options=task_options)
         # Set before __post_init__: it pickles this object into the actor.
@@ -208,9 +208,10 @@ class SynthABTool(ChiaTool):
         self._period_ns = period_ns
         self._flow = flow
         self._make_jobs = make_jobs
+        self._base_patch = base_patch                # the parent's patch: the logged diffs are the edits on top of it
         self._lock = threading.Lock()
         self._rebuild: Optional[dict] = None        # current / last make verilog
-        self._child: Optional[dict] = None          # {"rtl", "diff_hash", "changes"} of the last good rebuild
+        self._child: Optional[dict] = None          # {"rtl", "diff_hash", "diff", "changes"} of the last good rebuild
         self._parent_refs: dict = {}                # module -> ref (parent never changes)
         self._jobs: dict = {}                       # handle -> A/B job
         self._n = 0
@@ -239,6 +240,16 @@ class SynthABTool(ChiaTool):
         d = subprocess.run(f"cd {N.ROCKET} && git diff HEAD && git ls-files --others --exclude-standard -z "
                            "| xargs -0 -r sha1sum", shell=True, capture_output=True, text=True).stdout
         return hashlib.sha256(d.encode()).hexdigest()[:12]
+
+    def _edit_diff(self) -> str:
+        """The agent's edits on top of the parent (logged with each A/B, so the loop can tell
+        the next session what was measured and undone). Never fails the rebuild."""
+        try:
+            head = subprocess.run(["git", "-C", N.ROCKET, "rev-parse", "HEAD"], capture_output=True,
+                                  text=True, check=True).stdout.strip()
+            return N._round_diff(head, self._base_patch)
+        except Exception as e:                                       # noqa: BLE001
+            return f"(diff unavailable: {type(e).__name__}: {e})"
 
     def _log(self, entry: dict):
         os.makedirs(AB_DIR, exist_ok=True)
@@ -282,7 +293,7 @@ class SynthABTool(ChiaTool):
             rtl = N.tile_rtl_from_sources(src, N.TOP)
             changes = changed_modules(self._parent_modules(), module_texts(rtl))
             with self._lock:
-                self._child = {"rtl": rtl, "diff_hash": job["diff_hash"], "changes": changes}
+                self._child = {"rtl": rtl, "diff_hash": job["diff_hash"], "diff": job["diff"], "changes": changes}
             job["changes"] = changes
         except Exception as e:                                       # noqa: BLE001
             job["error"] = f"{type(e).__name__}: {e}"
@@ -320,7 +331,7 @@ class SynthABTool(ChiaTool):
         with self._lock:
             job = self._rebuild
             if job is None or job.get("done"):
-                job = {"started": time.time(), "diff_hash": self._diff_hash()}
+                job = {"started": time.time(), "diff_hash": self._diff_hash(), "diff": self._edit_diff()}
                 self._rebuild = job
                 threading.Thread(target=self._run_make, args=(job,), daemon=True).start()
         deadline = time.time() + max(0, min(int(max_wait_seconds), MAX_WAIT))
@@ -375,7 +386,7 @@ class SynthABTool(ChiaTool):
         with self._lock:
             self._n += 1
             handle = f"ab{self._n}"
-            job = {"module": module, "started": time.time(), "whole": whole,
+            job = {"module": module, "started": time.time(), "whole": whole, "diff": child.get("diff", ""),
                    "child": N.synth_sta.options(**res).chia_remote(c_rtl, self._period_ns, self._flow)}
             if not whole:
                 if module not in self._parent_refs:
@@ -421,5 +432,6 @@ class SynthABTool(ChiaTool):
         if c["ok"]:
             lines.append(f"full reports: {d}/child_paths.rpt, {d}/parent_paths.rpt (read with chipyard_bash)")
         job["text"] = "\n".join(lines)
-        self._log({"event": "ab", "handle": handle, "module": job["module"], "child": c, "parent": p, "delta_ns": delta})
+        self._log({"event": "ab", "handle": handle, "module": job["module"], "child": c, "parent": p, "delta_ns": delta,
+                   "diff": job["diff"][-6000:]})
         return job["text"]

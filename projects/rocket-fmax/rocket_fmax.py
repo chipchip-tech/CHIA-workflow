@@ -83,15 +83,24 @@ SYSTEM_MESSAGE_CHIA = ("You are a hardware timing engineer working on the Rocket
                        "you finish.")
 EMPTY_RETRY = """
 
-## Your previous session made no edit
+## The previous session(s) of this round left no edit
 
-A session on this round finished without changing any file. Its answer:
+{n} session(s) on this round finished with the tree back at the current best: the edits they
+measured with synth_ab were undone. What they measured (delta = child - parent, positive = better):
+
+{tried}
+
+The last session's answer:
 
 {answer}
 
-That wastes the round. Try at least two concrete edits on the worst path family. Check each one with
-synth_ab, ending with the whole `RocketTile`. A pipeline stage is allowed: the loop measures its
-cycle cost on the benchmarks and rejects the round if that cost is too high.
+Do **not** make these edits again, nor the same idea on the same logic (e.g. another split of the
+same multiplier): the numbers above already answer it. The located worst path above is only a
+starting point. Pick a different endpoint family from `timing_families.txt` (they sit close to the
+worst one), or one edit that shortens several families at once, or a pipeline stage. Try at least two
+concrete edits, each checked with synth_ab ending with the whole `RocketTile`. A pipeline stage is
+allowed: the loop measures its cycle cost on the benchmarks and rejects the round if that cost is
+too high.
 """
 SYSTEM_MESSAGE_DEBUG = ("You are a Chisel engineer working on the Rocket core in Chipyard. An edit made earlier in this "
                         "round builds but fails functional tests; you find and fix the bug through the chipyard_bash "
@@ -683,7 +692,7 @@ def _call_agent_once(a, llm, prompt: str, tag: str, d: Path, prefix: str, best: 
     try:
         if ab:
             tools.append(AB.SynthABTool("synth_ab", best["rtl"], best["synth"], best["name"], N.CONFIG,
-                                        a.period_ns, a.synth_flow, a.make_jobs,
+                                        a.period_ns, a.synth_flow, a.make_jobs, best["patch"],
                                         task_options={"resources": {"chipyard": slot}}))
         resp = get(llm.prompt.chia_remote(llm, prompt, tools=tools, _chia_tag=tag))
     except Exception as e:                                           # noqa: BLE001
@@ -962,10 +971,12 @@ def run_round(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best, histor
             if reason or get(N.collect_diff.chia_remote(snap["rocket_head"], snap["outside"]))["patch"] != best["patch"]:
                 break
             print(f"round {i}: agent không sửa gì, gọi phiên mới (lần {k}/{a.empty_retries})", flush=True)
-            rprompt = prompt + EMPTY_RETRY.format(answer=last_response(d)[-1500:])
+            rprompt = prompt + EMPTY_RETRY.format(n=k, tried=tried_edits(d) or "(no synth_ab measurement)",
+                                                  answer=last_response(d)[-1500:])
             write(d / f"retry{k}_prompt.md", rprompt)
             reason = call_agent(a, llm, rprompt, f"{tag}_retry{k}", d, f"retry{k}", best, a.ab_tool)
     r["agent_min"] = (time.time() - t_agent) / 60
+    r["tried"] = tried_edits(d, diff_chars=1500, max_chars=5000)
 
     diff = after_agent(out, d, i, snap, best, r, reason)
     if diff is None:
@@ -1358,6 +1369,37 @@ def last_response(d: Path) -> str:
     return files[-1].read_text()[-1500:] if files[-1].exists() else ""
 
 
+def tried_edits(d: Path, diff_chars: int = 3000, max_chars: int = 12000) -> str:
+    """The synth_ab measurements of the round so far (the A/B log is per round, so the last
+    session's *_ab_experiments.jsonl holds them all), grouped by edit: each edit's diff on
+    top of the best and its A/B results. chia-fmax-r3 rounds 1-2: four sessions split the
+    same dfma multiplier, measured it worse on the tile and undid it, and the retry prompt
+    only said "no edit"."""
+    logs = sorted(d.glob("*_ab_experiments.jsonl"), key=lambda p: p.stat().st_mtime)
+    if not logs:
+        return ""
+    edits: dict[str, list] = {}
+    for line in logs[-1].read_text(errors="replace").splitlines():
+        try:
+            e = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if e.get("event") != "ab":
+            continue
+        c, p = e.get("child") or {}, e.get("parent") or {}
+        if e.get("error") or not c.get("ok"):
+            res = f"{e.get('module')}: failed ({(e.get('error') or c.get('error') or '')[:150]})"
+        else:
+            res = (f"{e.get('module')}: child {c.get('slack_ns')} ns vs parent {p.get('slack_ns')} ns, "
+                   f"delta {e.get('delta_ns')} ns, child worst path {c.get('crit')}")
+        edits.setdefault(e.get("diff") or "(diff not logged)", []).append(f"[{e.get('t')}] {res}")
+    out = []
+    for n, (diff, res) in enumerate(edits.items(), 1):
+        out += [f"Edit {n}:", *[f"- {x}" for x in res], "", "```diff", diff[-diff_chars:].strip(), "```", ""]
+    text = "\n".join(out).strip()
+    return text if len(text) <= max_chars else "...(earlier edits cut)\n" + text[-max_chars:]
+
+
 def history_entry(i: int, r: dict, resp_summary: str) -> str:
     s = r.get("synth")
     lines = [f"### Vòng {i}: {'NHẬN' if r['accepted'] else 'LOẠI'}",
@@ -1375,6 +1417,9 @@ def history_entry(i: int, r: dict, resp_summary: str) -> str:
         lines.append(f"Build lỗi, agent sửa lỗi build {r['build_fixes']} lần.")
     if resp_summary:
         lines.append(f"Tóm tắt của agent: {resp_summary[:800]}")
+    if r.get("tried") and not r["accepted"]:
+        lines.append("Các sửa đổi agent đã đo bằng synth_ab trong vòng này (đều không được giữ; đừng thử lại "
+                     "y nguyên hay cùng ý trên cùng logic):\n\n" + r["tried"])
     patch = r.get("round_diff") or r["patch"]
     if not r["accepted"] and r.get("ab_result") and s is not None and s.success:
         lines.append("A/B của mục tiêu tốt hơn nhưng cả RocketTile bị loại. Patch này đã đo rồi: nộp lại y "

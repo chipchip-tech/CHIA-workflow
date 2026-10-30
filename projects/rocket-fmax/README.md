@@ -246,4 +246,9 @@ docker exec chia-chipyard-$USER-0 bash -lc 'cd /home/ray/chipyard/generators/roc
 - **Mới kiểm bằng mock:**
   - `--vivado-part` trong các vòng (ghi `vivado.csv` từng vòng, chờ Vivado ở cuối job, lỗi Vivado không làm dừng loop).
   - Huỷ gate khi synth tile thua, agent debug, gate điểm xuất phát (`--start-patch`).
+  - Danh sách sửa đổi đã đo rồi hoàn tác (30/10/2026). Ở `chia-fmax-r3`, vòng 1–2 có 4 phiên đều tách bộ nhân
+    dfma, A/B cả tile xấu đi nên tự hoàn tác. Prompt retry lúc đó chỉ nói "không sửa gì". Nay `synth_ab` ghi diff
+    của mỗi sửa đổi (so với bản tốt nhất) vào log A/B. Prompt retry liệt kê từng sửa đổi kèm diff và số A/B, rồi
+    yêu cầu chọn họ đường găng khác. `history.md` (lịch sử các vòng) của vòng bị loại cũng mang danh sách này.
+    Mới kiểm bằng mock (`tried_edits`, `_round_diff` trên repo git giả).
 - Tính đúng chức năng chỉ dựa vào riscv-tests và 8 benchmark (như example), không kiểm tương đương.

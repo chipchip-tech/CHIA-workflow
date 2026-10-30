@@ -999,8 +999,13 @@ class BudgetBashTool(BashTool):
 @ChiaFunction(resources={"chipyard": 1}, max_retries=0)
 def round_diff(rocket_head: str, base_patch: str) -> str:
     """Diff of the rocket-chip working tree against `rocket_head` + `base_patch`: the
-    edits of this round only. Uses a temporary index, so the tree and its index are
-    left as they are."""
+    edits of this round only."""
+    return _round_diff(rocket_head, base_patch)
+
+
+def _round_diff(rocket_head: str, base_patch: str) -> str:
+    """round_diff in the caller's process (also used by ab_tool in its actor). Uses a
+    temporary index, so the tree and its index are left as they are."""
     fd, idx = tempfile.mkstemp(prefix="rocket_fmax_idx_")
     os.close(fd)
     os.remove(idx)
