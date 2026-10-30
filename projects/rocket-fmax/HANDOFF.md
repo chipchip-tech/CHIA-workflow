@@ -74,14 +74,22 @@ File này dành cho session Claude Code tiếp quản project. Đọc cùng `CLA
 - Sau r4 (mới kiểm bằng mock): loop loại ngay vòng có Verilog `RocketTile` trùng bản đã đo (`rtl_hash`, `seen`), không
   gate, không place + route; `ab_result` có bảng slack theo họ endpoint của parent và child (`V.compare_families`),
   prompt dặn chấm theo họ đã nhắm.
+- **Đợt `fmax-r5` (30/10/2026) xong: 0/5 vòng nhận**, vẫn 63,61 MHz. Vòng 1 cycle +4,071 % (cùng mức với vòng 2 của r4,
+  lịch sử không truyền qua đợt); vòng 2–5 post-route 63,23–64,32 MHz, tốt nhất vòng 5 +1,11 % (< 2 %). `synth_design`
+  −5,888 ns (FPU `divSqrt` → `regfile`) giống hệt ở mọi điểm. Hai chiến lược trên cùng netlist chênh tới 3,2 %, nên
+  mức tăng của các vòng ngang nhiễu place + route. Đường găng post-route: `core.div` (DSP → `remainder`) và frontend
+  (`icache`/`fq`). Vòng 22–30 phút. Chưa có log agent r5.
 
 ## Việc tiếp theo
 
 1. Người dùng chép `rocket_fmax.py`, `ab_tool.py`, `vivado_nodes.py`, `prompts/improve_timing.md`, chạy `fmax-r5` (README, mục "Chạy"; `--start-patch` = `best.patch` của r4).
 2. Chưa đo: RAM khi 2 sub-block synth cùng lúc. Kiểm Vivado sót bằng `docker exec chia-vivado-$USER-0 pgrep -fa
    'Xilinx|vivado -mode'` (`pgrep -fa vivado` khớp cả raylet vì có resource `vivado`).
-3. Tiến độ chậm (+2,55 MHz/đợt, cách 100 MHz ~5,7 ns trên rất nhiều đường). Sau r5 bàn lại với người dùng: mục tiêu
-   100 MHz, giới hạn cycle 3 %, model/effort của agent (agent + build chỉ ~10 phút mỗi vòng, `--llm-timeout` 30 phút).
+3. **Chờ người dùng quyết** (đã nêu sau r5): r4 +4,2 %, r5 0 %, cách 100 MHz còn +57 %, ít nhất 3 họ đường ở
+   −5,5 … −5,9 ns. Các lựa chọn: nới giới hạn cycle (vd. 10 %; vẫn nhận theo hiệu năng > 2 %), hạ mục tiêu mốc 1,
+   đổi model/effort agent, giảm nhiễu P&R (thêm chiến lược hoặc đo lại bản tốt nhất), truyền lịch sử từ đợt trước
+   (`history.md`, patch bị loại) sang đợt mới. Xin log agent r5 (`agent_ab_experiments.jsonl`, `agent_response.md`)
+   để xem agent có dùng bảng họ endpoint không.
 4. Ghi kết quả từng đợt vào bảng "Kết quả" của `README.md`.
 
 ## Quy ước làm việc

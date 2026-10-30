@@ -188,6 +188,7 @@ post-route Vivado (Artix-7 `xc7a100tcsg324-1`, hiệu năng = Fmax post-route / 
 | `chia-fmax-r2` (29/10/2026) | 1/5 | 81,91 → **84,37 MHz** | +0,405 % | hiệu năng 81,58 → 84,03 (+3,0 %); diện tích +1,5 % so với baseline; vòng 2–5 loại |
 | `chia-fmax-r3b` (30/10/2026) | 1/5 | 84,37 → **90,57 MHz** | +0,405 % | hiệu năng 84,03 → 90,20 (+7,35 %); diện tích −0,1 % so với baseline; Vivado không đổi (67,53 MHz) |
 | `fmax-r4` (30/10/2026, **post-route Vivado**) | 1/5 | 61,06 → **63,61 MHz** | +0,405 % | hiệu năng 60,82 → 63,36 (+4,18 %); baseline post-route 58,67 MHz; LUT 29 484, 48 BRAM, 30 DSP |
+| `fmax-r5` (30/10/2026, post-route Vivado) | 0/5 | 63,61 (không đổi) | +0,405 % | vòng tốt nhất 64,32 MHz, hiệu năng +1,11 % (< ngưỡng 2 %); `synth_design` đứng yên 62,94 MHz ở mọi điểm |
 
 Chi tiết `chia-fmax-r1` (gate riscv-tests pass ở mọi vòng nhận):
 
@@ -240,6 +241,24 @@ vào hazard/stall), sửa `fp_hazard_targets`, nhưng A/B báo delta 0,000 vì �
 cả hai bên; agent không so được họ `fq` của parent nên bỏ cuộc sau 1 sửa. Sau r4: `synth_ab` báo slack từng họ
 endpoint ở cả parent và child.
 
+Chi tiết `fmax-r5` (xuất phát từ `best.patch` của `fmax-r4`; điểm xuất phát chính là iter1 của r4):
+
+| Vòng | Post-route (MHz) | synth (MHz) | Cycle | Hiệu năng | Đường găng post-route / lý do loại | Phút (P&R) |
+|---|---|---|---|---|---|---|
+| start | 63,61 (explore; extratiming 63,40) | 62,94 | +0,405 % | | `frontend.icache.s2_tag_hit_4` → `frontend.fq.elts_0_pc` (CE) | |
+| 1 | loại | | +4,071 % | | tốn quá nhiều cycle (cùng mức +4,071 % với vòng 2 của r4), place + route bị huỷ | 22,3 |
+| 2 | loại: 63,93 (extratiming; explore 62,65) | 62,94 | +0,405 % | +0,49 % | `core.div._prod_T_40__8` (DSP) → `core.div.remainder` | 27,7 (21,4) |
+| 3 | loại: 64,30 (extratiming; explore 62,27) | 62,94 | +1,718 % | −0,23 % | như vòng 2 | 27,9 (22,0) |
+| 4 | loại: 63,23 (explore; extratiming 63,07) | 62,94 | +0,405 % | −0,61 % | `frontend.fq.elts_3_data` → `core.ex_reg_btb_resp_entry` (CE) | 30,0 (23,3) |
+| 5 | loại: 64,32 (extratiming; explore 63,30) | 62,94 | +0,404 % | +1,11 % | như vòng 2 | 28,5 (21,6) |
+
+Nhận xét r5: worst slack `synth_design` −5,888 ns (họ FPU `divSqrt` → `regfile`) giống hệt ở mọi điểm, dù TNS synth
+khác nhau (−9 892 … −10 314 ns), tức không vòng nào động tới họ này. Hai chiến lược trên cùng netlist chênh 0,3–3,2 %
+(vòng 3: 62,27 và 64,30), các vòng có cycle gần như không đổi rơi trong 63,23–64,32 MHz: mức tăng lớn nhất (+1,11 %)
+ngang mức nhiễu place + route. Đường găng post-route chuyển qua lại giữa `core.div` (DSP → `remainder`) và frontend
+(`icache`/`fq`). Vòng 1 lặp lại một sửa tốn +4,071 % cycle đã bị loại ở r4, vì lịch sử không truyền qua đợt mới.
+Không vòng nào trùng Verilog (guard không kích hoạt). Vòng 22–30 phút (place + route 21–23).
+
 Nhận xét: vòng đầy đủ 33–37 phút (agent + build ~10 phút, place + route 25–27 phút); post-route lần đầu không còn
 dính `dcache` → `core.mem_reg_wdata`, đường găng chuyển sang frontend (icache tag hit → fetch queue); 2000 endpoint
 âm, TNS ~ −10 000 ns, nên còn nhiều họ đường cách mục tiêu ~5,7 ns.
@@ -288,6 +307,8 @@ docker exec chia-chipyard-$USER-0 bash -lc 'cd /home/ray/chipyard/generators/roc
 - **Mới kiểm bằng mock:**
   - Gate fail → huỷ place + route → agent debug; `--baseline-only` với `--start-patch`; huỷ task giữa place + route
     với Vivado giả thì không còn tiến trình Vivado nào.
-  - Bỏ qua vòng có Verilog `RocketTile` trùng một bản đã đo (sau `fmax-r4`).
-  - `synth_ab` so slack từng họ endpoint của parent và child (sau `fmax-r4`).
+  - Bỏ qua vòng có Verilog `RocketTile` trùng một bản đã đo (sau `fmax-r4`; `fmax-r5` chạy với code này nhưng không
+    vòng nào trùng nên chưa kích hoạt).
+  - `synth_ab` so slack từng họ endpoint của parent và child (sau `fmax-r4`; đã có trong `fmax-r5`, chưa đọc log agent
+    để xác nhận agent dùng bảng).
 - Tính đúng chức năng chỉ dựa vào riscv-tests và 8 benchmark (như example), không kiểm tương đương.
