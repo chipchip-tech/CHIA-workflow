@@ -4,10 +4,9 @@ Modeled on TimingExperimentTool of examples/timing_opt in CHIA (BOOM): while it
 edits, the agent re-elaborates its Chisel to Verilog and synthesizes one module
 of the edited RTL (child) next to the same module of the current best (parent),
 so it can see whether an edit shortens the path before the loop pays for the
-full build + gate + place and route. Synthesis is Vivado synth_design
-(vivado_nodes.vivado_synth, same part and period as the loop, SRAMs as their
-behavioral models): a sub-block takes about a minute, RocketTile 2-3 minutes.
-The loop judges post-route numbers; synth_design only estimates the wires.
+full build + gate + synth. Synthesis is the loop's own Yosys + OpenSTA flow
+(fmax_nodes.synth_sta, sky130_fd_sc_hd, same period; SRAMs are black boxes), so a
+sub-block takes about a minute and RocketTile itself 3-4 minutes.
 
 MCP methods (claude shows them as mcp__synth_ab__<method>):
 
@@ -17,7 +16,7 @@ MCP methods (claude shows them as mcp__synth_ab__<method>):
   ab_result(handle, max_wait_seconds) result: slack of both sides and the delta
 
 Every call returns within max_wait_seconds (<= MAX_WAIT): long work runs in a
-thread (make) or as Ray tasks (vivado_synth on "vivado"), and the agent polls.
+thread (make) or as Ray tasks (synth_sta on "eda"), and the agent polls.
 
 The tool actor runs on the chipyard worker next to chipyard_bash (the two share
 the "chipyard" slot, 0.5 each), so `make verilog` sees the agent's edits and the
@@ -43,13 +42,12 @@ from chia.base.ChiaFunction import get
 from chia.base.tools.ChiaTool import ChiaTool
 
 import fmax_nodes as N
-import vivado_nodes as V
 
 AB_DIR = f"{N.STAGE_DIR}/ab"                 # reports for the agent, wiped every round
 LOG_FILE = f"{AB_DIR}/experiments.jsonl"     # read back by the loop after the agent
 MAX_WAIT = 60                                 # seconds a call may block (MCP round trip)
 REBUILD_TIMEOUT = 1500
-SUB_BLOCK_VIVADO = 0.5                        # two sub-block synths at once on "vivado"
+SUB_BLOCK_EDA = 0.5                           # two sub-block synths at once on "eda"
 NOISE_NS = 0.1
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -89,13 +87,13 @@ def make_errors(log: str, n: int = 40) -> str:
 
 
 def summary(s) -> dict:
-    """Small dict of a VivadoResult (what the agent and the log need)."""
+    """Small dict of a SynthResult (what the agent and the log need)."""
     if s is None:
         return {"ok": False, "error": "no result"}
     if not s.success:
         return {"ok": False, "error": s.error or "synth failed"}
     return {"ok": True, "slack_ns": round(s.worst_slack_ns, 4), "path_ns": round(s.period_ns - s.worst_slack_ns, 4),
-            "luts": s.luts, "crit": f"{s.crit_start} -> {s.crit_end}"}
+            "area_um2": round(s.area_um2 or 0), "crit": f"{s.crit_start} -> {s.crit_end}"}
 
 
 def report_files(child, parent) -> dict:
@@ -109,19 +107,19 @@ def report_files(child, parent) -> dict:
 
 
 def ab_lines(parent_name: str, p: dict, c: dict, child, parent=None) -> tuple[list, Optional[float]]:
-    """Report lines of one A/B (summaries `p`, `c`; VivadoResults `child`, `parent`) and the delta
+    """Report lines of one A/B (summaries `p`, `c`; SynthResults `child`, `parent`) and the delta
     child - parent in ns. The worst slack alone hides a family that got shorter under another one
     (fmax-r4 round 4: frontend edit, FPU path worst on both sides), so families are compared too."""
     lines = [f"parent ({parent_name}): " + (f"worst slack {p['slack_ns']:+.3f} ns, path {p['path_ns']:.3f} ns, "
-                                            f"LUT {p['luts']}, {p['crit']}" if p["ok"] else p["error"]),
+                                            f"area {p['area_um2']}, {p['crit']}" if p["ok"] else p["error"]),
              "child (your edit):   " + (f"worst slack {c['slack_ns']:+.3f} ns, path {c['path_ns']:.3f} ns, "
-                                        f"LUT {c['luts']}, {c['crit']}" if c["ok"] else c["error"])]
+                                        f"area {c['area_um2']}, {c['crit']}" if c["ok"] else c["error"])]
     delta = round(c["slack_ns"] - p["slack_ns"], 4) if c["ok"] and p["ok"] else None
     if delta is not None:
         verdict = ("better" if delta > NOISE_NS else "worse" if delta < -NOISE_NS
                    else f"no clear change (|delta| <= {NOISE_NS} ns is synthesis noise)")
         lines.append(f"delta of the worst slack (child - parent): {delta:+.3f} ns -> {verdict}")
-    table = (V.compare_families(parent.endpoints, child.endpoints)
+    table = (N.compare_families(parent.endpoints, child.endpoints)
              if c["ok"] and parent is not None and parent.success else "")
     if table:
         lines += ["worst slack per endpoint family (ns; delta = child - parent, positive = shorter):", table]
@@ -133,18 +131,17 @@ def ab_lines(parent_name: str, p: dict, c: dict, child, parent=None) -> tuple[li
 class SynthABTool(ChiaTool):
 
     def __init__(self, name: str, parent_rtl: N.TileRTL, parent_synth, parent_name: str, config: str,
-                 period_ns: float, part: str, threads: int = 8, make_jobs: int = 16, base_patch: str = "",
+                 period_ns: float, flow: str, make_jobs: int = 16, base_patch: str = "",
                  task_options: Optional[dict] = None):
         super().__init__(name, task_options=task_options)
         # Set before __post_init__: it pickles this object into the actor.
         self._parent_rtl = parent_rtl
-        self._parent_synth = parent_synth            # synth_design of the parent's RocketTile (its impl run)
+        self._parent_synth = parent_synth            # full RocketTile result of the parent
         self._parent_tile = summary(parent_synth)
         self._parent_name = parent_name
         self._config = config
         self._period_ns = period_ns
-        self._part = part
-        self._threads = threads
+        self._flow = flow
         self._make_jobs = make_jobs
         self._base_patch = base_patch                # the parent's patch: the logged diffs are the edits on top of it
         self._lock = threading.Lock()
@@ -295,13 +292,12 @@ class SynthABTool(ChiaTool):
 
     def start_ab(self, module: str) -> str:
         """Synthesize `module` of your last rebuild (child) and of the current best (parent)
-        with Vivado synth_design (the loop's part and period). Returns a handle for ab_result.
+        with the loop's Yosys + OpenSTA flow and period. Returns a handle for ab_result.
 
         Sub-blocks (Rocket, FPU, FPUFMAPipe, MulDiv, DCache, ...) take about 1-2 min and their
         ports get 0 input/output delay, so only paths inside the module count. module=RocketTile
-        synthesizes the whole tile (2-3 min, one at a time) and compares it with the best's
-        synth_design of the whole tile. The loop judges the post-route numbers, which follow
-        the synth_design ones only roughly (wires are estimated before placement).
+        synthesizes the whole tile (3-4 min, one at a time) and compares it with the best's
+        full result: that is the number the loop judges.
         """
         if self._rebuild is not None and not self._rebuild.get("done"):
             return "ERROR: a rebuild is running. Call synth_ab_rebuild_verilog until it says ok first."
@@ -319,18 +315,17 @@ class SynthABTool(ChiaTool):
             close = [m for m in child["rtl"].modules if module.lower() in m.lower()][:15]
             return f"ERROR: module {module!r} is not under {N.TOP}. Similar: {close or '(none)'}; see list_modules."
         if not whole and module in child["rtl"].blackboxes:
-            return f"ERROR: {module} is an SRAM model; pick the module that instantiates it."
-        res = {"resources": {"vivado": 1 if whole else SUB_BLOCK_VIVADO}}
+            return f"ERROR: {module} is an SRAM black box; pick the module that instantiates it."
+        res = {"resources": {"eda": 1 if whole else SUB_BLOCK_EDA}}
         with self._lock:
             self._n += 1
             handle = f"ab{self._n}"
             job = {"module": module, "started": time.time(), "whole": whole, "diff": child.get("diff", ""),
-                   "child": V.vivado_synth.options(**res).chia_remote(c_rtl, self._period_ns, self._part,
-                                                                      self._threads)}
+                   "child": N.synth_sta.options(**res).chia_remote(c_rtl, self._period_ns, self._flow)}
             if not whole:
                 if module not in self._parent_refs:
-                    self._parent_refs[module] = V.vivado_synth.options(**res).chia_remote(
-                        p_rtl, self._period_ns, self._part, self._threads)
+                    self._parent_refs[module] = N.synth_sta.options(**res).chia_remote(
+                        p_rtl, self._period_ns, self._flow)
                 job["parent"] = self._parent_refs[module]
             self._jobs[handle] = job
         return (f"started: handle={handle}, module={module} ({len(c_rtl.modules)} modules, "

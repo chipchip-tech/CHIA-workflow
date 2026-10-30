@@ -1,4 +1,4 @@
-# Bàn giao: rocket-fmax, theo example `timing_opt` (bắt đầu lại 29/10/2026, mốc Vivado post-route từ 30/10/2026)
+# Bàn giao: rocket-fmax, theo example `timing_opt` (bắt đầu lại 29/10/2026; Vivado 30/10, quay lại Yosys cuối 30/10/2026)
 
 File này dành cho session Claude Code tiếp quản project. Đọc cùng `CLAUDE.md` (gốc repo) và `README.md`
 (thư mục này).
@@ -80,16 +80,29 @@ File này dành cho session Claude Code tiếp quản project. Đọc cùng `CLA
   mức tăng của các vòng ngang nhiễu place + route. Đường găng post-route: `core.div` (DSP → `remainder`) và frontend
   (`icache`/`fq`). Vòng 22–30 phút. Chưa có log agent r5.
 
+- **Cuối ngày 30/10/2026: người dùng tạm bỏ mốc FPGA, quay lại Yosys** ("là 1 phần mốc asic") và đẩy timing cao
+  hơn; cho phép gỡ phần không cần. Đã làm (mới kiểm bằng mock `scratchpad/m6/test_loop.py`, chưa chạy thật):
+  - Gỡ `vivado_nodes.py`, `docker/VivadoDockerfile`, worker `rocket_vivado`, mọi tham số `--vivado-*`, `vivado_impl.csv`.
+    Code Vivado còn trong git ở commit `d2a1ac0`.
+  - Khôi phục từ commit `de60f5a^`: `synth_sta`/`SynthResult` (Yosys `synth -flatten` + `abc -D -constr` + OpenSTA,
+    flow `v2`, giữ y nguyên field để cache `baseline_synth_v2_p10` cũ đọc lại được), `docker/EdaDockerfile`, worker
+    `rocket_eda` (`eda`, 10 GB). Yosys giờ chạy trong process group riêng.
+  - Loop: build → synth (3–4 phút) → nếu Fmax không vượt `hiệu năng bản tốt nhất × (1 + --min-perf-gain)` (kể cả cycle
+    bằng baseline) thì loại, không gate → gate → nhận theo Fmax / cycle. `--min-perf-gain` về 0,01 như r1–r3b.
+  - Giữ phần thêm ở giai đoạn Vivado: bỏ qua Verilog đã đo (`rtl_hash`), bảng slack theo họ endpoint trong `synth_ab`
+    (`N.compare_families` trên báo cáo OpenSTA), phiên retry khi agent không sửa gì.
+  - Mới: mỗi đợt ghi `history.md`; `--history-from <run dir>...` đưa lịch sử đợt trước vào prompt (r5 vòng 1 lặp sửa đã
+    loại ở r4). r4/r5 chạy trước khi có tính năng này nên không có `history.md`.
+  - Prompt `improve_timing.md` viết lại cho sky130 (đặc thù flow Yosys: flatten một lần ABC, nhân mảng, SRAM hộp đen).
+
 ## Việc tiếp theo
 
-1. Người dùng chép `rocket_fmax.py`, `ab_tool.py`, `vivado_nodes.py`, `prompts/improve_timing.md`, chạy `fmax-r5` (README, mục "Chạy"; `--start-patch` = `best.patch` của r4).
-2. Chưa đo: RAM khi 2 sub-block synth cùng lúc. Kiểm Vivado sót bằng `docker exec chia-vivado-$USER-0 pgrep -fa
-   'Xilinx|vivado -mode'` (`pgrep -fa vivado` khớp cả raylet vì có resource `vivado`).
-3. **Chờ người dùng quyết** (đã nêu sau r5): r4 +4,2 %, r5 0 %, cách 100 MHz còn +57 %, ít nhất 3 họ đường ở
-   −5,5 … −5,9 ns. Các lựa chọn: nới giới hạn cycle (vd. 10 %; vẫn nhận theo hiệu năng > 2 %), hạ mục tiêu mốc 1,
-   đổi model/effort agent, giảm nhiễu P&R (thêm chiến lược hoặc đo lại bản tốt nhất), truyền lịch sử từ đợt trước
-   (`history.md`, patch bị loại) sang đợt mới. Xin log agent r5 (`agent_ab_experiments.jsonl`, `agent_response.md`)
-   để xem agent có dùng bảng họ endpoint không.
+1. Người dùng chép file, dựng lại cluster (README, "Chuẩn bị": image `chia-eda-sky130` nếu đã xoá, `docker rm -f
+   chia-vivado-$USER-0`, `chia up`), chạy `fmax-y1` từ `best.patch` của `fmax-r4` (= r3b + ALU prefix-OR; Fmax Yosys
+   của bản này chưa đo, r3b là 90,57 MHz).
+2. Đọc log `fmax-y1`, kiểm: synth start HIT/miss đúng (`baseline_start_<hash>_rtl2`/`gate` HIT từ r4/r5, `synth`
+   miss), vòng bị loại ở bước synth không chạy gate, agent dùng bảng họ endpoint.
+3. Khi Fmax > 100 MHz: hạ `--period-ns`. Sau phần synth: mốc ASIC post-route (ORFS sky130).
 4. Ghi kết quả từng đợt vào bảng "Kết quả" của `README.md`.
 
 ## Quy ước làm việc

@@ -12,7 +12,7 @@ fix it while keeping what the edit does for timing.
   `ready`/`valid`). Look for every user of the delayed signal.
 - Edit only Scala under `/home/ray/chipyard/generators/rocket-chip/src/main/scala/`, with small
   in-place edits. No file with "Config" in its name, nothing outside rocket-chip.
-- Do NOT run `make`, `sbt`, `verilator`, `yosys` or `vivado` through the shell (each command is limited to
+- Do NOT run `make`, `sbt`, `verilator` or `yosys` through the shell (each command is limited to
   120 s). Do not `git commit`, `git stash`, `git checkout` or `git restore`.$AB_NOTE
 
 ## Tool

@@ -1,16 +1,16 @@
 """Nodes for the Rocket Fmax loop (projects/rocket-fmax).
 
 Every node passes data (str/bytes/dataclass) and never file paths: the chipyard,
-verilator, claude and vivado containers do not share a filesystem.
+verilator, claude and eda containers do not share a filesystem.
 
   chipyard (resource "chipyard"):  load_test_elfs, tree_snapshot, reset_rocket,
                                    collect_diff, restore_outside, stage_for_agent,
                                    read_text, ab_cleanup, find_scala_classes,
                                    read_source_lines, round_diff
   claude (resource "claude_creds"): read_text_claude (SalvageClaudeLLM runs there)
+  eda (resource "eda"):            synth_sta (Yosys + OpenSTA, sky130_fd_sc_hd)
   any node (no resource):          extract_tile_rtl, run_gate (fans out to
                                    VerilatorRunNode on "verilator_run")
-Vivado (synth_ab A/B, place + route) is in vivado_nodes.py.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from chia.base.ChiaFunction import ChiaFunction, get
 from chia.models.claude import ClaudeCodeLLM, ClaudeCodeQueryResult, parse_rate_limit_event
@@ -47,6 +47,9 @@ BENCHMARKS = ("dhrystone", "median", "multiply", "qsort", "towers", "vvadd")
 # file whose name says it holds configs (cache sizes, FPU on/off, ...).
 EDITABLE_PREFIX = "src/main/scala/"
 FORBIDDEN_FILE_RE = re.compile(r"Config", re.IGNORECASE)
+
+# sky130hd cells Yosys must not map to (probe/low-power cells, as ORFS DONT_USE).
+DONT_USE_RE = re.compile(r"^sky130_fd_sc_hd__(probe_p_8|probec_p_8|lpflow_\w+)$")
 
 # EICG_wrapper is a latch-based clock gate; for a synthesis-only estimate it is
 # replaced by a wire so the gated registers stay clocked by `clock`.
@@ -377,11 +380,11 @@ class TileRTL:
     top: str
     files: dict             # {filename: text} defining the modules under `top`
     blackboxes: dict        # {sram module: original text} (*_ext)
-    stubs: str              # empty port-only modules of the blackboxes (unused since Yosys left)
+    stubs: str              # empty port-only modules of the blackboxes (read by OpenSTA)
     modules: list           # modules in the hierarchy (blackboxes included)
     replaced: list          # modules swapped for a synthesis stub (EICG_wrapper)
     mems_conf: str = ""
-    sram_models: str = ""   # blackboxes + the modules they instantiate (split_*_ext), for Vivado P&R
+    sram_models: str = ""   # blackboxes + the modules they instantiate (split_*_ext); part of rtl_hash
 
 
 def tile_rtl_from_sources(generated_src_files: list, top: str = TOP, stub_modules=()) -> TileRTL:
@@ -499,7 +502,8 @@ def path_chain(path: str) -> list[str]:
 
 def pick_target(rtl: TileRTL, synth) -> dict:
     """The smallest instance holding both ends of the worst path of `synth` (crit_start /
-    crit_end as dotted names, see vivado_nodes.dotted), with its module and the chain above it."""
+    crit_end: flattened Yosys names such as core.div.divisor[3]_reg), with its module and the
+    chain above it."""
     paths = instance_paths(rtl)
     start, end = inst_prefix(synth.crit_start, paths), inst_prefix(synth.crit_end, paths)
     path = common_path([start, end])
@@ -737,6 +741,277 @@ def _round_diff(rocket_head: str, base_patch: str) -> str:
     finally:
         if os.path.exists(idx):
             os.remove(idx)
+
+
+# ---------------------------------------------------------------------------
+# eda: Yosys + OpenSTA (sky130_fd_sc_hd), what the loop accepts or rejects on
+# ---------------------------------------------------------------------------
+
+# Synthesis flows; the name is part of the cache tags, so add a new name instead of
+# changing an existing flow.
+#   v2: synth -flatten, abc -D -constr (ABC's default script then adds buffer; upsize;
+#       dnsize). $lcu is Brent-Kung (techmap.v default), $mul is Yosys' array multiplier.
+SYNTH_FLOWS = {
+    "v2": "synth -flatten -top {top}",
+}
+
+# Same driver/load as ORFS sky130hd (ABC_DRIVER_CELL, ABC_LOAD_IN_FF).
+ABC_CONSTR = "set_driving_cell sky130_fd_sc_hd__buf_1\nset_load 5\n"
+
+YOSYS_SCRIPT = """\
+read_liberty -lib {lib}
+{read_blackboxes}
+read_verilog -sv -DSYNTHESIS {files}
+hierarchy -check -top {top}
+{synth}
+rename -wire -suffix _reg t:*DFF*
+dfflibmap -liberty {lib}
+abc -D {period_ps} -liberty {lib} -constr abc.constr
+opt_clean -purge
+setundef -zero
+hilomap -singleton -hicell sky130_fd_sc_hd__conb_1 HI -locell sky130_fd_sc_hd__conb_1 LO
+opt_clean -purge
+tee -o {stat} stat -liberty {lib}
+write_verilog -noattr -noexpr -nohex -nodec {netlist}
+"""
+
+STA_SCRIPT = """\
+read_liberty {lib}
+{read_stubs}
+read_verilog {netlist}
+link_design {top}
+create_clock -name clk -period {period_ns} [get_ports clock]
+set_input_delay 0 -clock clk [lsearch -inline -all -not -exact [all_inputs] [get_ports clock]]
+set_output_delay 0 -clock clk [all_outputs]
+puts "@@WORST"
+report_worst_slack -max -digits 4
+puts "@@WNS"
+report_wns -digits 4
+puts "@@TNS"
+report_tns -digits 4
+puts "@@ENDPOINTS"
+report_checks -path_delay max -group_count 2000 -format end -digits 3
+puts "@@PATHS"
+report_checks -path_delay max -group_count 10 -fields {{slew cap input_pins nets fanout}} -digits 3
+puts "@@END"
+"""
+
+
+@dataclass
+class SynthResult:
+    success: bool
+    period_ns: float
+    flow: str = ""
+    worst_slack_ns: float | None = None   # report_worst_slack (can be > 0)
+    wns_ns: float | None = None           # report_wns (0 when nothing fails)
+    tns_ns: float | None = None
+    fmax_mhz: float | None = None         # 1000 / (period - worst_slack)
+    crit_start: str = ""
+    crit_end: str = ""
+    endpoints: str = ""                   # worst 2000 endpoints with slack (one line each)
+    families: str = ""                    # endpoints grouped by register (bit index removed)
+    paths: str = ""                       # top-10 full path reports
+    area_um2: float | None = None
+    yosys_log_tail: str = ""
+    stat: str = ""
+    sta_log: str = ""
+    yosys_seconds: float = 0.0
+    sta_seconds: float = 0.0
+    error: str = ""
+    lib_sha256: str = ""
+    removed_cells: list = field(default_factory=list)
+
+
+def filter_liberty(text: str, dont_use: re.Pattern = DONT_USE_RE) -> tuple[str, list[str]]:
+    """Drop `cell (name) {...}` groups whose name matches `dont_use`."""
+    out, removed, pos = [], [], 0
+    for m in re.finditer(r'^\s*cell\s*\(\s*"?([\w$]+)"?\s*\)\s*\{', text, re.M):
+        if m.start() < pos or not dont_use.match(m.group(1)):
+            continue
+        depth, i = 1, m.end()
+        while depth:
+            j = min(k for k in (text.find("{", i), text.find("}", i)) if k >= 0)
+            depth += 1 if text[j] == "{" else -1
+            i = j + 1
+        out.append(text[pos:m.start()])
+        pos = i
+        removed.append(m.group(1))
+    out.append(text[pos:])
+    return "".join(out), removed
+
+
+def _section(log: str, name: str) -> str:
+    m = re.search(rf"@@{name}\n(.*?)(?=\n@@|\Z)", log, re.S)
+    return m.group(1).strip() if m else ""
+
+
+def _num(pattern: str, text: str) -> float | None:
+    m = re.search(pattern, text)
+    return float(m.group(1)) if m else None
+
+
+def parse_sta(log: str, period_ns: float) -> dict:
+    worst = _num(r"worst slack(?:\s+max)?\s+(-?[\d.]+(?:e-?\d+)?)", _section(log, "WORST"))
+    wns = _num(r"wns(?:\s+max)?\s+(-?[\d.]+(?:e-?\d+)?)", _section(log, "WNS"))
+    tns = _num(r"tns(?:\s+max)?\s+(-?[\d.]+(?:e-?\d+)?)", _section(log, "TNS"))
+    paths = _section(log, "PATHS")
+    start = re.search(r"Startpoint:\s*(\S+)", paths)
+    end = re.search(r"Endpoint:\s*(\S+)", paths)
+    fmax = 1000.0 / (period_ns - worst) if worst is not None and period_ns - worst > 0 else None
+    return dict(worst_slack_ns=worst, wns_ns=wns, tns_ns=tns, fmax_mhz=fmax,
+                crit_start=start.group(1) if start else "", crit_end=end.group(1) if end else "",
+                endpoints=_section(log, "ENDPOINTS"), paths=paths)
+
+
+_END_LINE_RE = re.compile(r"\s*(\S+)\s.*?(-?\d+\.\d+)\s*(?:\(VIOLATED\)|\(MET\))?\s*$")
+
+
+def family_table(endpoints: str) -> dict:
+    """{register family: [worst slack, number of endpoints, worst pin]} of `report_checks
+    -format end` lines. A family is the register with its bit index as [*] and a Vec index
+    right before `_reg` as _* (core.x_3[5]_reg/D -> core.x_3[*]_reg, core.x_3_reg/D -> core.x_*_reg)."""
+    fam: dict[str, list] = {}
+    for line in endpoints.splitlines():
+        m = _END_LINE_RE.match(line)
+        if not m:
+            continue
+        pin, slack = m.group(1), float(m.group(2))
+        key = re.sub(r"\[\d+\]", "[*]", pin.rsplit("/", 1)[0])
+        key = re.sub(r"_\d+(?=_reg$)", "_*", key)
+        f = fam.setdefault(key, [slack, 0, pin])
+        f[1] += 1
+        if slack < f[0]:
+            f[0], f[2] = slack, pin
+    return fam
+
+
+def endpoint_families(endpoints: str, n: int = 15) -> str:
+    """Endpoints grouped by register: worst slack, number of failing bits, the worst one."""
+    rows = sorted(family_table(endpoints).items(), key=lambda kv: kv[1][0])[:n]
+    out = [f"{'worst slack':>11}  {'bits':>4}  register (bit index -> [*]; worst endpoint)"]
+    out += [f"{v[0]:11.3f}  {v[1]:4d}  {k}  ({v[2]})" for k, v in rows]
+    return "\n".join(out)
+
+
+def compare_families(parent_endpoints: str, child_endpoints: str, n: int = 12) -> str:
+    """Worst slack per endpoint family on both sides, for the n worst families of either side.
+    A family missing from one side's reported endpoints is shown as "> <that side's best
+    reported slack>" (it got better than every listed endpoint)."""
+    pf, cf = family_table(parent_endpoints), family_table(child_endpoints)
+    if not pf or not cf:
+        return ""
+    floor = {id(pf): max(v[0] for v in pf.values()), id(cf): max(v[0] for v in cf.values())}
+    keys = sorted(set(pf) | set(cf), key=lambda k: min(pf.get(k, [9e9])[0], cf.get(k, [9e9])[0]))[:n]
+
+    def cell(t, k):
+        return f"{t[k][0]:8.3f}" if k in t else f"> {floor[id(t)]:.2f}".rjust(8)
+    out = [f"{'parent':>8}  {'child':>8}  {'delta':>7}  register family"]
+    for k in keys:
+        delta = f"{cf[k][0] - pf[k][0]:+7.3f}" if k in pf and k in cf else " " * 7
+        out.append(f"{cell(pf, k)}  {cell(cf, k)}  {delta}  {k}")
+    return "\n".join(out)
+
+
+def first_path(paths: str, limit: int = 8000) -> str:
+    """The first `Startpoint ... slack` block of an OpenSTA report_checks output."""
+    i = paths.find("Startpoint")
+    if i < 0:
+        return ""
+    j = paths.find("slack", i)
+    j = paths.find("\n", j) if j >= 0 else -1
+    block = paths[i:j if j >= 0 else len(paths)]
+    return block if len(block) <= limit else block[:limit] + "\n... (truncated, see timing_paths.rpt)"
+
+
+def parse_area(stat: str) -> float | None:
+    vals = re.findall(r"Chip area for (?:top )?module '?\\?[\w$.]*'?:\s*([\d.]+)", stat)
+    return float(vals[-1]) if vals else None
+
+
+@ChiaFunction(resources={"eda": 1}, num_cpus=2, max_retries=0)
+def synth_sta(rtl: TileRTL, period_ns: float, flow: str = "v2",
+              yosys_timeout: int = 4 * 3600) -> SynthResult:
+    """Yosys (synth -flatten, dfflibmap, abc -D) + OpenSTA on rtl.top at a fixed
+    clock period. SRAM *_ext modules stay black boxes (their pins are
+    unconstrained), I/O get 0 delay against `clock`. Yosys runs in its own process
+    group, so a cancelled task leaves no Yosys behind."""
+    res = SynthResult(success=False, period_ns=period_ns, flow=flow)
+    lib_src = os.environ.get("SKY130HD_LIB", "/home/ray/pdk/sky130hd/sky130_fd_sc_hd__tt_025C_1v80.lib")
+    with open(lib_src) as f:
+        lib_text = f.read()
+    res.lib_sha256 = hashlib.sha256(lib_text.encode()).hexdigest()
+    work = tempfile.mkdtemp(prefix="rocket_fmax_synth_")
+    try:
+        # Scripts use paths relative to `work` (the cwd of yosys and sta).
+        lib = "sky130hd_filtered.lib"
+        filtered, res.removed_cells = filter_liberty(lib_text)
+        with open(os.path.join(work, lib), "w") as f:
+            f.write(filtered)
+        os.makedirs(os.path.join(work, "rtl"))
+        for name, text in rtl.files.items():
+            with open(os.path.join(work, "rtl", name), "w") as f:
+                f.write(text)
+        bb_paths = []
+        for name, text in rtl.blackboxes.items():
+            bb_paths.append(f"bb_{name}.v")
+            with open(os.path.join(work, bb_paths[-1]), "w") as f:
+                f.write(text + "\n")
+        stubs, netlist, stat = "bb_stubs.v", "netlist.v", "stat.txt"
+        with open(os.path.join(work, stubs), "w") as f:
+            f.write(rtl.stubs)
+        ys = YOSYS_SCRIPT.format(
+            lib=lib, top=rtl.top, period_ps=int(round(period_ns * 1000)),
+            synth=SYNTH_FLOWS[flow].format(top=rtl.top),
+            read_blackboxes="\n".join(f"read_verilog -lib -sv {p}" for p in bb_paths),
+            files=" ".join(f"rtl/{n}" for n in sorted(rtl.files)),
+            stat=stat, netlist=netlist)
+        with open(os.path.join(work, "synth.ys"), "w") as f:
+            f.write(ys)
+        with open(os.path.join(work, "abc.constr"), "w") as f:
+            f.write(ABC_CONSTR)
+        t0 = time.time()
+        y = subprocess.Popen(["yosys", "-q", "-l", "yosys.log", "-s", "synth.ys"], cwd=work,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                             start_new_session=True)
+        try:
+            yerr, _ = y.communicate(timeout=yosys_timeout)
+            rc = y.returncode
+        except subprocess.TimeoutExpired:
+            _kill(y)
+            rc, yerr = -1, ""
+        except BaseException:            # cancelled: no Yosys left behind
+            _kill(y)
+            raise
+        res.yosys_seconds = time.time() - t0
+        ylog_path = os.path.join(work, "yosys.log")
+        ylog = open(ylog_path, errors="replace").read() if os.path.exists(ylog_path) else ""
+        res.yosys_log_tail = ylog[-20000:] + (f"\n[yosys stdout/stderr]\n{yerr[-5000:]}" if yerr else "")
+        if rc != 0 or not os.path.exists(os.path.join(work, netlist)):
+            res.error = (f"yosys returncode {rc}" + (" (timeout)" if rc == -1 else "")
+                         + (" (killed: OOM?)" if rc in (137, -9) else ""))
+            return res
+        stat_path = os.path.join(work, stat)
+        res.stat = open(stat_path).read() if os.path.exists(stat_path) else ""
+        res.area_um2 = parse_area(res.stat)
+
+        with open(os.path.join(work, "sta.tcl"), "w") as f:
+            f.write(STA_SCRIPT.format(lib=lib, netlist=netlist, top=rtl.top, period_ns=period_ns,
+                                      read_stubs=f"read_verilog {stubs}" if rtl.stubs else ""))
+        t0 = time.time()
+        s = subprocess.run(["sta", "-no_init", "-no_splash", "-exit", "sta.tcl"], cwd=work,
+                           capture_output=True, text=True, timeout=3600)
+        res.sta_seconds = time.time() - t0
+        res.sta_log = s.stdout + ("\nSTDERR:\n" + s.stderr if s.stderr else "")
+        for k, v in parse_sta(s.stdout, period_ns).items():
+            setattr(res, k, v)
+        res.families = endpoint_families(res.endpoints)
+        if s.returncode != 0 or res.worst_slack_ns is None:
+            res.error = f"sta returncode {s.returncode}, worst slack not found"
+            return res
+        res.success = True
+        return res
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------

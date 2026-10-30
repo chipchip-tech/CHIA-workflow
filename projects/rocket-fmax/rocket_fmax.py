@@ -1,23 +1,22 @@
-"""Rocket Fmax loop on CHIA. Milestone 1: RocketTile above 100 MHz after Vivado place + route on
-the Arty A7-100T (xc7a100tcsg324-1), cycle cost at most +3 % over the baseline.
+"""Rocket Fmax loop on CHIA: raise the Fmax of RocketTile measured with Yosys + OpenSTA on
+sky130_fd_sc_hd (the synthesis half of the ASIC milestone), cycle cost at most +3 % over the baseline.
 
 One round, as CHIA's timing_opt example:
   reset rocket-chip to the best patch -> one Claude Code session edits the Chisel through
-  chipyard_bash and checks its edits with synth_ab (ab_tool.py: Vivado synth_design A/B; pipeline
+  chipyard_bash and checks its edits with synth_ab (ab_tool.py: Yosys + OpenSTA A/B; pipeline
   stages allowed) -> scope check -> build RocketConfig (a build-fix agent on a compile error) ->
-  in parallel: gate (riscv-tests ISA + benchmarks on Verilator) and Vivado place + route of
-  RocketTile (vivado_impl, best of --vivado-impl-strategies) -> accepted when every test passes
-  with the baseline's instruction counts, the cycle cost (geomean mcycle / baseline mcycle) stays
-  within --max-ipc-loss and post-route Fmax / cycle cost beats the best by more than
-  --min-perf-gain. A functional failure cancels place + route and goes to a debug agent
-  (--debug-retries).
+  Yosys + OpenSTA of RocketTile (synth_sta, 3-4 min): a round that cannot beat the best even
+  without any cycle cost stops here -> gate (riscv-tests ISA + benchmarks on Verilator) ->
+  accepted when every test passes with the baseline's instruction counts, the cycle cost (geomean
+  mcycle / baseline mcycle) stays within --max-ipc-loss and Fmax / cycle cost beats the best by
+  more than --min-perf-gain. A functional failure goes to a debug agent (--debug-retries).
 
 Run from this directory on the head (README.md):
   chia job submit --working-dir . -- python rocket_fmax.py --start-patch <best.patch> --run-name <name>
-  --baseline-only: no rounds, place + route of the baseline (and of --start-patch)
+  --baseline-only: no rounds, synth of the baseline (and of --start-patch)
 
-Outputs go to --out-dir/<run-name>/ (results.csv, vivado_impl.csv, patches/, runs/, profile/).
-Needs the workers chipyard, verilator_run, claude_creds and vivado of cluster.yaml.
+Outputs go to --out-dir/<run-name>/ (results.csv, history.md, patches/, runs/, profile/).
+Needs the workers chipyard, verilator_run, claude_creds and eda of cluster.yaml.
 """
 
 import argparse
@@ -34,14 +33,12 @@ import time
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
-from types import SimpleNamespace
 
 import ray
 
 import ab_tool as AB
 import fmax_nodes as N
-import vivado_nodes as V
-from chia.base.ChiaFunction import chia_cancel, get
+from chia.base.ChiaFunction import get
 from chia.base.bypass import Bypass
 from chia.base.cache import start_cache, stop_cache
 from chia.base.tools.BashTool import BashTool
@@ -55,28 +52,24 @@ PROMPT_FIX = HERE / "prompts" / "fix_build.md"
 PROMPT_DEBUG = HERE / "prompts" / "fix_failure.md"
 
 # Cache tags (the cache is keyed by tag only, see exp.yaml):
-#   rtl2: TileRTL with sram_models (Vivado needs the split_*_ext modules)
-#   vivimpl4: endpoint list in the reports; strategies in the tag (vivimpl1-3 were never cached)
+#   rtl2: TileRTL with sram_models
+#   synth_<flow>_p<period>: synth_sta (baseline_synth_v2_p10 is the one of chia-fmax-r1..r3b)
 RTL_TAG = "rtl2"
-IMPL_TAG = "vivimpl4"
 
-CSV_FIELDS = ["iter", "accepted", "fmax_mhz", "slack_ns", "tns_ns", "strategy", "synth_fmax_mhz", "critical_path",
-              "luts", "brams", "dsps", "cycle_pct", "perf", "perf_gain_pct", "isa_pass", "reason", "elapsed_min",
-              "impl_min"]
-IMPL_FIELDS = ["point", "strategy", "best", "synth_fmax_mhz", "place_slack_ns", "fmax_mhz", "slack_ns", "tns_ns",
-               "failing", "luts", "lutram", "ffs", "brams", "dsps", "minutes", "critical_path", "error"]
+CSV_FIELDS = ["iter", "accepted", "fmax_mhz", "slack_ns", "tns_ns", "area_um2", "critical_path", "cycle_pct", "perf",
+              "perf_gain_pct", "isa_pass", "reason", "elapsed_min", "synth_min"]
 
-SYSTEM_MESSAGE = ("You are a hardware timing engineer working on the Rocket core in Chipyard, targeting an AMD "
-                  "Artix-7 FPGA. You raise frequency x IPC: you edit Chisel sources through the chipyard_bash tool "
-                  "(pipeline stages allowed, with every consumer updated) and check each edit with the synth_ab "
-                  "tool. You never run make, sbt, verilator or vivado yourself: the full build, tests and place "
-                  "and route run after you finish.")
+SYSTEM_MESSAGE = ("You are a hardware timing engineer working on the Rocket core in Chipyard, targeting an ASIC "
+                  "standard-cell library (sky130_fd_sc_hd). You raise frequency x IPC: you edit Chisel sources "
+                  "through the chipyard_bash tool (pipeline stages allowed, with every consumer updated) and check "
+                  "each edit with the synth_ab tool. You never run make, sbt, verilator or yosys yourself: the full "
+                  "build, synthesis and tests run after you finish.")
 SYSTEM_MESSAGE_DEBUG = ("You are a Chisel engineer working on the Rocket core in Chipyard. An edit made earlier in this "
                         "round builds but fails functional tests; you find and fix the bug through the chipyard_bash "
-                        "tool and keep the intent of the edit. You never run make, sbt, verilator or vivado.")
+                        "tool and keep the intent of the edit. You never run make, sbt, verilator or yosys.")
 SYSTEM_MESSAGE_FIX = ("You are a Chisel engineer working on the Rocket core in Chipyard. The build of an edit "
                       "made earlier in this round failed; you fix the compile errors through the chipyard_bash "
-                      "tool and keep the intent of the edit. You never run make, sbt, verilator or vivado "
+                      "tool and keep the intent of the edit. You never run make, sbt, verilator or yosys "
                       "through chipyard_bash.")
 EMPTY_RETRY = """
 
@@ -93,7 +86,7 @@ The last session's answer:
 
 Do **not** make these edits again, nor the same idea on the same logic: the numbers above already
 answer it. The located worst path above is only a starting point. Pick a different endpoint family
-from `route_families.txt` (they sit close to the worst one), or one edit that shortens several
+from `timing_families.txt` (they sit close to the worst one), or one edit that shortens several
 families at once, or a pipeline stage. Try at least two concrete edits, each checked with synth_ab
 ending with the whole `RocketTile`. A pipeline stage is allowed: the loop measures its cycle cost on
 the benchmarks and rejects the round if that cost is too high.
@@ -102,19 +95,17 @@ the benchmarks and rejects the round if that cost is too high.
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--period-ns", type=float, default=10.0, help="clock period of synth_design and place + route")
-    p.add_argument("--vivado-part", default="xc7a100tcsg324-1", help="Vivado part (Arty A7-100T)")
-    p.add_argument("--vivado-threads", type=int, default=8, help="maxThreads of synth_design")
-    p.add_argument("--vivado-impl-strategies", nargs="+", default=["explore", "extratiming"],
-                   choices=sorted(V.IMPL_STRATEGIES), help="place + route runs per point; the best counts")
-    p.add_argument("--vivado-impl-parallel", type=int, default=1,
-                   help="place + route runs at the same time (2 used close to 10 GB; the container has 18 GB)")
-    p.add_argument("--vivado-impl-threads", type=int, default=4, help="maxThreads of each place + route run")
+    p.add_argument("--period-ns", type=float, default=10.0,
+                   help="clock period of Yosys (abc -D) and OpenSTA; keep it at or below the target (a wider "
+                        "period lets ABC stop early and the measured Fmax drops)")
+    p.add_argument("--synth-flow", choices=sorted(N.SYNTH_FLOWS), default="v2")
     p.add_argument("--baseline-only", action="store_true",
-                   help="no rounds: place + route of the baseline (and of --start-patch), vivado_impl.csv")
+                   help="no rounds: synth of the baseline (and of --start-patch)")
     p.add_argument("--start-patch", default=None,
                    help="start the rounds from this patch (best.patch of an earlier run) instead of the "
                         "unmodified rocket-chip")
+    p.add_argument("--history-from", nargs="*", default=[], metavar="RUN_DIR",
+                   help="earlier runs (--out-dir/<run>) whose history.md the agent gets as earlier rounds")
     p.add_argument("--iters", type=int, default=5)
     p.add_argument("--run-name", default=None)
     p.add_argument("--out-dir", default="~/rocket-fmax-v2")
@@ -143,15 +134,18 @@ def parse_args():
                         "further away than this (s; weekly limit), then the call fails")
     p.add_argument("--max-ipc-loss", type=float, default=0.03,
                    help="cycle cost (geomean of mcycle / baseline mcycle) may be at most 1 + this")
-    p.add_argument("--min-perf-gain", type=float, default=0.02,
-                   help="post-route Fmax / cycle cost must beat the best by more than this fraction "
-                        "(strategies of one netlist differ by up to ~8 %%)")
+    p.add_argument("--min-perf-gain", type=float, default=0.01,
+                   help="Fmax / cycle cost must beat the best by more than this fraction")
     p.add_argument("--debug-retries", type=int, default=2,
                    help="debug-agent sessions after a functional failure of the gate")
     p.add_argument("--empty-retries", type=int, default=1, help="new sessions when the agent finishes without any edit")
     a = p.parse_args()
     if a.start_patch and not Path(a.start_patch).expanduser().is_file():
         p.error(f"không thấy --start-patch {a.start_patch}")
+    a.history_from = [os.path.expanduser(h) for h in a.history_from]
+    missing = [h for h in a.history_from if not (Path(h) / "history.md").is_file()]
+    if missing:
+        p.error(f"--history-from: không có history.md trong {missing}")
     if a.run_name is None:
         a.run_name = f"{'baseline' if a.baseline_only else 'fmax'}-{datetime.now().strftime('%Y%m%d-%H%M')}"
     a.out_dir = os.path.expanduser(a.out_dir)
@@ -190,8 +184,8 @@ def ptag(a) -> str:
     return f"{a.period_ns:g}".replace(".", "p")
 
 
-def impl_tag(a, prefix: str) -> str:
-    return f"{prefix}_{IMPL_TAG}_{a.vivado_part}_p{ptag(a)}_" + "-".join(a.vivado_impl_strategies)
+def synth_tag(a, prefix: str) -> str:
+    return f"{prefix}_synth_{a.synth_flow}_p{ptag(a)}"
 
 
 def bench_tag(a) -> str:
@@ -204,8 +198,8 @@ def patch_hash(patch: str) -> str:
 
 
 def rtl_hash(rtl) -> str:
-    """Hash of the tile's Verilog (what Vivado and the gate see), to spot a round that rebuilt a
-    netlist already measured (fmax-r4 round 5 repeated round 3: same Vivado numbers)."""
+    """Hash of the tile's Verilog (what synth and the gate see), to spot a round that rebuilt a
+    netlist already measured (fmax-r4 round 5 repeated round 3 word for word)."""
     h = hashlib.sha256()
     for name in sorted(rtl.files):
         h.update(name.encode() + b"\0" + rtl.files[name].encode() + b"\0")
@@ -219,82 +213,47 @@ def cache_has(tag: str) -> bool:
 
 
 def fmax(p: dict) -> float:
-    """Post-route Fmax of an accepted point."""
-    return p["impl"].result.fmax_mhz
+    """Fmax (Yosys + OpenSTA) of an accepted point."""
+    return p["synth"].fmax_mhz
 
 
 def perf(p: dict) -> float:
-    """Post-route Fmax / cycle cost of an accepted point."""
+    """Fmax / cycle cost of an accepted point."""
     return fmax(p) / p.get("cyc", 1.0)
 
 
 # ---------------------------------------------------------------------------
-# Vivado place + route
+# Yosys + OpenSTA
 # ---------------------------------------------------------------------------
 
-def impl_launch(a, rtl, tag: str | None = None):
+def synth_row(s) -> dict:
+    """results.csv columns of a synth result."""
+    if s is None or not s.success:
+        return {}
+    return {"fmax_mhz": fmt(s.fmax_mhz, 2), "slack_ns": fmt(s.worst_slack_ns, 3), "tns_ns": fmt(s.tns_ns, 1),
+            "area_um2": fmt(s.area_um2, 0), "critical_path": f"{s.crit_start} -> {s.crit_end}"}
+
+
+def save_synth(d: Path, s):
+    """runs/<label>/ reports of a synth result."""
+    for name, text in (("timing_paths.rpt", s.paths), ("timing_endpoints.rpt", s.endpoints),
+                       ("timing_families.txt", s.families), ("synth_stat.txt", s.stat),
+                       ("yosys_log_tail.txt", s.yosys_log_tail), ("sta.log", s.sta_log)):
+        write(d / name, text)
+
+
+def synth_text(s) -> str:
+    return (f"{s.fmax_mhz:.2f} MHz (slack {s.worst_slack_ns:.3f} ns, TNS {fmt(s.tns_ns, 1)} ns, area "
+            f"{fmt(s.area_um2, 0)} um2, {s.crit_start} -> {s.crit_end}; Yosys {s.yosys_seconds / 60:.1f} min)"
+            if s.success else f"lỗi: {s.error}")
+
+
+def run_synth(a, out: Path, label: str, rtl, tag: str | None = None):
     kw = {"_chia_tag": tag} if tag else {}
-    return V.vivado_impl.chia_remote(rtl, a.period_ns, a.vivado_part, tuple(a.vivado_impl_strategies),
-                                     a.vivado_threads, a.vivado_impl_threads, a.vivado_impl_parallel, **kw)
-
-
-def impl_get(a, ref) -> V.VivadoImplResult:
-    try:
-        return get(ref)
-    except Exception as e:                                           # noqa: BLE001
-        return V.VivadoImplResult(success=False, part=a.vivado_part, period_ns=a.period_ns,
-                                  error=f"{type(e).__name__}: {e}"[:500])
-
-
-def impl_row(res) -> dict:
-    """results.csv columns of a place + route result."""
-    b, s = res.result if res is not None else None, res.synth if res is not None else None
-    row = {"synth_fmax_mhz": fmt(s.fmax_mhz, 2) if s is not None else ""}
-    if b is not None:
-        row.update(fmax_mhz=fmt(b.fmax_mhz, 2), slack_ns=fmt(b.worst_slack_ns, 3), tns_ns=fmt(b.tns_ns, 1),
-                   strategy=res.best, critical_path=f"{b.crit_start} -> {b.crit_end}", luts=b.luts or "",
-                   brams=b.brams if b.brams is not None else "", dsps=b.dsps if b.dsps is not None else "")
-    return row
-
-
-def save_impl(out: Path, label: str, res) -> str:
-    """runs/<label>/impl_*/ reports, vivado_impl.csv rows and the log lines; returns a one-line summary."""
-    d = out / "runs" / label
-    rows, syn = [], res.synth
-    for n, r in ([("synth", syn)] if syn is not None else []) + list(res.runs.items()):
-        for name, text in (("vivado_paths.rpt", r.paths), ("vivado_timing_summary.rpt", r.summary),
-                           ("vivado_utilization.rpt", r.utilization), ("vivado_families.txt", r.families),
-                           ("vivado_endpoints.txt", r.endpoints), ("vivado_log_tail.txt", r.log_tail)):
-            write(d / f"impl_{n}" / name, text)
-        rows.append({"strategy": n, "best": n == res.best if n != "synth" else "",
-                     "place_slack_ns": fmt(res.place_slack.get(n), 3), "fmax_mhz": fmt(r.fmax_mhz, 2),
-                     "slack_ns": fmt(r.worst_slack_ns, 3), "tns_ns": fmt(r.tns_ns, 1),
-                     "failing": r.failing_endpoints if r.failing_endpoints is not None else "",
-                     "luts": r.luts or "", "lutram": r.lutram if r.lutram is not None else "", "ffs": r.ffs or "",
-                     "brams": r.brams if r.brams is not None else "", "dsps": r.dsps if r.dsps is not None else "",
-                     "minutes": f"{r.seconds / 60:.1f}", "critical_path": f"{r.crit_start} -> {r.crit_end}",
-                     "error": r.error + (f" (returncodes {r.returncodes})" if len(r.returncodes) > 1 else "")})
-    if not rows:
-        rows.append({"error": res.error})
-    for row in rows:
-        append_csv(out / "vivado_impl.csv", IMPL_FIELDS,
-                   {"point": label, "synth_fmax_mhz": fmt(syn.fmax_mhz, 2) if syn is not None else "", **row})
-    for n, r in res.runs.items():
-        print(f"  {n:12s} place {fmt(res.place_slack.get(n), 3)} ns -> route "
-              + (f"{r.worst_slack_ns:.3f} ns ({r.fmax_mhz:.2f} MHz)" if r.success else f"lỗi: {r.error}")
-              + f", {r.seconds / 60:.1f} min", flush=True)
-    b = res.result
-    return (f"post-route {b.fmax_mhz:.2f} MHz ({res.best}, slack {b.worst_slack_ns:.3f} ns, "
-            f"{b.crit_start} -> {b.crit_end}); synth {fmt(syn.fmax_mhz, 2)} MHz, LUT {b.luts}, BRAM {b.brams}, "
-            f"DSP {b.dsps}" if res.success else f"lỗi: {res.error}")
-
-
-def finish_impl(a, out: Path, label: str, ref) -> V.VivadoImplResult:
-    t0 = time.time()
-    res = impl_get(a, ref)
-    print(f"\nvivado place + route {label} ({a.vivado_part}, {a.period_ns:g} ns, chờ {(time.time() - t0) / 60:.1f} "
-          f"min): {save_impl(out, label, res)}", flush=True)
-    return res
+    s = get(N.synth_sta.chia_remote(rtl, a.period_ns, a.synth_flow, **kw))
+    save_synth(out / "runs" / label, s)
+    print(f"synth {label} ({a.synth_flow}, {a.period_ns:g} ns): {synth_text(s)}", flush=True)
+    return s
 
 
 # ---------------------------------------------------------------------------
@@ -406,12 +365,12 @@ def ensure_baseline(a, out: Path, elfs: dict, snap: dict) -> dict:
 
 
 def ensure_start(a, out: Path, snap: dict, base: dict, elfs: dict) -> dict:
-    """Start point of the rounds (--start-patch): build, gate and place + route, cached under
-    baseline_start_<hash>_*. Place + route runs while the gate does."""
+    """Start point of the rounds (--start-patch): build, gate and synth, cached under
+    baseline_start_<hash>_* (the RTL and gate tags are those of fmax-r4/r5)."""
     patch = Path(a.start_patch).expanduser().read_text()
     h = patch_hash(patch)
     tags = {"rtl": f"baseline_start_{h}_{RTL_TAG}", "gate": f"baseline_start_{h}_gate{bench_tag(a)}",
-            "impl": impl_tag(a, f"baseline_start_{h}")}
+            "synth": synth_tag(a, f"baseline_start_{h}")}
     hits = {k: cache_has(t) for k, t in tags.items()}
     print(f"\nstart point ({N.CONFIG}, patch {a.start_patch}): "
           + ", ".join(f"{tags[k]}={'HIT' if v else 'miss'}" for k, v in hits.items()), flush=True)
@@ -425,21 +384,19 @@ def ensure_start(a, out: Path, snap: dict, base: dict, elfs: dict) -> dict:
         if not art.success:
             raise SystemExit(f"start point build failed:\n{build_errors(art)}")
     rtl = get(N.extract_tile_rtl.chia_remote(art, _chia_tag=tags["rtl"]))
-    impl_ref = impl_launch(a, rtl, tags["impl"])
     gate = get(N.run_gate.chia_remote(art, elfs, _chia_tag=tags["gate"]))
     save_gate(d, gate)
     res = ironlaw(a, base["gate"], gate)
     write(d / "gate_compare.txt", "\n".join(res["lines"]))
     print("start gate:\n  " + "\n  ".join(res["lines"]), flush=True)
     if res["fails"]:
-        chia_cancel(impl_ref, force=True)
         raise SystemExit("điểm xuất phát không qua gate:\n  " + "\n  ".join(res["fails"]))
-    impl = finish_impl(a, out, "start", impl_ref)
-    start = {"name": "start", "patch": patch, "rtl": rtl, "impl": impl, "cyc": res["cyc"]}
+    synth = run_synth(a, out, "start", rtl, tags["synth"])
+    start = {"name": "start", "patch": patch, "rtl": rtl, "synth": synth, "cyc": res["cyc"]}
     append_csv(out / "results.csv", CSV_FIELDS,
-               {"iter": "start", "accepted": True, **impl_row(impl), "isa_pass": True,
+               {"iter": "start", "accepted": True, **synth_row(synth), "isa_pass": True,
                 "cycle_pct": f"{(res['cyc'] - 1) * 100:.3f}",
-                "perf": f"{perf(start):.3f}" if impl.success else "", "reason": f"start: patch {a.start_patch}"})
+                "perf": f"{perf(start):.3f}" if synth.success else "", "reason": f"start: patch {a.start_patch}"})
     return start
 
 
@@ -457,12 +414,11 @@ def tool_text() -> dict:
 
 
 def render_prompt(a, i: int, best: dict, history: list[str], target_md: str) -> str:
-    v, s = best["impl"].result, best["impl"].synth
+    s = best["synth"]
     return string.Template(PROMPT.read_text()).safe_substitute(
-        ITER=i, MAX_ITERS=a.iters, LLM_MIN=round(a.llm_timeout / 60), CONFIG_DESC=N.CONFIG, PART=a.vivado_part,
-        PERIOD_NS=f"{a.period_ns:g}", STRATEGIES=", ".join(f"`{x}`" for x in a.vivado_impl_strategies),
-        BEST_NAME=best["name"], BEST_SLACK=fmt(v.worst_slack_ns, 3), BEST_FMAX=fmt(v.fmax_mhz, 2),
-        BEST_STRATEGY=best["impl"].best, BEST_SYNTH_SLACK=fmt(s.worst_slack_ns, 3), BEST_SYNTH_FMAX=fmt(s.fmax_mhz, 2),
+        ITER=i, MAX_ITERS=a.iters, LLM_MIN=round(a.llm_timeout / 60), CONFIG_DESC=N.CONFIG,
+        PERIOD_NS=f"{a.period_ns:g}", BEST_NAME=best["name"], BEST_SLACK=fmt(s.worst_slack_ns, 3),
+        BEST_FMAX=fmt(s.fmax_mhz, 2), BEST_TNS=fmt(s.tns_ns, 1), BEST_AREA=fmt(s.area_um2, 0),
         BEST_IPC_LOSS=f"{(best.get('cyc', 1.0) - 1) * 100:+.2f} %", BEST_PERF=f"{perf(best):.2f}",
         MAX_IPC_LOSS=f"{a.max_ipc_loss:.1%}", MIN_PERF_GAIN=f"{a.min_perf_gain:.1%}", DEBUG_RETRIES=a.debug_retries,
         BENCHES=", ".join((*N.BENCHMARKS, *a.extra_bench)), STAGE_DIR=N.STAGE_DIR, TARGET=target_md,
@@ -470,30 +426,27 @@ def render_prompt(a, i: int, best: dict, history: list[str], target_md: str) -> 
 
 
 def stage_files(best: dict, history: list[str]) -> dict:
-    v, s, rtl = best["impl"].result, best["impl"].synth, best["rtl"]
-    files = {"route_paths.rpt": v.paths, "route_endpoints.txt": v.endpoints, "route_families.txt": v.families,
-             "route_utilization.rpt": v.utilization, "synth_paths.rpt": s.paths, "synth_families.txt": s.families,
-             "best.patch": best["patch"], "history.md": "\n\n".join(history)}
+    s, rtl = best["synth"], best["rtl"]
+    files = {"timing_paths.rpt": s.paths, "timing_endpoints.rpt": s.endpoints, "timing_families.txt": s.families,
+             "synth_stat.txt": s.stat, "best.patch": best["patch"], "history.md": "\n\n".join(history)}
     files.update({f"best_verilog/{n}": t for n, t in rtl.files.items()})
-    files["best_verilog/sram_models.v"] = rtl.sram_models
+    files.update({f"best_verilog/bb_{m}.v": t for m, t in rtl.blackboxes.items()})
     return files
 
 
 def chia_target(best: dict) -> str:
-    """The worst post-route path located in the Verilog and the Chisel: a starting point for the
-    agent, which still picks what to work on."""
-    v = best["impl"].result
-    crit = SimpleNamespace(crit_start=V.dotted(v.crit_start), crit_end=V.dotted(v.crit_end))
-    target = N.pick_target(best["rtl"], crit)
-    target["crit"] = f"{v.crit_start} -> {v.crit_end}"
-    target["report"] = V.first_path(v.paths)
-    target["ends"], target["sources"] = N.path_sources(best["rtl"], crit, best["patch"])
+    """The worst path located in the Verilog and the Chisel: a starting point for the agent,
+    which still picks what to work on."""
+    s = best["synth"]
+    target = N.pick_target(best["rtl"], s)
+    target["report"] = N.first_path(s.paths)
+    target["ends"], target["sources"] = N.path_sources(best["rtl"], s, best["patch"])
     classes = get(N.find_scala_classes.chia_remote([m for _, m in target["chain"]]))
     return target_text(target, classes)
 
 
 def target_text(target: dict, classes: dict) -> str:
-    lines = [f"- Worst post-route path of the current best: `{target['crit']}`",
+    lines = [f"- Worst path of the current best: `{target['crit']}`",
              f"- It starts in instance `{target['start_path'] or N.TOP}` and ends in "
              f"`{target['end_path'] or N.TOP}`.",
              f"- Smallest instance holding both ends: `{target['path'] or N.TOP}` = module `{target['module']}`.",
@@ -505,8 +458,7 @@ def target_text(target: dict, classes: dict) -> str:
                  "change how the parent instantiates or feeds it instead)")
         lines.append(f"  - `{path or N.TOP}` -> `{mod}` -> {where}")
     if target.get("report"):
-        lines += ["", "Worst path report (Vivado, post-route, from route_paths.rpt):", "", "```", target["report"],
-                  "```"]
+        lines += ["", "Worst path report (OpenSTA, from timing_paths.rpt):", "", "```", target["report"], "```"]
     ends = target.get("ends") or []
     if ends:
         lines += ["", "Registers at the two ends and the Scala lines the Verilog `@[...]` comments point to:"]
@@ -574,8 +526,8 @@ def _call_agent_once(a, llm, prompt: str, tag: str, d: Path, prefix: str, best: 
     tools = [BashTool("chipyard_bash", N.CHIPYARD, timeout_seconds=120, task_options={"resources": {"chipyard": 0.5}})]
     resp = None
     try:
-        tools.append(AB.SynthABTool("synth_ab", best["rtl"], best["impl"].synth, best["name"], N.CONFIG, a.period_ns,
-                                    a.vivado_part, a.vivado_threads, a.make_jobs, best["patch"],
+        tools.append(AB.SynthABTool("synth_ab", best["rtl"], best["synth"], best["name"], N.CONFIG, a.period_ns,
+                                    a.synth_flow, a.make_jobs, best["patch"],
                                     task_options={"resources": {"chipyard": 0.5}}))
         resp = get(llm.prompt.chia_remote(llm, prompt, tools=tools, _chia_tag=tag))
     except Exception as e:                                           # noqa: BLE001
@@ -701,49 +653,47 @@ def tile_rtl(art, r: dict):
 
 def gate_and_judge(a, out: Path, label: str, art, rtl, elfs, base: dict, best: dict, r: dict,
                    seen: dict) -> dict:
-    """Gate and place + route of a built round, in parallel, then the decision. A functional
-    failure (r["functional_fail"]: the text for the debug agent) or a cycle cost above
-    --max-ipc-loss cancels place + route. Verilog identical to one already measured (`seen`:
-    rtl_hash -> label) is rejected without either."""
+    """Synth, then the gate, then the decision. A round whose Fmax cannot beat the best even at
+    the baseline's cycle count stops after synth (the gate takes ~19 min, synth 3-4). A
+    functional failure sets r["functional_fail"] (the text for the debug agent). Verilog identical
+    to one already measured (`seen`: rtl_hash -> label) is rejected without either."""
     d = out / "runs" / label
     r["rtl"], r["rtl_hash"] = rtl, rtl_hash(rtl)
     if r["rtl_hash"] in seen:
-        r["reason"] = (f"Verilog {N.TOP} trùng hệt {seen[r['rtl_hash']]} (đã đo); "
-                       "bỏ qua gate và place + route")
+        r["reason"] = f"Verilog {N.TOP} trùng hệt {seen[r['rtl_hash']]} (đã đo); bỏ qua synth và gate"
         return r
     t0 = time.time()
-    impl_ref = impl_launch(a, rtl)
+    synth = run_synth(a, out, label, rtl)
+    r["synth"], r["synth_min"] = synth, (time.time() - t0) / 60
+    if not synth.success:
+        r["reason"] = f"Yosys/OpenSTA lỗi: {synth.error}"[:1000]
+        return r
+    need = perf(best) * (1 + a.min_perf_gain)
+    if synth.fmax_mhz <= need:
+        r["reason"] = (f"Fmax {fmax(best):.2f} -> {synth.fmax_mhz:.2f} MHz: không vượt được hiệu năng {perf(best):.2f} "
+                       f"x (1 {a.min_perf_gain:+.1%}) = {need:.2f} kể cả khi cycle không tăng so với baseline; "
+                       f"đường găng {synth.crit_start} -> {synth.crit_end}; không chạy gate")
+        return r
     gate = get(N.run_gate.chia_remote(art, elfs))
     save_gate(d, gate)
     res = ironlaw(a, base["gate"], gate)
     write(d / "gate_compare.txt", "\n".join(res["lines"]))
     r["isa_pass"] = not any(f.startswith("ISA") for f in res["fails"])
     if res["fails"]:
-        chia_cancel(impl_ref, force=True)
         r["reason"] = "gate không đạt (chức năng): " + "; ".join(res["fails"][:10])
         logs = "\n\n".join(f"===== {n}\n{t[-2500:]}" for n, t in list(gate.fail_logs.items())[:6])
         r["functional_fail"] = "\n".join(res["fails"][:40]) + ("\n\n" + logs if logs else "")
         return r
     cyc = res["cyc"]
-    r.update(cyc=cyc, cycle_pct=f"{(cyc - 1) * 100:.3f}")
-    if cyc > 1 + a.max_ipc_loss:
-        chia_cancel(impl_ref, force=True)
-        r["reason"] = f"tốn quá nhiều cycle: {(cyc - 1) * 100:+.3f} % so với baseline; cho phép tối đa +{a.max_ipc_loss:.1%}"
-        return r
-    print(f"{label}: gate pass, cycle {(cyc - 1) * 100:+.3f} %, chờ place + route", flush=True)
-    impl = finish_impl(a, out, label, impl_ref)
-    r["impl"], r["impl_min"] = impl, (time.time() - t0) / 60
-    if not impl.success:
-        r["reason"] = f"Vivado place + route lỗi: {impl.error}"[:1000]
-        return r
-    v = impl.result
-    new_perf = v.fmax_mhz / cyc
+    new_perf = synth.fmax_mhz / cyc
     gain = new_perf / perf(best) - 1
-    r.update(perf=f"{new_perf:.3f}", perf_gain_pct=f"{gain * 100:.3f}")
-    text = (f"post-route Fmax {fmax(best):.2f} -> {v.fmax_mhz:.2f} MHz ({impl.best}), cycle {(cyc - 1) * 100:+.3f} % "
-            f"so với baseline, hiệu năng {perf(best):.2f} -> {new_perf:.2f} ({gain:+.2%}); đường găng "
-            f"{v.crit_start} -> {v.crit_end}")
-    if gain <= a.min_perf_gain:
+    r.update(cyc=cyc, cycle_pct=f"{(cyc - 1) * 100:.3f}", perf=f"{new_perf:.3f}", perf_gain_pct=f"{gain * 100:.3f}")
+    text = (f"Fmax {fmax(best):.2f} -> {synth.fmax_mhz:.2f} MHz, cycle {(cyc - 1) * 100:+.3f} % so với baseline, "
+            f"hiệu năng {perf(best):.2f} -> {new_perf:.2f} ({gain:+.2%}); đường găng {synth.crit_start} -> "
+            f"{synth.crit_end}")
+    if cyc > 1 + a.max_ipc_loss:
+        r["reason"] = f"tốn quá nhiều cycle: {text}; cho phép tối đa +{a.max_ipc_loss:.1%}"
+    elif gain <= a.min_perf_gain:
         r["reason"] = f"hiệu năng không tăng đủ: {text}; cần > {a.min_perf_gain:+.1%}"
     else:
         r["accepted"], r["reason"] = True, text
@@ -792,11 +742,10 @@ def tried_edits(d: Path, diff_chars: int = 3000, max_chars: int = 12000) -> str:
 
 def history_entry(i: int, r: dict, resp_summary: str) -> str:
     lines = [f"### Vòng {i}: {'NHẬN' if r['accepted'] else 'LOẠI'}", f"Lý do: {r['reason'][:3000]}"]
-    impl = r.get("impl")
-    if impl is not None and impl.success:
-        v = impl.result
-        lines.append(f"Post-route: worst slack {v.worst_slack_ns:.3f} ns ({v.fmax_mhz:.2f} MHz, {impl.best}), "
-                     f"đường găng {v.crit_start} -> {v.crit_end}; synth_design {fmt(impl.synth.worst_slack_ns, 3)} ns")
+    s = r.get("synth")
+    if s is not None and s.success:
+        lines.append(f"Synth: worst slack {s.worst_slack_ns:.3f} ns ({s.fmax_mhz:.2f} MHz), TNS {fmt(s.tns_ns, 1)} ns, "
+                     f"đường găng {s.crit_start} -> {s.crit_end}")
     if r.get("cycle_pct"):
         lines.append(f"Cycle so với baseline: {r['cycle_pct']} %" +
                      (f"; hiệu năng so với bản tốt nhất: {r['perf_gain_pct']} %" if r.get("perf_gain_pct") else ""))
@@ -815,11 +764,11 @@ def history_entry(i: int, r: dict, resp_summary: str) -> str:
 
 
 def new_round() -> dict:
-    return {"accepted": False, "reason": "", "impl": None, "rtl": None, "patch": "", "isa_pass": "", "build_fixes": 0}
+    return {"accepted": False, "reason": "", "synth": None, "rtl": None, "patch": "", "isa_pass": "", "build_fixes": 0}
 
 
 def run_round(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best, history, seen) -> dict:
-    """One round. Returns {"accepted", "reason", "impl", "rtl", "patch", "cyc", ...}."""
+    """One round. Returns {"accepted", "reason", "synth", "rtl", "patch", "cyc", ...}."""
     d = out / "runs" / f"iter{i}"
     r = new_round()
     get(N.reset_rocket.chia_remote(snap["rocket_head"], best["patch"]))
@@ -865,7 +814,7 @@ def run_round(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best, histor
         debug_llm = make_llm(a, a.fix_model or a.model, SYSTEM_MESSAGE_DEBUG, a.fix_timeout)
         reason = call_agent(a, debug_llm, dprompt, f"agent_{a.run_name}_iter{i}_debug{k}_llm", d, f"debug{k}", best)
         before, failed = r["patch"], r["reason"]
-        r.update(reason="", impl=None, rtl=None)
+        r.update(reason="", synth=None, rtl=None)
         diff = after_agent(out, d, i, snap, best, r, reason, f"test lỗi, agent debug lần {k}")
         if diff is None:
             return r
@@ -890,30 +839,25 @@ def run(a, out: Path):
     write(out / "runs" / "tree_snapshot.json", json.dumps(snap, indent=2))
 
     base = ensure_baseline(a, out, elfs, snap)
-    # the baseline is placed and routed when it is the start point or measured (--baseline-only);
-    # it queues on the one `vivado` slot ahead of the start point
-    base_ref = impl_launch(a, base["rtl"], impl_tag(a, "baseline")) if a.baseline_only or not a.start_patch else None
-    try:
-        start = ensure_start(a, out, snap, base, elfs) if a.start_patch else None
-    except BaseException:
-        if base_ref is not None:
-            chia_cancel(base_ref, force=True)
-        raise
-    if base_ref is not None:
-        base["impl"] = finish_impl(a, out, "baseline", base_ref)
-        append_csv(out / "results.csv", CSV_FIELDS, {"iter": "baseline", "accepted": True, **impl_row(base["impl"]),
+    # the baseline is synthesized when it is the start point or measured (--baseline-only)
+    if a.baseline_only or not a.start_patch:
+        base["synth"] = run_synth(a, out, "baseline", base["rtl"], synth_tag(a, "baseline"))
+        append_csv(out / "results.csv", CSV_FIELDS, {"iter": "baseline", "accepted": True, **synth_row(base["synth"]),
                                                      "isa_pass": True, "cycle_pct": "0.000",
-                                                     "perf": fmt(fmax(base), 3) if base["impl"].success else "",
+                                                     "perf": fmt(fmax(base), 3) if base["synth"].success else "",
                                                      "reason": "baseline"})
+    start = ensure_start(a, out, snap, base, elfs) if a.start_patch else None
     if a.baseline_only:
         return
     best = start or base
-    if not best["impl"].success:
-        raise SystemExit(f"{best['name']}: Vivado place + route lỗi: {best['impl'].error}")
+    if not best["synth"].success:
+        raise SystemExit(f"{best['name']}: Yosys/OpenSTA lỗi: {best['synth'].error}")
 
     llm = make_llm(a, a.model, SYSTEM_MESSAGE, a.llm_timeout)
     fix_llm = make_llm(a, a.fix_model or a.model, SYSTEM_MESSAGE_FIX, a.fix_timeout)
-    history: list[str] = []
+    # earlier runs' rounds first (fmax-r5 round 1 redid an edit rejected in fmax-r4)
+    history = [f"### Đợt trước: {Path(h).name}\n\n" + (Path(h) / "history.md").read_text().strip()
+               for h in a.history_from]
     seen = {rtl_hash(best["rtl"]): best["name"]}                    # Verilog already measured
     for i in range(1, a.iters + 1):
         t0 = time.time()
@@ -930,34 +874,35 @@ def run(a, out: Path):
             r["reason"] = r["reason"] + " [" + "; ".join(r["notes"]) + "]"
         resp_summary = last_response(out / "runs" / f"iter{i}")
         write(out / "runs" / f"iter{i}" / "decision.json",
-              json.dumps({k: v for k, v in r.items() if k not in ("impl", "rtl", "patch")},
+              json.dumps({k: v for k, v in r.items() if k not in ("synth", "rtl", "patch")},
                          indent=2, ensure_ascii=False, default=str))
         append_csv(out / "results.csv", CSV_FIELDS,
-                   {"iter": i, "accepted": r["accepted"], **impl_row(r.get("impl")), "isa_pass": r["isa_pass"],
+                   {"iter": i, "accepted": r["accepted"], **synth_row(r.get("synth")), "isa_pass": r["isa_pass"],
                     "cycle_pct": r.get("cycle_pct", ""), "perf": r.get("perf", ""),
                     "perf_gain_pct": r.get("perf_gain_pct", ""), "reason": r["reason"].replace("\n", " | ")[:1000],
-                    "elapsed_min": f"{r['minutes']:.1f}", "impl_min": fmt(r.get("impl_min"), 1)})
+                    "elapsed_min": f"{r['minutes']:.1f}", "synth_min": fmt(r.get("synth_min"), 1)})
         print(f"round {i}: {'ACCEPT' if r['accepted'] else 'REJECT'} ({r['minutes']:.1f} min) - {r['reason'][:400]}",
               flush=True)
         if r.get("rtl_hash"):
             seen.setdefault(r["rtl_hash"], f"iter{i}")
         if r["accepted"]:
-            best = {"name": f"iter{i}", "patch": r["patch"], "rtl": r["rtl"], "impl": r["impl"], "cyc": r["cyc"]}
+            best = {"name": f"iter{i}", "patch": r["patch"], "rtl": r["rtl"], "synth": r["synth"], "cyc": r["cyc"]}
         history.append(history_entry(i, r, resp_summary))
+        write(out / "history.md", "\n\n".join(history[len(a.history_from):]))
 
     write(out / "patches" / "best.patch", best["patch"])
-    write(out / "best.json", json.dumps({"best": best["name"], **impl_row(best["impl"]),
+    write(out / "best.json", json.dumps({"best": best["name"], **synth_row(best["synth"]),
                                          "cycle_cost": round(best.get("cyc", 1.0), 5), "perf": round(perf(best), 3)},
                                         indent=2))
     get(N.reset_rocket.chia_remote(snap["rocket_head"], best["patch"]))
-    print(f"\nbest: {best['name']} | " + json.dumps(impl_row(best["impl"]), ensure_ascii=False))
+    print(f"\nbest: {best['name']} | " + json.dumps(synth_row(best["synth"]), ensure_ascii=False))
 
 
 def export_profile(out: Path):
     log = out / "profile" / "ChiaProfileCollector.log"
     if not log.exists():
         return
-    # One run spans hours with long quiet gaps (build, place + route): keep it in one segment.
+    # One run spans hours with long quiet gaps (build, gate): keep it in one segment.
     cmd = ["chia", "viz-profile", str(log), "--format", "html", "--output-dir", str(out / "profile"),
            "--gap-threshold", "1000000"]
     try:
@@ -981,7 +926,7 @@ def main():
     if a.flush_cache:
         get(cache.flush.chia_remote())
     bypass = Bypass(yaml_path=str(EXP_YAML))
-    for fn in ("extract_tile_rtl", "run_gate", "vivado_impl"):
+    for fn in ("extract_tile_rtl", "run_gate", "synth_sta"):
         bypass.set_provider(fn, N.cache_provider)
         bypass.set_cond(fn, N.cache_hit_cond)
     try:

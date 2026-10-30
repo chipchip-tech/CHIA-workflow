@@ -2,10 +2,10 @@
 #   - hello_chipyard: build, git tree, agent tools (chipyard)
 #   - hello_verilator: gate, 4 simulators at once (verilator_run)
 #   - hello_claude: Claude Code, the agent (claude_creds)
-#   - rocket_vivado: Vivado synth_design (synth_ab) and place + route (vivado; image docker/VivadoDockerfile,
-#     Vivado on the host)
+#   - rocket_eda: Yosys + OpenSTA + sky130hd liberty, the loop's synth and synth_ab (eda; image
+#     built locally, docker/EdaDockerfile)
 # Node type names match configs/cluster-local.yaml, so this is the same cluster ("default").
-# The opencode worker of cluster-local.yaml and the Yosys worker (rocket_eda) are gone: after
+# The opencode worker of cluster-local.yaml and the Vivado worker (rocket_vivado) are gone: after
 # `chia up` with this file, remove their old containers once (README, "Chuẩn bị").
 #
 # Before `chia up`:
@@ -66,23 +66,18 @@ available_node_types:
                 - cp /home/ray/.claude/.claude.json /home/ray/.claude.json
                 - python3 -c "import json,os; p=os.path.expanduser('~/.claude/settings.json'); d=json.load(open(p)) if os.path.exists(p) else {}; d['skipDangerousModePermissionPrompt']=True; json.dump(d,open(p,'w'))"
 
-    # vivado_nodes.py: Vivado installed on the head under ~/tools/Xilinx, mounted
-    # read-only. label=disable: SELinux on Bazzite would otherwise need a relabel (:z) of the whole
-    # Vivado tree.
-    rocket_vivado:
-        resources: {"vivado": 1}
+    # fmax_nodes.synth_sta: Yosys + OpenSTA + sky130hd liberty.
+    rocket_eda:
+        resources: {"eda": 1}
         num_workers: 1
         compatible_ips: ["${THIS_MACHINE}"]
         docker:
-            image: "chia-vivado:latest"
-            container_name: "chia-vivado-${USER}"
-            pull_before_run: false   # built locally: docker build -f docker/VivadoDockerfile ...
+            image: "chia-eda-sky130:latest"
+            container_name: "chia-eda-${USER}"
+            pull_before_run: false   # built locally: docker build -f docker/EdaDockerfile ...
             run_options:
-                - "-v ~/tools/Xilinx:/tools/Xilinx:ro"
-                - --security-opt label=disable
-                - --shm-size=2gb
-                - --memory=18g       # synth_design peaked at ~9.5 GB (forked workers); 2 place + route at once ~10 GB
-                - --memory-swap=26g  # + up to 8 GB of host swap (zram on Bazzite) instead of an OOM kill
+                - --shm-size=4gb
+                - --memory=10g       # a runaway Yosys kills only this container
 
 head_env_commands: ["source ~/.bashrc && conda activate chia_env"]
 head_setup_commands: ["source ~/.bashrc && conda activate chia_env"]
