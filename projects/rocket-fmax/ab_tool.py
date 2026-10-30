@@ -108,8 +108,10 @@ def report_files(child, parent) -> dict:
     return out
 
 
-def ab_lines(parent_name: str, p: dict, c: dict, child) -> tuple[list, Optional[float]]:
-    """Report lines of one A/B (summaries `p`, `c`) and the delta child - parent in ns."""
+def ab_lines(parent_name: str, p: dict, c: dict, child, parent=None) -> tuple[list, Optional[float]]:
+    """Report lines of one A/B (summaries `p`, `c`; VivadoResults `child`, `parent`) and the delta
+    child - parent in ns. The worst slack alone hides a family that got shorter under another one
+    (fmax-r4 round 4: frontend edit, FPU path worst on both sides), so families are compared too."""
     lines = [f"parent ({parent_name}): " + (f"worst slack {p['slack_ns']:+.3f} ns, path {p['path_ns']:.3f} ns, "
                                             f"LUT {p['luts']}, {p['crit']}" if p["ok"] else p["error"]),
              "child (your edit):   " + (f"worst slack {c['slack_ns']:+.3f} ns, path {c['path_ns']:.3f} ns, "
@@ -118,8 +120,12 @@ def ab_lines(parent_name: str, p: dict, c: dict, child) -> tuple[list, Optional[
     if delta is not None:
         verdict = ("better" if delta > NOISE_NS else "worse" if delta < -NOISE_NS
                    else f"no clear change (|delta| <= {NOISE_NS} ns is synthesis noise)")
-        lines.append(f"delta (child - parent): {delta:+.3f} ns -> {verdict}")
-    if c["ok"]:
+        lines.append(f"delta of the worst slack (child - parent): {delta:+.3f} ns -> {verdict}")
+    table = (V.compare_families(parent.endpoints, child.endpoints)
+             if c["ok"] and parent is not None and parent.success else "")
+    if table:
+        lines += ["worst slack per endpoint family (ns; delta = child - parent, positive = shorter):", table]
+    elif c["ok"]:
         lines += ["child worst endpoint families:", "\n".join(child.families.splitlines()[:9])]
     return lines, delta
 
@@ -132,7 +138,8 @@ class SynthABTool(ChiaTool):
         super().__init__(name, task_options=task_options)
         # Set before __post_init__: it pickles this object into the actor.
         self._parent_rtl = parent_rtl
-        self._parent_tile = summary(parent_synth)    # synth_design of the parent's RocketTile (its impl run)
+        self._parent_synth = parent_synth            # synth_design of the parent's RocketTile (its impl run)
+        self._parent_tile = summary(parent_synth)
         self._parent_name = parent_name
         self._config = config
         self._period_ns = period_ns
@@ -358,7 +365,7 @@ class SynthABTool(ChiaTool):
         for rel, text in report_files(child, parent).items():
             with open(os.path.join(d, rel), "w") as f:
                 f.write(text)
-        lines, delta = ab_lines(self._parent_name, p, c, child)
+        lines, delta = ab_lines(self._parent_name, p, c, child, self._parent_synth if job["whole"] else parent)
         lines.insert(0, f"status: done ({time.time() - job['started']:.0f} s), module {job['module']}"
                      + (" (whole tile, parent = full result of the best)" if job["whole"] else ""))
         if c["ok"]:

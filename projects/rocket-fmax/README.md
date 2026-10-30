@@ -231,7 +231,14 @@ Chi tiết `fmax-r4` (xuất phát từ `best.patch` của `chia-fmax-r3b`; Fmax
 | 2 | loại | | +4,071 % | | tốn quá nhiều cycle (> +3 %), place + route bị huỷ | 26,9 |
 | 3 | loại: 63,05 (extratiming; explore 62,60) | 63,57 | +1,907 % | −2,34 % | `frontend.icache.s2_tag_hit_5` → `core.ex_reg_rs_msb_0` (R); synth tốt hơn iter1 nhưng post-route kém hơn | 36,6 (27,3) |
 | 4 | loại | | | | agent không thay đổi gì (cả phiên retry) | 12,4 |
-| 5 | loại: 63,05 | 63,57 | +1,907 % | −2,34 % | Verilog trùng vòng 3 (mọi số Vivado trùng); nay loop bỏ qua Verilog đã đo | 32,9 (27,2) |
+| 5 | loại: 63,05 | 63,57 | +1,907 % | −2,34 % | patch trùng y nguyên vòng 3; nay loop bỏ qua Verilog đã đo | 32,9 (27,2) |
+
+Vòng 1 (agent): 2 sửa, đo bằng `synth_ab` cả tile. `fastLoadWord = false` làm tệ đi (−0,635 ns, hoàn tác); đếm
+trailing zero của ALU bằng prefix-OR thay `PriorityEncoderOH - 1` (đường 32–34 mức logic) được +1,909 ns synth
+(−7,797 → −5,888 ns), giữ lại. Vòng 4: agent nhắm đúng đường post-route (icache → fq, 19 mức logic, qua FP decoder
+vào hazard/stall), sửa `fp_hazard_targets`, nhưng A/B báo delta 0,000 vì đường FPU `divSqrt → regfile` là xấu nhất ở
+cả hai bên; agent không so được họ `fq` của parent nên bỏ cuộc sau 1 sửa. Sau r4: `synth_ab` báo slack từng họ
+endpoint ở cả parent và child.
 
 Nhận xét: vòng đầy đủ 33–37 phút (agent + build ~10 phút, place + route 25–27 phút); post-route lần đầu không còn
 dính `dcache` → `core.mem_reg_wdata`, đường găng chuyển sang frontend (icache tag hit → fetch queue); 2000 endpoint
@@ -275,10 +282,12 @@ docker exec chia-chipyard-$USER-0 bash -lc 'cd /home/ray/chipyard/generators/roc
   - Vivado 2025.1 ML Standard ở `~/tools/Xilinx`, image `chia-vivado`, worker `rocket_vivado`: synth và place + route
     chạy được. Bộ nhớ: synth đỉnh ~9,5 GB; 2 place + route song song gần 10 GB.
   - Bước 1 (`fmax-r4`, 30/10/2026): loop nhận/loại theo post-route chạy hết 5 vòng; place + route điểm xuất phát
-    và mỗi vòng; huỷ place + route khi cycle quá giới hạn (vòng 2). Chưa xác nhận: không còn Vivado sót sau khi huỷ
-    (`pgrep`), `synth_ab` bản Vivado (thời gian, RAM), agent đọc `route_paths.rpt`.
+    và mỗi vòng; huỷ place + route khi cycle quá giới hạn (vòng 2), sau đó không còn Vivado sót; `synth_ab` bản Vivado
+    (`rebuild_verilog` 55–79 s, A/B cả tile ~2,5 phút); agent đọc đường găng post-route. Chưa đo: RAM khi 2 sub-block
+    synth cùng lúc (r4 agent chỉ A/B cả tile).
 - **Mới kiểm bằng mock:**
   - Gate fail → huỷ place + route → agent debug; `--baseline-only` với `--start-patch`; huỷ task giữa place + route
     với Vivado giả thì không còn tiến trình Vivado nào.
   - Bỏ qua vòng có Verilog `RocketTile` trùng một bản đã đo (sau `fmax-r4`).
+  - `synth_ab` so slack từng họ endpoint của parent và child (sau `fmax-r4`).
 - Tính đúng chức năng chỉ dựa vào riscv-tests và 8 benchmark (như example), không kiểm tương đương.

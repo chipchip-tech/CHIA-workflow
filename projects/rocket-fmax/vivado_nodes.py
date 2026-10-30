@@ -148,9 +148,8 @@ def dotted(pin: str) -> str:
     return cell_of(pin).replace("/", ".")
 
 
-def endpoint_families(endpoints: str, n: int = 15) -> str:
-    """Endpoints grouped by register (bit index -> [*], replicas merged): worst slack, number of
-    endpoints, the worst one."""
+def family_table(endpoints: str) -> dict:
+    """{register (bit index -> [*], replicas merged): [worst slack, number of endpoints, worst pin]}."""
     fam: dict[str, list] = {}
     for line in endpoints.splitlines():
         parts = line.split()
@@ -167,9 +166,33 @@ def endpoint_families(endpoints: str, n: int = 15) -> str:
         f[1] += 1
         if slack < f[0]:
             f[0], f[2] = slack, pin
-    rows = sorted(fam.items(), key=lambda kv: kv[1][0])[:n]
+    return fam
+
+
+def endpoint_families(endpoints: str, n: int = 15) -> str:
+    """Endpoints grouped by register: worst slack, number of endpoints, the worst one."""
+    rows = sorted(family_table(endpoints).items(), key=lambda kv: kv[1][0])[:n]
     out = [f"{'worst slack':>11}  {'bits':>4}  register (bit index -> [*]; worst endpoint)"]
     out += [f"{v[0]:11.3f}  {v[1]:4d}  {k}  ({v[2]})" for k, v in rows]
+    return "\n".join(out)
+
+
+def compare_families(parent_endpoints: str, child_endpoints: str, n: int = 12) -> str:
+    """Worst slack per endpoint family on both sides, for the n worst families of either side.
+    A family missing from one side's ENDPOINTS worst endpoints is shown as "> <that side's
+    ENDPOINTS-th slack>" (it got better than every listed endpoint)."""
+    pf, cf = family_table(parent_endpoints), family_table(child_endpoints)
+    if not pf or not cf:
+        return ""
+    floor = {id(pf): max(v[0] for v in pf.values()), id(cf): max(v[0] for v in cf.values())}
+    keys = sorted(set(pf) | set(cf), key=lambda k: min(pf.get(k, [9e9])[0], cf.get(k, [9e9])[0]))[:n]
+
+    def cell(t, k):
+        return f"{t[k][0]:8.3f}" if k in t else f"> {floor[id(t)]:.2f}".rjust(8)
+    out = [f"{'parent':>8}  {'child':>8}  {'delta':>7}  register family"]
+    for k in keys:
+        delta = f"{cf[k][0] - pf[k][0]:+7.3f}" if k in pf and k in cf else " " * 7
+        out.append(f"{cell(pf, k)}  {cell(cf, k)}  {delta}  {k}")
     return "\n".join(out)
 
 

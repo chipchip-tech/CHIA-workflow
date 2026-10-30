@@ -124,11 +124,15 @@ answers `running`, call it again.
   another block (e.g. `dcache` -> `core`) are not seen. `$AB_START("RocketTile")` synthesizes the
   whole tile (2-3 min) and compares it with the `synth_design` of $BEST_NAME ($BEST_SYNTH_SLACK ns).
 - `$AB_RESULT(handle)`: worst slack of child and parent, the delta (positive = shorter; |delta| <=
-  0.1 ns is noise) and the child's worst endpoint families. Full reports (Vivado `report_timing`)
-  are under `$STAGE_DIR/ab/<handle>/`.
+  0.1 ns is noise) and a table of the worst endpoint families with their slack on both sides and
+  the delta per family. Full reports (Vivado `report_timing`) are under `$STAGE_DIR/ab/<handle>/`.
+
+The worst slack alone can hide your gain: when another family (e.g. an FPU path) is the worst on
+both sides, it stays the same while the family you shortened moved. Judge an edit by the row of
+the family you targeted in the table (and check that no other family got worse).
 
 Before you finish, run `$AB_START("RocketTile")` once on the final edit, and finish with it only if
-the paths you targeted got shorter there (state the numbers). The loop then places and routes it.
+the families you targeted got shorter there (state their rows of the table). The loop then places and routes it.
 
 You must try: finishing without an edit that you have measured wastes the round. A rejected edit
 costs nothing, because the loop rejects it and keeps $BEST_NAME. You cannot measure cycle cost
