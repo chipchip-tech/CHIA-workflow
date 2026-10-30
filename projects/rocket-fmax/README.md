@@ -102,7 +102,13 @@ chia job submit --working-dir . -- python probe_tools.py --agent claude --models
 Mỗi điểm được synth bằng Yosys (baseline, điểm xuất phát, mọi vòng có synth) còn được chạy Vivado `synth_design`
 out-of-context trên `RocketTile`, cùng chu kỳ, SRAM `*_ext` là black box, I/O trễ 0. Kết quả ghi vào
 `<run>/vivado.csv` (Fmax/slack Vivado cạnh Fmax/slack Yosys, LUT, FF, DSP, đường găng) và
-`runs/<vòng>/vivado_*.rpt`. **Không dùng để nhận/loại**: chỉ để đối chiếu, nhất là xem độ dao động của số Yosys.
+`runs/<vòng>/vivado_*.rpt`. Mặc định **không dùng để nhận/loại**: chỉ để đối chiếu, nhất là xem độ dao động của số Yosys.
+
+`--vivado-accept TOL_NS` (cần `--chia-mode`, `--vivado-part`): vòng đã đạt theo Yosys + gate còn phải có worst slack
+Vivado >= worst slack Vivado của bản tốt nhất − `TOL_NS` (`0` = không xấu đi, `-0.05` = phải tốt hơn ít nhất
+0,05 ns), nếu không thì bị loại ("Vivado xấu đi: ..."). Vivado lỗi cũng làm vòng bị loại. Vivado của vòng chạy song
+song với gate nên gần như không thêm thời gian. Prompt có thêm mục "Second check: Vivado" (ngưỡng, đường găng Vivado
+của bản tốt nhất). `synth_ab` của agent vẫn chỉ dùng Yosys.
 Worker `vivado` có 1 slot, các lần chạy xếp hàng; loop chỉ chờ Vivado ở cuối job. Baseline và điểm xuất phát được
 cache (`baseline_vivado_<part>_p<chu kỳ>`, `baseline_start_<hash>_vivado_...`).
 
@@ -157,7 +163,7 @@ chia job logs -f fmax-v2-r1          # dừng: chia job stop fmax-v2-r1
 - Gói Pro: một phiên dài tốn nhiều token, nên chạy theo đợt khoảng 5 vòng. Gặp "You've hit your limit" thì loop
   chờ tới giờ reset rồi gọi lại (`--quota-retries`, bỏ nếu xa hơn `--quota-max-wait`).
 - Tuỳ chọn khác: `--llm-timeout 1800` (example dùng 3600), `--debug-retries 2`, `--empty-retries 1` (phiên mới khi agent không sửa gì), `--build-fixes 2`,
-  `--fix-timeout 900`, `--vivado-part <part>` (đo thêm bằng Vivado, xem trên), `--make-jobs 16`, `--build-timeout 3600`, `--cache-dir ~/chia_cache`.
+  `--fix-timeout 900`, `--vivado-part <part>` (đo thêm bằng Vivado, xem trên), `--vivado-accept <tol ns>` (Vivado vào điều kiện nhận), `--make-jobs 16`, `--build-timeout 3600`, `--cache-dir ~/chia_cache`.
 - `rv64ui-p-ma_data` fail ngay trên baseline (Rocket không hỗ trợ truy cập lệch địa chỉ), nên phải `--exclude-isa`.
 
 ## Baseline (RocketConfig gốc, 10 ns, đo thật 29/10/2026)
@@ -213,7 +219,7 @@ các sửa đổi đã đo; `chia-fmax-r3` trước đó dừng tay sau 2 vòng 
 | 4 | loại (80,09) | −2,49 | 68,73 | Fmax thấp hơn iter3; đường găng `dcache.s2_req_addr` → `core.mem_reg_wdata` | 13,7 |
 | 5 | loại | | | agent không thay đổi gì so với iter3 | 14,9 |
 
-Yosys và Vivado không cùng xu hướng: vòng 3 tăng 7,35 % theo Yosys nhưng Vivado giữ nguyên 67,53 MHz (đường găng
+Yosys và Vivado không cùng xu hướng (vì vậy thêm `--vivado-accept`, mới kiểm bằng mock): vòng 3 tăng 7,35 % theo Yosys nhưng Vivado giữ nguyên 67,53 MHz (đường găng
 Vivado vẫn `dcache.s2_data` → `core.mem_reg_wdata` từ baseline). Vòng 4 bị Yosys loại nhưng Vivado lại tăng
 (68,73 MHz, LUT +3,7 %, DSP 30 → 17).
 

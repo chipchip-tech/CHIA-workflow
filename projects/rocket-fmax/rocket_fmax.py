@@ -120,8 +120,13 @@ def parse_args():
     p.add_argument("--baseline-only", action="store_true", help="milestone 1: baseline only")
     p.add_argument("--vivado-part", default="",
                    help="also time every synthesized point with Vivado synth_design on this part "
-                        "(e.g. xc7a200tfbg676-2; `vivado` worker), written to vivado.csv; not used to decide")
+                        "(e.g. xc7a200tfbg676-2; `vivado` worker), written to vivado.csv; not used to decide "
+                        "unless --vivado-accept (--chia-mode)")
     p.add_argument("--vivado-threads", type=int, default=8)
+    p.add_argument("--vivado-accept", type=float, default=None, metavar="TOL_NS",
+                   help="with --vivado-part: a round the Yosys numbers accept is also timed with Vivado, and "
+                        "kept only if its Vivado worst slack >= the best one's - TOL_NS (0 = no worse, "
+                        "-0.05 = at least 0.05 ns better); off by default")
     p.add_argument("--iters", type=int, default=5)
     p.add_argument("--bypass-llm", action="store_true",
                    help="milestone 2: bypass OpenCodeLLM.prompt; the loop applies --patch-file "
@@ -234,6 +239,8 @@ def parse_args():
     if a.chia_mode and (a.loop_ab or a.ab_tool or a.bypass_llm or a.equiv):
         p.error("--chia-mode không dùng chung với --loop-ab, --ab-tool, --bypass-llm hay --equiv "
                 "(đổi cycle thì không kiểm tương đương lockstep được)")
+    if a.vivado_accept is not None and not (a.vivado_part and a.chia_mode):
+        p.error("--vivado-accept cần --vivado-part và --chia-mode")
     if a.start_patch and not Path(a.start_patch).expanduser().is_file():
         p.error(f"không thấy --start-patch {a.start_patch}")
     a.ab_tool = a.ab_tool or a.chia_mode       # chia-mode: the agent gets synth_ab
@@ -285,26 +292,61 @@ def synth_row(s) -> dict:
 
 # ---------------------------------------------------------------------------
 # --vivado-part: Vivado synth_design timing of every synthesized point, next to the
-# Yosys numbers (vivado.csv). Not used to accept or reject.
+# Yosys numbers (vivado.csv). Used to accept or reject only with --vivado-accept.
 # ---------------------------------------------------------------------------
 
 VIV_FIELDS = ["iter", "accepted", "yosys_fmax_mhz", "yosys_slack_ns", "viv_fmax_mhz", "viv_slack_ns",
               "viv_tns_ns", "viv_failing", "viv_luts", "viv_ffs", "viv_dsps", "viv_min", "viv_critical_path",
               "error"]
-VIV_PENDING: list = []      # (label, ref, yosys SynthResult, accepted), in dispatch order
+VIV_PENDING: list = []      # (label, ref or VivadoResult, yosys SynthResult, accepted), in dispatch order
 
 
 def vivado_tag(a, prefix: str) -> str:
     return f"{prefix}_vivado_{a.vivado_part}_p" + f"{a.period_ns:g}".replace(".", "p")
 
 
-def vivado_launch(a, label: str, rtl, ysynth, accepted, tag: str | None = None):
-    """Dispatch Vivado on `rtl` (one `vivado` slot: runs queue up behind each other)."""
-    if not a.vivado_part or rtl is None:
-        return
-    kw = {"_chia_tag": tag} if tag else {}
-    ref = V.vivado_synth.chia_remote(rtl, a.period_ns, a.vivado_part, a.vivado_threads, **kw)
+def vivado_launch(a, label: str, rtl, ysynth, accepted, tag: str | None = None, ref=None):
+    """Dispatch Vivado on `rtl` (one `vivado` slot: runs queue up behind each other), or
+    queue for vivado.csv a run already dispatched (`ref`: ObjectRef or VivadoResult)."""
+    if not a.vivado_part or (rtl is None and ref is None):
+        return None
+    if ref is None:
+        kw = {"_chia_tag": tag} if tag else {}
+        ref = V.vivado_synth.chia_remote(rtl, a.period_ns, a.vivado_part, a.vivado_threads, **kw)
     VIV_PENDING.append((label, ref, ysynth, accepted))
+    return ref
+
+
+def vivado_get(ref):
+    """The VivadoResult of a ref (or a result already in hand); a failed task as an error result."""
+    if isinstance(ref, V.VivadoResult):
+        return ref
+    try:
+        return get(ref)
+    except Exception as e:                                           # noqa: BLE001
+        return V.VivadoResult(success=False, part="", period_ns=0.0, error=f"{type(e).__name__}: {e}"[:500])
+
+
+def viv_of(p: dict):
+    """Vivado result of an accepted point (resolved once), None without --vivado-part."""
+    if p.get("viv") is None and p.get("viv_ref") is not None:
+        p["viv"] = vivado_get(p["viv_ref"])
+    return p.get("viv")
+
+
+def vivado_note(a, best: dict) -> str:
+    """--vivado-accept: what the prompt tells the agent about the Vivado check."""
+    v = viv_of(best) if a.vivado_accept is not None else None
+    if v is None or not v.success:
+        return ""
+    floor = v.worst_slack_ns - a.vivado_accept
+    return (f"\n\n## Second check: Vivado\n\nA round the numbers above accept is also synthesized with Vivado "
+            f"`synth_design` ({a.vivado_part}, same {a.period_ns:g} ns clock, out of context). It is kept only if "
+            f"the Vivado worst slack is >= {floor:.3f} ns. {best['name']} has Vivado worst slack "
+            f"{v.worst_slack_ns:.3f} ns ({v.fmax_mhz:.2f} MHz), critical path `{v.crit_start}` -> "
+            f"`{v.crit_end}`. synth_ab does not run Vivado. An FPGA maps multipliers to DSP blocks, so an "
+            f"edit that only shortens an FP multiplier array rarely moves this number, and an edit that "
+            f"lengthens the Vivado path above gets the round rejected.\n")
 
 
 def vivado_flush(out: Path, wait: bool = False):
@@ -313,13 +355,10 @@ def vivado_flush(out: Path, wait: bool = False):
         print(f"chờ Vivado: {', '.join(p[0] for p in VIV_PENDING)}", flush=True)
     while VIV_PENDING:
         label, ref, ys, acc = VIV_PENDING[0]
-        if not wait and not ray.wait([ref], timeout=0)[0]:
+        if not wait and not isinstance(ref, V.VivadoResult) and not ray.wait([ref], timeout=0)[0]:
             break
         VIV_PENDING.pop(0)
-        try:
-            v = get(ref)
-        except Exception as e:                                       # noqa: BLE001
-            v = V.VivadoResult(success=False, part="", period_ns=0.0, error=f"{type(e).__name__}: {e}"[:500])
+        v = vivado_get(ref)
         rcs = getattr(v, "returncodes", [])
         d = out / "runs" / label
         write(d / "vivado_paths.rpt", v.paths)
@@ -390,8 +429,8 @@ def ensure_start(a, out: Path, snap: dict, base: dict, elfs: dict) -> dict:
     print_synth("start", synth)
     if not synth.success:
         raise SystemExit(f"start point synth/STA lỗi: {synth.error}")
-    start = {"name": "start", "patch": patch, "synth": synth, "rtl": rtl}
-    vivado_launch(a, "start", rtl, synth, True, vivado_tag(a, f"baseline_start_{h}"))
+    start = {"name": "start", "patch": patch, "synth": synth, "rtl": rtl,
+             "viv_ref": vivado_launch(a, "start", rtl, synth, True, vivado_tag(a, f"baseline_start_{h}"))}
     row = {"iter": "start", "accepted": True, **synth_row(synth),
            "reason": f"start: patch {a.start_patch}"}
     if gate_ref is not None:
@@ -544,7 +583,7 @@ def ensure_baseline(a, out: Path, elfs: dict, snap: dict) -> dict:
     synth_ref = N.synth_sta.chia_remote(rtl, a.period_ns, a.synth_flow, _chia_tag=tags["synth"])
     gate = get(gate_ref)
     synth = get(synth_ref)
-    vivado_launch(a, "baseline", rtl, synth, True, vivado_tag(a, "baseline"))
+    viv_ref = vivado_launch(a, "baseline", rtl, synth, True, vivado_tag(a, "baseline"))
 
     write(d / "rtl_info.json", json.dumps({"top": rtl.top, "files": len(rtl.files), "modules": rtl.modules,
                                            "blackboxes": list(rtl.blackboxes), "replaced": rtl.replaced},
@@ -585,7 +624,7 @@ def ensure_baseline(a, out: Path, elfs: dict, snap: dict) -> dict:
     append_row(out / "results.csv", {"iter": "baseline", "accepted": True, **synth_row(synth),
                                      "isa_pass": True, "bench_cycles_match": True, "reason": "baseline",
                                      "elapsed_min": f"{(time.time() - t0) / 60:.1f}"})
-    return {"rtl": rtl, "gate": gate, "synth": synth}
+    return {"rtl": rtl, "gate": gate, "synth": synth, "viv_ref": viv_ref}
 
 
 # ---------------------------------------------------------------------------
@@ -601,7 +640,8 @@ def render_prompt(a, i: int, best: dict, history: list[str], target_md: str = ""
             BEST_FMAX=fmt(s.fmax_mhz, 2), BEST_IPC_LOSS=f"{(best.get('cyc', 1.0) - 1) * 100:+.2f} %",
             BEST_PERF=f"{perf(best):.2f}", MAX_IPC_LOSS=f"{a.max_ipc_loss:.1%}",
             MIN_PERF_GAIN=f"{a.min_perf_gain:.1%}", DEBUG_RETRIES=a.debug_retries,
-            BENCHES=", ".join((*N.BENCHMARKS, *a.extra_bench)), STAGE_DIR=N.STAGE_DIR, TARGET=target_md,
+            BENCHES=", ".join((*N.BENCHMARKS, *a.extra_bench)), STAGE_DIR=N.STAGE_DIR,
+            TARGET=target_md + vivado_note(a, best),
             HISTORY="\n\n".join(history) or "(no earlier round)", **tool_text(a))
     return string.Template((PROMPT_AB if a.ab_tool else PROMPT).read_text()).safe_substitute(
         ITER=i, MAX_ITERS=a.iters, CONFIG_DESC=N.CONFIG, PERIOD_NS=a.period_ns, BEST_NAME=best["name"],
@@ -839,10 +879,15 @@ def gate_and_judge(a, d: Path, art, rtl, elfs, base: dict, best: dict, r: dict, 
         chia_cancel(gate_ref, force=True)
         r["reason"], r["tile_reject"] = why, synth.success
         return r
+    if a.vivado_accept is not None and a.vivado_part:
+        # --vivado-accept: Vivado (~3-5 min) runs while the gate (~15 min) does; vivado.csv gets
+        # it at the end of the round, with the decision
+        r["viv"] = None
+        r["viv_ref"] = V.vivado_synth.chia_remote(rtl, a.period_ns, a.vivado_part, a.vivado_threads)
     gate = get(gate_ref)
     save_gate(d, gate)
     if a.chia_mode:
-        return judge_chia(a, d, base, best, r, gate)
+        return judge_vivado(a, d, best, judge_chia(a, d, base, best, r, gate))
     isa_ok, cyc_ok, gwhy = compare_gate(base["gate"], gate, a.exclude_isa)
     r["isa_pass"], r["bench_cycles_match"] = isa_ok, cyc_ok
     write(d / "gate_compare.txt", "\n".join(gwhy) or "khớp baseline")
@@ -878,6 +923,29 @@ def judge(a, best: dict, synth) -> tuple[bool, str]:
     if tns is not None:
         why += f"; {tns[2]} (cần > {a.tns_min_gain:.0%}, slack >= {tns[1]:.4f})"
     return False, why
+
+
+def judge_vivado(a, d: Path, best: dict, r: dict) -> dict:
+    """--vivado-accept: a round accepted on the Yosys numbers is kept only if its Vivado worst
+    slack is >= the best one's - TOL. A failed Vivado run rejects the round."""
+    if not r["accepted"] or r.get("viv_ref") is None:
+        return r
+    v, v0 = vivado_get(r["viv_ref"]), viv_of(best)
+    r["viv"] = v
+    if v0 is None or not v0.success:
+        r["notes"] = r.get("notes", []) + [f"không có số Vivado của {best['name']}, bỏ qua kiểm Vivado"]
+        return r
+    if not v.success:
+        r["accepted"], r["reason"] = False, f"Vivado lỗi: {v.error}; {r['reason']}"
+        return r
+    floor = v0.worst_slack_ns - a.vivado_accept
+    text = (f"Vivado {v0.fmax_mhz:.2f} -> {v.fmax_mhz:.2f} MHz (slack {v0.worst_slack_ns:.3f} -> "
+            f"{v.worst_slack_ns:.3f} ns, cần >= {floor:.3f}; đường găng Vivado {v.crit_start} -> {v.crit_end})")
+    if v.worst_slack_ns < floor:
+        r["accepted"], r["reason"] = False, f"Vivado xấu đi: {text}; Yosys: {r['reason']}"
+    else:
+        r["reason"] = f"{r['reason']}; {text}"
+    return r
 
 
 def judge_chia(a, d: Path, base: dict, best: dict, r: dict, gate) -> dict:
@@ -1001,7 +1069,7 @@ def run_round(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best, histor
         reason = call_agent(a, debug_llm, dprompt, f"agent_{a.run_name}_iter{i}_debug{k}_llm", d, f"debug{k}",
                             best, a.ab_tool)
         before, failed = r["patch"], r["reason"]
-        r.update(reason="", synth=None, rtl=None)
+        r.update(reason="", synth=None, rtl=None, viv_ref=None, viv=None)
         diff = after_agent(out, d, i, snap, best, r, reason, f"test lỗi, agent debug lần {k}")
         if diff is None:
             return r
@@ -1469,7 +1537,7 @@ def run(a, out: Path):
     llm = make_llm(a, a.model, SYSTEM_MESSAGE_CHIA if a.chia_mode else SYSTEM_MESSAGE_AB if a.ab_tool else SYSTEM_MESSAGE,
                    a.edit_timeout if a.loop_ab else a.llm_timeout, (a.edit_steps or None) if a.loop_ab else None)
     fix_llm = make_llm(a, a.fix_model or a.model, SYSTEM_MESSAGE_FIX, a.fix_timeout, None)
-    best = {"name": "baseline", "patch": "", "synth": base["synth"], "rtl": base["rtl"]}
+    best = {"name": "baseline", "patch": "", "synth": base["synth"], "rtl": base["rtl"], "viv_ref": base["viv_ref"]}
     if a.start_patch:
         best = ensure_start(a, out, snap, base, elfs)
     start = top = best          # top: the accepted point with the best worst slack (Fmax)
@@ -1491,7 +1559,7 @@ def run(a, out: Path):
             r["reason"] = r["reason"] + " [" + "; ".join(r["notes"]) + "]"
         resp_summary = last_response(out / "runs" / f"iter{i}")
         write(out / "runs" / f"iter{i}" / "decision.json",
-              json.dumps({k: v for k, v in r.items() if k not in ("synth", "rtl", "patch", "round_diff")},
+              json.dumps({k: v for k, v in r.items() if k not in ("synth", "rtl", "patch", "round_diff", "viv_ref", "viv")},
                          indent=2, ensure_ascii=False, default=str))
         append_row(csv_path, {"iter": i, "accepted": r["accepted"], **synth_row(r.get("synth")),
                               "isa_pass": r["isa_pass"], "bench_cycles_match": r["bench_cycles_match"],
@@ -1506,12 +1574,13 @@ def run(a, out: Path):
         if r["accepted"]:
             peak = max(best.get("peak_wns", best["synth"].worst_slack_ns), r["synth"].worst_slack_ns)
             best = {"name": f"iter{i}", "patch": r["patch"], "synth": r["synth"], "rtl": r["rtl"],
-                    "peak_wns": peak, **({"cyc": r["cyc"]} if "cyc" in r else {})}
+                    "peak_wns": peak, "viv_ref": r.get("viv_ref"), "viv": r.get("viv"),
+                    **({"cyc": r["cyc"]} if "cyc" in r else {})}
             print_synth(f"new best iter{i}", r["synth"])
             if r["synth"].worst_slack_ns > top["synth"].worst_slack_ns:
                 top = best
         history.append(history_entry(i, r, resp_summary))
-        vivado_launch(a, f"iter{i}", r.get("rtl"), r.get("synth"), r["accepted"])
+        vivado_launch(a, f"iter{i}", r.get("rtl"), r.get("synth"), r["accepted"], ref=r.get("viv_ref"))
         vivado_flush(out)
 
     vivado_flush(out, wait=True)
