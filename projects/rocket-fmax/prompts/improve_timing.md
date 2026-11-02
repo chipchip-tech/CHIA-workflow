@@ -12,34 +12,36 @@ when it is the easiest way to cut a long path, as long as the IPC it costs is sm
 How the loop judges the round after you finish:
 
 1. Build `$CONFIG_DESC` (Chisel -> Verilog -> Verilator). A compile error goes to a build-fix session.
-2. Synthesize `RocketTile` with Yosys (`synth -flatten`, sky130_fd_sc_hd, `abc -D` at a fixed clock
-   period of $PERIOD_NS ns) and time it with OpenSTA. Fmax = 1000 / (period - worst slack). SRAM
-   macros (`*_ext`) are black boxes and not timed. A round whose Fmax cannot beat the current best
-   by more than $MIN_PERF_GAIN, even with no cycle cost, is rejected here.
+2. Synthesize `RocketTile` with Yosys (flow $FLOW: `$FLOW_SYNTH`, sky130_fd_sc_hd, `abc -D` at a fixed
+   clock period of $PERIOD_NS ns) and time it with OpenSTA. Fmax = 1000 / (period - worst slack). SRAM
+   macros (`*_ext`) are black boxes and not timed. The **family score** is the sum of the worst slacks
+   of the $FAMILY_K worst endpoint families (`timing_families.txt`), each clipped at 0. A round that
+   can pass neither test of step 5, even with no cycle cost, is rejected here.
 3. Run riscv-tests `rv64ui/um/ua/uf/ud-p-*` (all must pass) and the benchmarks $BENCHES. Every
    benchmark must pass with the same `minstret` (instruction count) as the baseline. A functional
    failure goes to a debug session (at most $DEBUG_RETRIES) with the failing test's log.
 4. Cycle cost = geometric mean over the benchmarks of `mcycle / mcycle of the baseline`. It must stay
    at most **$MAX_IPC_LOSS above the baseline** (cumulative, over all accepted rounds; the current
    best uses $BEST_IPC_LOSS of it).
-5. Accept only if `Fmax / cycle cost` beats the current best by more than $MIN_PERF_GAIN.
+5. Accept if `Fmax / cycle cost` beats the current best by more than $MIN_PERF_GAIN, **or** if the
+   family score rises by at least $MIN_FAMILY_GAIN ns while the worst slack drops by at most
+   $WORST_TOL ns. The second test exists because several families sit close together: the Fmax only
+   rises once all of them are shortened, so shortening one or two of them is progress too.
 
 Current best ($BEST_NAME): worst slack $BEST_SLACK ns at $PERIOD_NS ns, Fmax $BEST_FMAX MHz, TNS
-$BEST_TNS ns, area $BEST_AREA um2; cycle cost $BEST_IPC_LOSS above the baseline, performance
+$BEST_TNS ns, family score $BEST_FAMILY ns, area $BEST_AREA um2; cycle cost $BEST_IPC_LOSS above the baseline, performance
 $BEST_PERF (Fmax / cycle cost).
 
 ## What makes a path long in this flow
 
-- The whole tile is flattened and mapped by one ABC run with a delay target. Gate count in series
-  and fanout (ABC inserts buffers and sizes cells) set the delay; there are no wires in this
-  estimate.
+$FLOW_NOTES
+- Gate count in series and fanout (ABC inserts buffers and sizes cells) set the delay; there are no
+  wires in this estimate.
 - Adders and comparators become Brent-Kung prefix trees; Yosys maps `*` to a plain array multiplier
   (no Booth, no Wallace tree), so a multiplier is deep. Wide one-hot or priority muxes,
   bypass/forwarding muxes and equality compares across many sources are deep too.
 - Paths that start or end at an SRAM pin are not timed (black boxes), so the SRAM itself is never
   the critical path here; logic between registers is.
-- Synthesizing the whole tile at once moves other paths by 1-2 ns when you edit one block: a gain
-  of the targeted family can be hidden or exaggerated by the worst slack alone.
 
 ## Your tools
 
@@ -76,7 +78,7 @@ Both run on the chipyard worker:
 ## Inputs (through the shell)
 
 - `$STAGE_DIR/timing_paths.rpt`: OpenSTA report of the 10 worst paths of $BEST_NAME, cell by cell
-  with fanout. The design is flattened: `fpuOpt.divSqrt_2.x_reg` is register `x` in instance
+  with fanout. Names are instance paths: `fpuOpt.divSqrt_2.x_reg` is register `x` in instance
   `fpuOpt.divSqrt_2`; `_reg` = flip-flop (`core` = the Rocket pipeline, `fpuOpt` = the FPU,
   `frontend`, `dcache`, `ptw`, ...).
 - `$STAGE_DIR/timing_endpoints.rpt`: the worst 2000 endpoints with their slack.
@@ -116,17 +118,20 @@ when it answers `running`, call it again.
   module that holds both ends of the path you target. `$AB_START("RocketTile")` synthesizes the
   whole tile (3-4 min) and compares it with the full result of $BEST_NAME ($BEST_SLACK ns): that is
   the number the loop uses.
-- `$AB_RESULT(handle)`: worst slack of child and parent, the delta (positive = shorter; |delta| <=
-  0.1 ns is synthesis noise) and a table of the worst endpoint families with their slack on both
-  sides and the delta per family. Full reports are under `$STAGE_DIR/ab/<handle>/`.
+- `$AB_RESULT(handle)`: worst slack of child and parent, the delta (positive = shorter), the family
+  score of both sides (whole tile) and a table of the worst endpoint families with their slack on
+  both sides and the delta per family. Full reports are under `$STAGE_DIR/ab/<handle>/`.
+- Verilog already synthesized (in this round, an earlier round or an earlier run) is not
+  synthesized again: the reply starts with `ALREADY MEASURED` and gives that result. Take it as the
+  answer to that idea and try something else.
 
 The worst slack alone can hide your gain: when another family is the worst on both sides, it stays
 the same while the family you shortened moved. Judge an edit by the row of the family you targeted
 in the table, and check that no other family got worse.
 
 Before you finish, run `$AB_START("RocketTile")` once on the final edit, and finish with it only if
-the families you targeted got shorter there (state their rows of the table) and no other family
-fell below $BEST_SLACK ns.
+the families you targeted got shorter there (state their rows of the table and the family score)
+and the worst slack did not drop below $BEST_SLACK ns by more than $WORST_TOL ns.
 
 You must try: finishing without an edit that you have measured wastes the round. A rejected edit
 costs nothing, because the loop rejects it and keeps $BEST_NAME. You cannot measure cycle cost

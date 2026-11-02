@@ -49,7 +49,7 @@ MAX_WAIT = 60                                 # seconds a call may block (MCP ro
 REBUILD_TIMEOUT = 1500
 SUB_BLOCK_EDA = 0.5                           # two sub-block synths at once on "eda"
 AB_YOSYS_TIMEOUT = 900                        # a child/parent Yosys past this is killed (normal: 3-5 min)
-NOISE_NS = 0.1
+NOISE_NS = {"v2": 0.1, "v3": 0.01}            # |delta| below this is not a change (v2: flat-synthesis noise)
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 _LOC_RE = re.compile(r"\s*//\s*@\[[^\]]*\]")   # firtool source locators move when Scala lines move
@@ -73,6 +73,17 @@ def module_texts(rtl: N.TileRTL) -> dict:
             if m in rtl.modules:
                 out[m] = _LOC_RE.sub("", t)
     return out
+
+
+def child_key(rtl: N.TileRTL, module: str, flow: str, period_ns: float) -> str:
+    """Hash of what one A/B synthesizes (module texts without source locators, SRAM models, flow,
+    period): the same key means the same netlist, so the result can be reused (fmax-y3/y4 measured
+    the same mulUnroll edit four times, 5 min each)."""
+    h = hashlib.sha256(f"{module}\0{flow}\0{period_ns:g}\0".encode())
+    for m, t in sorted(module_texts(rtl).items()):
+        h.update(m.encode() + b"\0" + t.encode() + b"\0")
+    h.update((rtl.sram_models or "").encode())
+    return h.hexdigest()[:16]
 
 
 def changed_modules(parent: dict, child: dict) -> dict:
@@ -107,7 +118,8 @@ def report_files(child, parent) -> dict:
     return out
 
 
-def ab_lines(parent_name: str, p: dict, c: dict, child, parent=None) -> tuple[list, Optional[float]]:
+def ab_lines(parent_name: str, p: dict, c: dict, child, parent=None, family_k: int = 0,
+             noise: float = 0.1) -> tuple[list, Optional[float]]:
     """Report lines of one A/B (summaries `p`, `c`; SynthResults `child`, `parent`) and the delta
     child - parent in ns. The worst slack alone hides a family that got shorter under another one
     (fmax-r4 round 4: frontend edit, FPU path worst on both sides), so families are compared too."""
@@ -117,9 +129,13 @@ def ab_lines(parent_name: str, p: dict, c: dict, child, parent=None) -> tuple[li
                                         f"area {c['area_um2']}, {c['crit']}" if c["ok"] else c["error"])]
     delta = round(c["slack_ns"] - p["slack_ns"], 4) if c["ok"] and p["ok"] else None
     if delta is not None:
-        verdict = ("better" if delta > NOISE_NS else "worse" if delta < -NOISE_NS
-                   else f"no clear change (|delta| <= {NOISE_NS} ns is synthesis noise)")
+        verdict = ("better" if delta > noise else "worse" if delta < -noise
+                   else f"no clear change (|delta| <= {noise} ns)")
         lines.append(f"delta of the worst slack (child - parent): {delta:+.3f} ns -> {verdict}")
+    if family_k and c["ok"] and parent is not None and parent.success:
+        ps, cs = N.family_score(parent.endpoints, family_k), N.family_score(child.endpoints, family_k)
+        lines.append(f"family score (sum of the {family_k} worst families' slack, clipped at 0): parent {ps:.3f}, "
+                     f"child {cs:.3f}, delta {cs - ps:+.3f} ns")
     table = (N.compare_families(parent.endpoints, child.endpoints)
              if c["ok"] and parent is not None and parent.success else "")
     if table:
@@ -133,7 +149,8 @@ class SynthABTool(ChiaTool):
 
     def __init__(self, name: str, parent_rtl: N.TileRTL, parent_synth, parent_name: str, config: str,
                  period_ns: float, flow: str, make_jobs: int = 16, base_patch: str = "",
-                 task_options: Optional[dict] = None):
+                 task_options: Optional[dict] = None, memo: Optional[dict] = None, round_label: str = "",
+                 allow_synth: bool = True, family_k: int = 8):
         super().__init__(name, task_options=task_options)
         # Set before __post_init__: it pickles this object into the actor.
         self._parent_rtl = parent_rtl
@@ -145,6 +162,10 @@ class SynthABTool(ChiaTool):
         self._flow = flow
         self._make_jobs = make_jobs
         self._base_patch = base_patch                # the parent's patch: the logged diffs are the edits on top of it
+        self._memo = dict(memo or {})                # child_key -> {"text", "label"}: A/Bs already measured
+        self._round_label = round_label
+        self._allow_synth = allow_synth              # False in --phase sim: rebuild only
+        self._family_k = family_k
         self._lock = threading.Lock()
         self._rebuild: Optional[dict] = None        # current / last make verilog
         self._child: Optional[dict] = None          # {"rtl", "diff_hash", "diff", "changes"} of the last good rebuild
@@ -300,6 +321,9 @@ class SynthABTool(ChiaTool):
         synthesizes the whole tile (3-4 min, one at a time) and compares it with the best's
         full result: that is the number the loop judges.
         """
+        if not self._allow_synth:
+            return ("ERROR: no synthesis in this phase (simulation only): use synth_ab_rebuild_verilog to check "
+                    "that your edit compiles; the loop measures its cycle cost on the benchmarks.")
         if self._rebuild is not None and not self._rebuild.get("done"):
             return "ERROR: a rebuild is running. Call synth_ab_rebuild_verilog until it says ok first."
         child = self._child
@@ -317,11 +341,21 @@ class SynthABTool(ChiaTool):
             return f"ERROR: module {module!r} is not under {N.TOP}. Similar: {close or '(none)'}; see list_modules."
         if not whole and module in child["rtl"].blackboxes:
             return f"ERROR: {module} is an SRAM black box; pick the module that instantiates it."
+        key = child_key(c_rtl, module, self._flow, self._period_ns)
         res = {"resources": {"eda": 1 if whole else SUB_BLOCK_EDA}}
         with self._lock:
             self._n += 1
             handle = f"ab{self._n}"
-            job = {"module": module, "started": time.time(), "whole": whole, "diff": child.get("diff", ""),
+            old = self._memo.get(key)
+            if old is not None:
+                text = (f"ALREADY MEASURED: this exact Verilog of {module} was synthesized before ({old['label']}); "
+                        f"not synthesized again. That result (its parent may be an older best):\n{old['text']}")
+                self._jobs[handle] = {"module": module, "text": text}
+                self._log({"event": "ab", "handle": handle, "module": module, "memo": True, "child_key": key,
+                           "diff": child.get("diff", "")[-6000:], "child": old.get("child", {}),
+                           "parent": old.get("parent", {}), "delta_ns": old.get("delta_ns")})
+                return f"handle={handle}: already measured, call synth_ab_ab_result(handle=\"{handle}\") for the result"
+            job = {"module": module, "key": key, "started": time.time(), "whole": whole, "diff": child.get("diff", ""),
                    "child": N.synth_sta.options(**res).chia_remote(c_rtl, self._period_ns, self._flow,
                                                                        yosys_timeout=AB_YOSYS_TIMEOUT)}
             if not whole:
@@ -362,12 +396,15 @@ class SynthABTool(ChiaTool):
         for rel, text in report_files(child, parent).items():
             with open(os.path.join(d, rel), "w") as f:
                 f.write(text)
-        lines, delta = ab_lines(self._parent_name, p, c, child, self._parent_synth if job["whole"] else parent)
+        lines, delta = ab_lines(self._parent_name, p, c, child, self._parent_synth if job["whole"] else parent,
+                                self._family_k, NOISE_NS.get(self._flow, 0.1))
         lines.insert(0, f"status: done ({time.time() - job['started']:.0f} s), module {job['module']}"
                      + (" (whole tile, parent = full result of the best)" if job["whole"] else ""))
         if c["ok"]:
             lines.append(f"full reports: {d}/child_paths.rpt, {d}/parent_paths.rpt (read with chipyard_bash)")
         job["text"] = "\n".join(lines)
+        label = f"{self._round_label}, {handle}".strip(", ")
+        self._memo[job["key"]] = {"text": job["text"], "label": label, "child": c, "parent": p, "delta_ns": delta}
         self._log({"event": "ab", "handle": handle, "module": job["module"], "child": c, "parent": p, "delta_ns": delta,
-                   "diff": job["diff"][-6000:]})
+                   "diff": job["diff"][-6000:], "child_key": job["key"], "label": label, "text": job["text"][-8000:]})
         return job["text"]

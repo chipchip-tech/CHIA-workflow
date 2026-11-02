@@ -40,6 +40,9 @@ dùng tiếp.
 | `chia-fmax-r3b` | 30/10 | 1/5 | → **90,57** | −1,04 | +0,405 % | `core.div.divisor` → `core.div.remainder` |
 | (`fmax-r4`, nhận theo Vivado) | 30/10 | 1/5 | — | — | +0,405 % | thêm sửa ALU, xem mục 3 |
 | `fmax-y1` (dừng ở vòng 3) | 31/10 | 0/3 | start **92,36** | −0,827 | +0,405 % | `core.div.divisor[4]` → `core.div.remainder[128]` |
+| `fmax-y2` (dừng ở vòng 1) | 01/11 | — | | | | Yosys treo > 30 phút trên bản sửa dang dở của agent |
+| `fmax-y3` | 01/11 | 0/5 | 92,36 | −0,827 | +0,405 % | như trên |
+| `fmax-y4` (dừng ở vòng 3) | 02/11 | 0/3 | 92,36 | −0,827 | +0,405 % | như trên; tốt nhất −0,786 ns (+0,4 %) |
 
 Tổng cộng: **47,13 → 92,36 MHz (+96 %)**. Chi phí cycle chỉ tăng +0,405 %, nên hiệu năng (Fmax / chi phí cycle) đi
 từ 47,13 lên 91,99 (+95 %). Mọi điểm được nhận đều pass riscv-tests và 8 benchmark. Diện tích ở `fmax-y1` là
@@ -134,3 +137,21 @@ Các hướng đã thử nhưng bị loại:
   ```
 
   Lệnh này để agent biết vòng 3 đã đẩy đường găng sang `sfma` → `dfma`. Khi Fmax vượt 100 MHz thì hạ `--period-ns`.
+
+## 6. Sau `fmax-y1`: `fmax-y2` … `fmax-y4` (01–02/11/2026)
+
+- `fmax-y2`: vòng 1 agent hết giờ giữa chừng, loop vẫn build bản sửa dang dở của nó (5 file) và Yosys chạy hơn 30 phút
+  (bình thường 3–5 phút). Đã thêm giới hạn thời gian Yosys (`--synth-timeout`, mặc định 15 phút; `synth_ab` cũng vậy).
+- `fmax-y3` (5 vòng) và `fmax-y4` (3 vòng): không vòng nào nhận. Agent đã thử: cây carry-save / Booth radix-4 cho
+  `MulDiv`, CSA và tách 4 phần cho bộ nhân FMA, dời bộ cộng FMA ra sau thanh ghi (−16 ns), trễ thêm 1 chu kỳ cho kết
+  quả `divSqrt`, giảm `mulUnroll` xuống 4. Tốt nhất: cây CSA cho `MulDiv` (y4 vòng 1), −0,827 → −0,786 ns (+0,4 %),
+  dưới ngưỡng 1 %.
+- Lỗi của loop đã sửa: ở vòng không có thay đổi, `history.md` ghi chính patch xuất phát vào mục "Patch đã bị loại",
+  tức bảo agent vòng sau tránh bản đang tốt nhất (cả 5 vòng của y3).
+- Dữ liệu cho thấy dao động của flow `v2` (flatten): cùng một RTL cho kết quả y hệt (patch `mulUnroll ≤ 4` đo 4 lần đều
+  −0,9221 ns), nhưng sửa `MulDiv` làm họ `regfile_ext.Memory` (không bị sửa) đi từ −0,658 lên −0,080 ns ở một lần đo
+  và xuống ở lần khác. Biên độ 0,2–0,6 ns lớn hơn ngưỡng nhận 1 % (~0,1 ns).
+
+**Hướng tiếp (người dùng duyệt 02/11/2026):** tách pha theo `docs/workflow-phases.md`. Pha sim cho agent thêm tầng
+pipeline và chỉ đo chi phí cycle, ra danh sách ứng viên; pha asic dùng synth phân cấp (`v3`) để A/B không bị nhiễu,
+nhận thêm theo tổng slack các họ xấu nhất (điểm họ), và `synth_ab` không đo lại Verilog đã đo. Xem README.

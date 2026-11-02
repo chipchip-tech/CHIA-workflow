@@ -125,6 +125,11 @@ def tree_snapshot() -> dict:
 def reset_rocket(rocket_head: str, patch: str) -> str:
     """Put rocket-chip back at `rocket_head` (dropping edits and commits), then
     apply `patch` (the best version so far; "" = baseline)."""
+    return reset_rocket_local(rocket_head, patch)
+
+
+def reset_rocket_local(rocket_head: str, patch: str) -> str:
+    """reset_rocket in the caller's process."""
     _sh(f"git -C {ROCKET} reset -q --hard {rocket_head}")
     _sh(f"git -C {ROCKET} clean -fdq")
     if patch.strip():
@@ -705,6 +710,37 @@ def path_sources(rtl: TileRTL, synth, best_patch: str, context: int = 40) -> tup
 
 
 @ChiaFunction(resources={"chipyard": 1}, max_retries=0)
+def apply_candidate(rocket_head: str, best_patch: str, cand_patch: str, cand_base: str) -> dict:
+    """Put rocket-chip at best_patch plus the edits of a candidate: cand_patch is a whole patch
+    (from rocket_head) made on top of cand_base. The edits (cand_patch minus cand_base) are applied
+    with a 3-way merge. Returns {"ok", "error", "status"}."""
+    try:
+        if cand_base == best_patch:
+            return {"ok": True, "error": "", "status": reset_rocket_local(rocket_head, cand_patch)}
+        reset_rocket_local(rocket_head, cand_patch)
+        delta = _round_diff(rocket_head, cand_base)
+        reset_rocket_local(rocket_head, best_patch)
+        if not delta.strip():
+            return {"ok": False, "error": "candidate has no edit on top of its base", "status": ""}
+        # apply -3 works on the index: stage the best's edits first (unstaged again below)
+        _sh(f"git -C {ROCKET} add -A")
+        with tempfile.NamedTemporaryFile("w", suffix=".patch", delete=False) as f:
+            f.write(delta)
+        try:
+            r = subprocess.run(["git", "-C", ROCKET, "apply", "-3", "--whitespace=nowarn", f.name],
+                               capture_output=True, text=True)
+        finally:
+            os.unlink(f.name)
+        if r.returncode != 0:
+            reset_rocket_local(rocket_head, best_patch)
+            return {"ok": False, "error": f"git apply -3: {(r.stderr or r.stdout)[-1500:]}", "status": ""}
+        _sh(f"git -C {ROCKET} reset -q")          # apply -3 stages; leave the index as reset_rocket does
+        return {"ok": True, "error": "", "status": _sh(f"git -C {ROCKET} status --short")}
+    except Exception as e:                                           # noqa: BLE001
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"[:1500], "status": ""}
+
+
+@ChiaFunction(resources={"chipyard": 1}, max_retries=0)
 def round_diff(rocket_head: str, base_patch: str) -> str:
     """Diff of the rocket-chip working tree against `rocket_head` + `base_patch`: the
     edits of this round only."""
@@ -751,9 +787,17 @@ def _round_diff(rocket_head: str, base_patch: str) -> str:
 # changing an existing flow.
 #   v2: synth -flatten, abc -D -constr (ABC's default script then adds buffer; upsize;
 #       dnsize). $lcu is Brent-Kung (techmap.v default), $mul is Yosys' array multiplier.
+#   v3: same without -flatten (hierarchical): ABC maps each module on its own, so an edit of one
+#       module leaves the netlist of every other module as it was. With v2, an edit of MulDiv moved
+#       FPU families by 0.2-0.6 ns (fmax-y4), more than the 1 % acceptance threshold. No
+#       optimization across module ports, so v3 slacks are not comparable with v2 ones.
 SYNTH_FLOWS = {
     "v2": "synth -flatten -top {top}",
+    "v3": "synth -top {top}",
 }
+# OpenSTA prints hierarchical names with "/" by default; "." keeps the names of v3 in the form
+# of v2's flattened names (core.div.remainder[3]_reg/D), which the family and target code parse.
+STA_PRE = {"v3": "set_hierarchy_separator .\n"}
 
 # Same driver/load as ORFS sky130hd (ABC_DRIVER_CELL, ABC_LOAD_IN_FF).
 ABC_CONSTR = "set_driving_cell sky130_fd_sc_hd__buf_1\nset_load 5\n"
@@ -776,7 +820,7 @@ write_verilog -noattr -noexpr -nohex -nodec {netlist}
 """
 
 STA_SCRIPT = """\
-read_liberty {lib}
+{sta_pre}read_liberty {lib}
 {read_stubs}
 read_verilog {netlist}
 link_design {top}
@@ -851,6 +895,7 @@ def _num(pattern: str, text: str) -> float | None:
 
 
 def parse_sta(log: str, period_ns: float) -> dict:
+    log = log.replace("\\", "")      # escaped identifiers (remainder\[3\]_reg) -> plain names
     worst = _num(r"worst slack(?:\s+max)?\s+(-?[\d.]+(?:e-?\d+)?)", _section(log, "WORST"))
     wns = _num(r"wns(?:\s+max)?\s+(-?[\d.]+(?:e-?\d+)?)", _section(log, "WNS"))
     tns = _num(r"tns(?:\s+max)?\s+(-?[\d.]+(?:e-?\d+)?)", _section(log, "TNS"))
@@ -910,6 +955,14 @@ def compare_families(parent_endpoints: str, child_endpoints: str, n: int = 12) -
         delta = f"{cf[k][0] - pf[k][0]:+7.3f}" if k in pf and k in cf else " " * 7
         out.append(f"{cell(pf, k)}  {cell(cf, k)}  {delta}  {k}")
     return "\n".join(out)
+
+
+def family_score(endpoints: str, k: int = 8) -> float:
+    """Sum of the worst slacks of the k worst endpoint families, each clipped at 0 (ns; 0 when
+    nothing fails). Fmax only rises once every family above the new worst slack is shortened,
+    so the loop also accepts an edit that raises this score without lowering the worst slack."""
+    worst = sorted(v[0] for v in family_table(endpoints).values())[:k]
+    return sum(min(x, 0.0) for x in worst)
 
 
 def first_path(paths: str, limit: int = 8000) -> str:
@@ -998,7 +1051,8 @@ def synth_sta(rtl: TileRTL, period_ns: float, flow: str = "v2",
         res.area_um2 = parse_area(res.stat)
 
         with open(os.path.join(work, "sta.tcl"), "w") as f:
-            f.write(STA_SCRIPT.format(lib=lib, netlist=netlist, top=rtl.top, period_ns=period_ns,
+            f.write(STA_SCRIPT.format(sta_pre=STA_PRE.get(flow, ""), lib=lib, netlist=netlist, top=rtl.top,
+                                      period_ns=period_ns,
                                       read_stubs=f"read_verilog {stubs}" if rtl.stubs else ""))
         t0 = time.time()
         s = subprocess.run(["sta", "-no_init", "-no_splash", "-exit", "sta.tcl"], cwd=work,
