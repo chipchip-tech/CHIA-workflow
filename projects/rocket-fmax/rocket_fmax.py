@@ -120,6 +120,9 @@ def parse_args():
     p.add_argument("--repeat-seed", type=int, default=7, help="baseline: rerun the benchmarks with this seed")
     p.add_argument("--model", default="sonnet", help="Claude Code model of the agent")
     p.add_argument("--effort", default="medium", choices=["low", "medium", "high", "xhigh", "max"])
+    p.add_argument("--synth-timeout", type=int, default=900,
+                   help="time limit of one Yosys run of the tile (s); normal is 3-5 min, a run past this "
+                        "is killed and the round rejected")
     p.add_argument("--llm-timeout", type=int, default=1800, help="time limit of one agent session (s)")
     p.add_argument("--build-fixes", type=int, default=2,
                    help="when a round's build fails, let an agent fix the compile errors and rebuild, "
@@ -250,7 +253,7 @@ def synth_text(s) -> str:
 
 def run_synth(a, out: Path, label: str, rtl, tag: str | None = None):
     kw = {"_chia_tag": tag} if tag else {}
-    s = get(N.synth_sta.chia_remote(rtl, a.period_ns, a.synth_flow, **kw))
+    s = get(N.synth_sta.chia_remote(rtl, a.period_ns, a.synth_flow, yosys_timeout=a.synth_timeout, **kw))
     save_synth(out / "runs" / label, s)
     print(f"synth {label} ({a.synth_flow}, {a.period_ns:g} ns): {synth_text(s)}", flush=True)
     return s

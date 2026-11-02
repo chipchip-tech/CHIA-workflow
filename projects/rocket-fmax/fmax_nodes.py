@@ -987,7 +987,10 @@ def synth_sta(rtl: TileRTL, period_ns: float, flow: str = "v2",
         ylog = open(ylog_path, errors="replace").read() if os.path.exists(ylog_path) else ""
         res.yosys_log_tail = ylog[-20000:] + (f"\n[yosys stdout/stderr]\n{yerr[-5000:]}" if yerr else "")
         if rc != 0 or not os.path.exists(os.path.join(work, netlist)):
-            res.error = (f"yosys returncode {rc}" + (" (timeout)" if rc == -1 else "")
+            res.error = (f"yosys returncode {rc}"
+                         + (f" (timeout: Yosys still running after {yosys_timeout // 60} min, a normal "
+                            "RocketTile run takes 3-5 min; the logic is likely too large or too deep for "
+                            "ABC, e.g. an unrolled loop or a huge mux/compare tree)" if rc == -1 else "")
                          + (" (killed: OOM?)" if rc in (137, -9) else ""))
             return res
         stat_path = os.path.join(work, stat)

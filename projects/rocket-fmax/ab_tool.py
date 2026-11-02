@@ -48,6 +48,7 @@ LOG_FILE = f"{AB_DIR}/experiments.jsonl"     # read back by the loop after the a
 MAX_WAIT = 60                                 # seconds a call may block (MCP round trip)
 REBUILD_TIMEOUT = 1500
 SUB_BLOCK_EDA = 0.5                           # two sub-block synths at once on "eda"
+AB_YOSYS_TIMEOUT = 900                        # a child/parent Yosys past this is killed (normal: 3-5 min)
 NOISE_NS = 0.1
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -321,11 +322,12 @@ class SynthABTool(ChiaTool):
             self._n += 1
             handle = f"ab{self._n}"
             job = {"module": module, "started": time.time(), "whole": whole, "diff": child.get("diff", ""),
-                   "child": N.synth_sta.options(**res).chia_remote(c_rtl, self._period_ns, self._flow)}
+                   "child": N.synth_sta.options(**res).chia_remote(c_rtl, self._period_ns, self._flow,
+                                                                       yosys_timeout=AB_YOSYS_TIMEOUT)}
             if not whole:
                 if module not in self._parent_refs:
                     self._parent_refs[module] = N.synth_sta.options(**res).chia_remote(
-                        p_rtl, self._period_ns, self._flow)
+                        p_rtl, self._period_ns, self._flow, yosys_timeout=AB_YOSYS_TIMEOUT)
                 job["parent"] = self._parent_refs[module]
             self._jobs[handle] = job
         return (f"started: handle={handle}, module={module} ({len(c_rtl.modules)} modules, "
