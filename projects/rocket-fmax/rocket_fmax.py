@@ -584,7 +584,9 @@ def after_agent(out: Path, d: Path, i: int, snap: dict, best: dict, r: dict, age
     tree: they go on to the build like any other (the gate keeps them honest) and the failure is
     kept as a note. Returns the diff, or None with r["reason"] set when the round stops."""
     diff, why = collect_and_check(out, d, i, snap, best)
-    r["patch"] = diff["patch"]
+    # an unchanged tree is the best patch itself: keeping it would list the accepted patch
+    # under "Patch đã bị loại" in history.md and tell the next agent not to repeat it
+    r["patch"] = "" if diff["patch"] == best["patch"] else diff["patch"]
     if why:
         r["reason"] = "; ".join(x for x in (label, agent_reason, why) if x)
         return None
@@ -766,6 +768,17 @@ def history_entry(i: int, r: dict, resp_summary: str) -> str:
     return "\n".join(lines)
 
 
+def drop_unchanged_patch(text: str) -> str:
+    """History written before 02/11/2026 listed the start patch itself as "Patch đã bị loại" in
+    rounds where the agent changed nothing (fmax-y3); drop that block from such rounds."""
+    parts = re.split(r"(?m)^(?=### Vòng )", text)
+    pat = re.compile(r"\nPatch đã bị loại \(đã revert, đừng lặp lại y nguyên\):\n```diff\n.*?\n```", re.S)
+    def clean(x: str) -> str:
+        lines = x.split("\n", 2)
+        return pat.sub("", x) if len(lines) > 1 and "agent không thay đổi gì" in lines[1] else x
+    return "".join(clean(x) for x in parts)
+
+
 def new_round() -> dict:
     return {"accepted": False, "reason": "", "synth": None, "rtl": None, "patch": "", "isa_pass": "", "build_fixes": 0}
 
@@ -859,7 +872,7 @@ def run(a, out: Path):
     llm = make_llm(a, a.model, SYSTEM_MESSAGE, a.llm_timeout)
     fix_llm = make_llm(a, a.fix_model or a.model, SYSTEM_MESSAGE_FIX, a.fix_timeout)
     # earlier runs' rounds first (fmax-r5 round 1 redid an edit rejected in fmax-r4)
-    history = [f"### Đợt trước: {Path(h).name}\n\n" + (Path(h) / "history.md").read_text().strip()
+    history = [f"### Đợt trước: {Path(h).name}\n\n" + drop_unchanged_patch((Path(h) / "history.md").read_text().strip())
                for h in a.history_from]
     seen = {rtl_hash(best["rtl"]): best["name"]}                    # Verilog already measured
     for i in range(1, a.iters + 1):
