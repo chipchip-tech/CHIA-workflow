@@ -111,7 +111,10 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
 | `project/<tên>` | Một project, code nằm trong `projects/<tên>/` | Tách từ `setup`. Tên viết thường, nối bằng `-`. |
 
 - Mở project mới: `git checkout -b project/<tên> origin/setup`, rồi tạo `projects/<tên>/`
-  kèm `README.md` (mục tiêu, lệnh chạy, trạng thái kiểm chứng).
+  kèm `README.md` (mục tiêu, lệnh chạy, trạng thái kiểm chứng, mục **Pha**).
+- Mọi project phần cứng theo khung `docs/workflow-phases.md`: **Simulate** (bắt buộc, chốt
+  gate và ngân sách) rồi rẽ sang **FPGA** và/hoặc **ASIC** (hai nhánh song song, thay đổi
+  chỉ dành cho một nhánh phải tắt được bằng config).
 - Trong nhánh project, chỉ sửa `projects/<tên>/`, và thêm một mục ngắn về project vào
   `CLAUDE.md`. Nếu phát hiện điều gì dùng chung (lỗi Bazzite mới, ghi chú CHIA), sửa trên
   `setup` rồi `git merge origin/setup` vào nhánh project. Không sửa docs chung ngay trong
@@ -120,20 +123,15 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
 - Session Claude Code được giao nhánh `claude/*` thì vẫn push lên nhánh đó, nhưng phải
   checkout đúng nhánh `setup` hoặc `project/<tên>` làm gốc. Khi được người dùng cho phép,
   push luôn lên nhánh đích.
-- Project hiện có: `project/ascon-secureboot` (RoCC Ascon-Hash256, secure boot; xong M1–M4).
-  Nhánh `temp` cũ đã đổi tên thành nhánh này.
+- Project hiện có: `project/ascon-secureboot` (RoCC Ascon-Hash256, secure boot; xong M1–M4),
+  `project/rocket-fmax` (mục dưới).
 - `project/rocket-fmax` (`projects/rocket-fmax/`): **session mới đọc `projects/rocket-fmax/HANDOFF.md` trước.**
-  Loop CHIA tối ưu Fmax của `RocketTile` (Chipyard `RocketConfig`), mục tiêu > 100 MHz ở chu kỳ 10 ns
-  (r1–r3b đo bằng Yosys + OpenSTA sky130hd, nay bằng Vivado post-route). **Bắt đầu lại từ đầu ngày 29/10/2026**: mọi kết
-  quả trước bị bỏ (lịch sử chỉ còn trong git, trước commit `ab43d94`), code config audit đã gỡ. Hướng duy nhất là
-  `--chia-mode` theo `examples/timing_opt` của CHIA: mỗi vòng một phiên Claude Code (Sonnet, effort medium, gói
-  Pro) tự A/B bằng `synth_ab`, được thêm pipeline; nhận khi Fmax / chi phí cycle tăng > 1 % và cycle tăng ≤ 3 %
-  so với baseline; gate riscv-tests + 8 benchmark (`--extra-bench mm spmv`), agent debug khi test fail; không
-  equiv. Baseline 10 ns đo thật: 47,13 MHz, đường găng `core.div`, gate 18,9 phút. Đợt 1 `chia-fmax-r1` (29/10): 4/5
-  vòng nhận, 81,91 MHz, cycle +0,405 %. Đợt 2 `chia-fmax-r2`: 1/5 vòng nhận, 84,37 MHz, cycle +0,405 %. Đợt 3 `chia-fmax-r3b` (30/10): 1/5 vòng nhận, 90,57 MHz Yosys, cycle +0,405 %; Vivado (đo song song, Artix-7) đứng yên 67,53 MHz. **Đổi mốc 30/10/2026**: mốc 1 = > 100 MHz post-route Vivado trên Arty A7-100T (`xc7a100tcsg324-1`), nhận/loại chỉ theo post-route, SRAM → BRAM, giữ cycle +3 %; mốc 2 = ORFS sky130 post-route. Bước 0 xong (`viv-impl2`): post-route baseline 58,67, start 61,06 MHz, 48 BRAM, mỗi chiến lược P&R 5–12 phút, chạy 1 Vivado một lúc. Bước 1 (30/10, mới kiểm bằng mock): loop nhận theo post-route (`explore` + `extratiming`, song song gate, ngưỡng 2 %), `synth_ab` bằng Vivado `synth_design`; đã gỡ Yosys/worker `eda`, opencode, `--loop-ab`, equiv; cluster còn 4 worker. Đợt `fmax-r4` (30/10, Bước 1 chạy thật): 1/5 vòng nhận, post-route 61,06 → 63,61 MHz, cycle +0,405 %; vòng 5 lặp y nguyên patch vòng 3 → loop nay loại ngay Verilog đã đo; A/B chỉ theo worst slack che mất cải thiện của họ khác → `synth_ab` nay so slack theo họ endpoint. Đợt `fmax-r5` (30/10): 0/5 vòng nhận (tốt nhất +1,11 %, ngang nhiễu P&R), vẫn 63,61 MHz; **Cuối 30/10 người dùng tạm bỏ mốc FPGA, quay lại Yosys + OpenSTA sky130hd (phần synth của mốc ASIC) và đẩy Fmax cao hơn**: code Vivado đã gỡ (còn ở commit `d2a1ac0`), loop synth trước gate, `--history-from`; mới kiểm bằng mock. Ghi nhớ kỹ thuật: build RocketConfig 1,3–1,7 phút, Yosys trên RocketTile ~3–4 phút; `abc -D` phải có
-  `-constr` và chu kỳ đặt ở mục tiêu (chu kỳ rộng làm Fmax đo thấp hơn); `rv64ui-p-ma_data` fail ở baseline
-  (`--exclude-isa`); image `eda` có Yosys 0.38. Claude không tự viết patch Chisel: mọi chỉnh sửa Chisel do loop
-  (agent) làm.
+  Loop CHIA (theo `examples/timing_opt`) tối ưu Fmax của `RocketTile` (`RocketConfig`), mục tiêu > 100 MHz ở 10 ns,
+  đo bằng Yosys + OpenSTA sky130hd; cycle tối đa +3 % so với baseline. Theo khung pha: `--phase sim` (agent thêm tầng
+  pipeline, chỉ đo cycle bằng gate, ra danh sách ứng viên) và `--phase asic` (agent tối ưu timing, `--try-patches` thử
+  ứng viên). Tốt nhất đã đo: 92,36 MHz (`fmax-r4`, flow `v2` synth phẳng); các đợt `fmax-y1`..`y4` sau đó 0 vòng
+  nhận. Từ 02/11/2026: flow `v3` (synth phân cấp), nhận theo tổng slack các họ endpoint, `synth_ab` nhớ RTL đã đo;
+  **chưa chạy thật**. Claude không tự viết patch Chisel: mọi chỉnh sửa Chisel do agent trong loop làm.
 
 ## Việc tiếp theo (gợi ý)
 

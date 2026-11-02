@@ -18,7 +18,7 @@ project.
 ### Prompt phỏng vấn
 
 ```
-Đọc CLAUDE.md, docs/usage-local.md và docs/prompt-template.md.
+Đọc CLAUDE.md, docs/usage-local.md, docs/workflow-phases.md và docs/prompt-template.md.
 Tôi muốn làm một project bằng CHIA nhưng chưa rõ cần nêu những gì.
 Hãy phỏng vấn tôi, MỖI LẦN TỐI ĐA 3 CÂU, theo bộ câu hỏi trong prompt-template.md.
 Dựa vào câu trả lời, đề xuất phương án (node, resource, worker, image) khi tôi chưa biết.
@@ -31,6 +31,7 @@ giả định bạn tự đặt. Chưa viết code hay sửa file nào.
 | Nhóm | Câu hỏi | Ảnh hưởng tới phần nào của loop |
 |---|---|---|
 | Mục tiêu | Muốn trả lời câu hỏi gì? Kết quả cuối là gì (bảng số, RTL đã sửa, patch, báo cáo)? | Tiêu chí hoàn thành, định dạng đầu ra |
+| Pha | Sau Simulate (bắt buộc) đi FPGA, ASIC hay cả hai? Board/part nào, PDK và corner nào, chu kỳ mục tiêu? Ngân sách chung (cycle, diện tích)? Xem `docs/workflow-phases.md` | Chế độ/loop của từng pha, thước đo nhận/loại, worker EDA |
 | Thiết kế | Core/config nào? Có sửa RTL không? Ai sửa: bạn, agent hay không ai? | `ChiselBuildNode` config, có cần `BashTool` và ghim worker không |
 | Workload | Chạy chương trình gì? Đã có sẵn hay phải viết? Đo gì (cycle, pass/fail, area/timing)? | Node biên dịch, `VerilatorRunNode`, gem5/Hammer |
 | Agent | Có dùng LLM không? Model nào? Có API key/credentials chưa? Bao nhiêu vòng? | `OpenCodeLLM`/`ClaudeCodeLLM`, worker `*_creds`, timeout |
@@ -83,11 +84,15 @@ nên loop phải tự ghi file config trước khi build.
 ## Template
 
 ```
-Đọc CLAUDE.md và docs/usage-local.md trước.
+Đọc CLAUDE.md, docs/usage-local.md và docs/workflow-phases.md trước.
 Làm trên nhánh project/<tên>, tách từ origin/setup nếu chưa có; code đặt trong projects/<tên>/.
 
 ## Mục tiêu
 <Project làm gì, đầu vào và đầu ra.>
+
+## Pha (docs/workflow-phases.md)
+- Simulate: gate <test, benchmark>, ngân sách <ví dụ cycle +3 %>.
+- Nhánh: <FPGA (board/part) / ASIC (PDK, corner, chu kỳ) / cả hai / chỉ Simulate>.
 
 ## Phạm vi
 - Thiết kế/config: <ví dụ RocketConfig, BOOM, accelerator riêng...>
@@ -175,6 +180,8 @@ viết test C gọi lệnh custom, build và mô phỏng, phản hồi lỗi cho
   `timing_opt`, `riscv_extensions`, `gem5_align`).
 - **Gửi log đầy đủ** khi có lỗi: lệnh đã chạy, output của `chia status`, và đoạn log từ
   chỗ bắt đầu lỗi.
+- **Theo khung pha** (`docs/workflow-phases.md`): Simulate trước, chốt gate và ngân sách,
+  rồi mới sang FPGA hoặc ASIC. Bảo session dừng ở cuối mỗi pha.
 - **Mỗi project một nhánh:** `project/<tên>`, code trong `projects/<tên>/`. Như vậy code
   project không lẫn với tài liệu setup, và `main` không bị đụng tới.
 - **Kết thúc mỗi session** bằng câu: "Cập nhật CLAUDE.md: đã làm gì, đã kiểm chứng gì,
