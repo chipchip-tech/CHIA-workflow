@@ -111,7 +111,10 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
 | `project/<tên>` | Một project, code nằm trong `projects/<tên>/` | Tách từ `setup`. Tên viết thường, nối bằng `-`. |
 
 - Mở project mới: `git checkout -b project/<tên> origin/setup`, rồi tạo `projects/<tên>/`
-  kèm `README.md` (mục tiêu, lệnh chạy, trạng thái kiểm chứng).
+  kèm `README.md` (mục tiêu, lệnh chạy, trạng thái kiểm chứng, mục **Pha**).
+- Mọi project phần cứng theo khung `docs/workflow-phases.md`: **Simulate** (bắt buộc, chốt
+  gate và ngân sách) rồi rẽ sang **FPGA** và/hoặc **ASIC** (hai nhánh song song, thay đổi
+  chỉ dành cho một nhánh phải tắt được bằng config).
 - Trong nhánh project, chỉ sửa `projects/<tên>/`, và thêm một mục ngắn về project vào
   `CLAUDE.md`. Nếu phát hiện điều gì dùng chung (lỗi Bazzite mới, ghi chú CHIA), sửa trên
   `setup` rồi `git merge origin/setup` vào nhánh project. Không sửa docs chung ngay trong
@@ -120,8 +123,8 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
 - Session Claude Code được giao nhánh `claude/*` thì vẫn push lên nhánh đó, nhưng phải
   checkout đúng nhánh `setup` hoặc `project/<tên>` làm gốc. Khi được người dùng cho phép,
   push luôn lên nhánh đích.
-- Project hiện có: `project/ascon-secureboot` (RoCC Ascon-Hash256, secure boot; xong M1–M4).
-  Nhánh `temp` cũ đã đổi tên thành nhánh này.
+- Project hiện có: `project/ascon-secureboot` (RoCC Ascon-Hash256, secure boot; xong M1–M4),
+  `project/rocket-fmax` (tối ưu Fmax RocketTile; chi tiết trong `CLAUDE.md` của nhánh đó).
 
 ## Việc tiếp theo (gợi ý)
 
