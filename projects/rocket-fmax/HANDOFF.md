@@ -23,9 +23,9 @@ và `README.md` (thư mục này).
 
 ## Việc tiếp theo
 
-1. Người dùng chép file, chạy bước 0 trong README (`--baseline-only` với `v3`). Kiểm trong `runs/start/`:
-   `timing_paths.rpt` có tên dạng `core.div.remainder[3]_reg` (không có `/` giữa các cấp, không có `\`),
-   `timing_families.txt` gom họ đúng, Yosys `v3` mất bao lâu, Fmax `v3` so với 92,36 MHz `v2`.
+1. Xong (03/11/2026): `v3-start` cho tên đúng dạng, điểm xuất phát 85,01 MHz ở `v3` (−1,763 ns, họ FMA đứng đầu).
+   Số `v3` thấp hơn `v2` vì không tối ưu qua cổng module (hằng số không lan vào module con); khi báo kết quả cuối,
+   synth lại bản tốt nhất bằng `v2` (và sau này ORFS) để so với 92,36 MHz.
 2. Chạy `sim-1`, đọc `candidates.json` và `results.csv`: ứng viên nào qua gate, tốn bao nhiêu cycle.
 3. Chạy `asic-1 --try-from sim-1`. Đọc lý do nhận/loại của từng ứng viên (cột `family_score`).
 4. Sau đó: ASIC post-route (ORFS sky130) cho bản tốt nhất.

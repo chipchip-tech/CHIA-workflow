@@ -159,6 +159,9 @@ docker exec chia-chipyard-$USER-0 bash -lc 'cd /home/ray/chipyard/generators/roc
   trước gate. Build RocketConfig 1,3–1,7 phút, Yosys `v2` cả tile 3–5 phút, image có Yosys 0.38.
 - **Mới kiểm bằng mock (02/11/2026):** `--phase sim`, `--try-from` (`apply_candidate`), nhận theo điểm họ, `synth_ab`
   nhớ Verilog đã đo, prompt `explore_pipeline.md`.
-- **Chưa kiểm:** flow `v3` (Yosys phân cấp + `set_hierarchy_separator .` của OpenSTA): bước 0 ở mục "Chạy" kiểm nó.
-  Nếu tên trong báo cáo khác dạng `core.div.remainder[3]_reg`, phần định vị đường găng và bảng họ sẽ sai.
+- **Flow `v3` chạy thật (`v3-start`, 03/11/2026):** tên đúng dạng `fpuOpt.dfma.fma.x[3]_reg` (không `/`, không `\`),
+  bảng họ gom đúng. Điểm xuất phát (`fmax-r4`) ở `v3`: worst slack −1,763 ns, **85,01 MHz** (`v2`: 92,36 MHz). Các họ
+  xấu nhất: FMA `mulAddResult_r`/`pph`/`ppl` (−1,76 … −1,63), `core.mem_reg_wdata` (−1,34), FMA
+  `roundRawFNToRecFN_io_in_r_sig` (−1,30), `divSqrt` `rem_Z`/`sigX_Z` (−1,04/−1,02). `core.div.remainder` và
+  `regfile_ext.Memory` (họ xấu nhất của `v2`) không còn trong 16 họ đầu.
 - Tính đúng chức năng chỉ dựa vào riscv-tests và 8 benchmark (như example), không kiểm tương đương.
