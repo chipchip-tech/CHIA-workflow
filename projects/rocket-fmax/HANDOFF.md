@@ -3,8 +3,11 @@
 File này dành cho session Claude Code tiếp quản project. Đọc cùng `CLAUDE.md` (gốc repo), `docs/workflow-phases.md`
 và `README.md` (thư mục này).
 
-## Trạng thái (02/11/2026)
+## Trạng thái (03/11/2026)
 
+- Tốt nhất ở flow `v3`: **87,84 MHz** (`asic-1`, patch `~/rocket-fmax-v2/sim-1/patches/cand_iter5.patch`: tách
+  `postMul` của FMA double, dùng tầng `Pipe` rảnh ở đầu ra), cycle +0,405 %. Đường găng mới: `dcache.s2_req_addr →
+  core.mem_reg_wdata`.
 - Tốt nhất: **92,36 MHz** Yosys `v2` (patch `~/rocket-fmax-v2/fmax-r4/patches/best.patch` trên máy người dùng),
   cycle +0,405 %, worst slack −0,827 ns. Các họ đường găng sát nhau: `core.div.remainder` (−0,83), FMA
   `mulAddResult_r`/`ppl`/`pph` (−0,80 … −0,70), `fpuOpt.regfile_ext.Memory` (−0,66), `divSqrt` `rem_Z`/`sigX_Z`
@@ -32,8 +35,10 @@ và `README.md` (thư mục này).
    mất dòng `TARGET`, synth sơ bộ cả tile ở pha sim, `--try-from` đo hết rồi thử theo nhóm biến thể, bỏ gate khi ứng
    viên nằm trên gốc của nó. Ba họ FMA đứng đầu cần nhiều hơn một tầng: đợt sim sau có thể cho agent thử tăng
    `dfmaLatency` và đo cycle.
-3. Chạy `asic-1 --try-from sim-1` bằng code mới. Đọc bảng ứng viên đo trên điểm xuất phát trong `history.md`, rồi lý do
-   nhận/loại (cột `family_score`).
+3. Xong (03/11/2026): `asic-1 --try-from sim-1` nhận vòng 5 (85,01 → 87,84 MHz), bốn biến thể kia BỎ QUA; dừng tay ở
+   vòng agent 1. Tiếp: `sim-2` từ `cand_iter5.patch` bằng code mới (lần đầu chạy thật bảng chống lặp và synth sơ bộ),
+   rồi `--try-from sim-2 --iters 0`. Họ cần nhắm: `core.mem_reg_wdata` (sim-1 vòng 4 thử tắt `fastLoadWord` thì tốn
+   +3,11 % cycle), `divSqrt`, các họ FMA còn lại.
 4. Sau đó: ASIC post-route (ORFS sky130) cho bản tốt nhất.
 
 ## Quy ước làm việc

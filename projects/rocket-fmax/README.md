@@ -2,14 +2,15 @@
 
 Mục tiêu: **Fmax của `RocketTile` (Chipyard `RocketConfig`) > 100 MHz** ở chu kỳ 10 ns, đo bằng Yosys + OpenSTA trên
 `sky130_fd_sc_hd` (phần synth của nhánh ASIC), chi phí cycle tối đa +3 % so với RocketConfig gốc. Tốt nhất hiện có:
-**92,36 MHz** (flow `v2`, patch của `fmax-r4`, cycle +0,405 %). Báo cáo các đợt Yosys: [REPORT.md](REPORT.md).
+**92,36 MHz** (flow `v2`, patch của `fmax-r4`, cycle +0,405 %). Ở flow `v3`: **87,84 MHz** (`asic-1`, ứng viên
+`sim-1` vòng 5, patch `~/rocket-fmax-v2/sim-1/patches/cand_iter5.patch`), từ 85,01 MHz. Báo cáo các đợt Yosys: [REPORT.md](REPORT.md).
 
 ## Pha (theo `docs/workflow-phases.md`)
 
 | Pha | Lệnh | Thước đo | Trạng thái |
 |---|---|---|---|
 | Simulate | `--phase sim` | gate (riscv-tests + 8 benchmark), chi phí cycle; agent thêm tầng pipeline, mỗi vòng qua gate thành một ứng viên (kèm synth sơ bộ cả tile, khối đã đổi) | `sim-1` xong (03/11/2026, code cũ): 5 ứng viên, cả 5 trên FMA; synth sơ bộ, nhóm biến thể **mới kiểm bằng mock** |
-| ASIC, synth | `--phase asic` (mặc định), `--try-from <đợt sim>` | Yosys + OpenSTA sky130hd tt_025C_1v80, SRAM là hộp đen; gate như trên | r1–r4, y1–y4 đã chạy (flow `v2`); flow `v3` và nhận theo điểm họ **chưa chạy thật** |
+| ASIC, synth | `--phase asic` (mặc định), `--try-from <đợt sim>` | Yosys + OpenSTA sky130hd tt_025C_1v80, SRAM là hộp đen; gate như trên | r1–r4, y1–y4 đã chạy (flow `v2`); `asic-1` (`v3`, `--try-from sim-1`) chạy thật 03/11/2026: 85,01 → 87,84 MHz |
 | ASIC, post-route | (chưa có) | ORFS sky130 | Chưa bắt đầu |
 | FPGA | (đã gỡ) | Vivado post-route, Arty A7-100T | **Tạm bỏ** ở 63,61 MHz (`fmax-r4`/`r5`); code ở commit `d2a1ac0` |
 
@@ -176,8 +177,15 @@ docker exec chia-chipyard-$USER-0 bash -lc 'cd /home/ray/chipyard/generators/roc
   trước gate. Build RocketConfig 1,3–1,7 phút, Yosys `v2` cả tile 3–5 phút, image có Yosys 0.38.
 - **Mới kiểm bằng mock (02/11/2026):** `--phase sim`, `--try-from` (`apply_candidate`), nhận theo điểm họ, `synth_ab`
   nhớ Verilog đã đo, prompt `explore_pipeline.md`.
-- **Mới kiểm bằng mock (03/11/2026):** khối đã đổi và biến thể, bảng "Blocks already covered", synth sơ bộ ở pha sim,
-  `--try-from` đo trước rồi thử theo nhóm, bỏ gate khi ứng viên nằm trên đúng gốc của nó.
+- **`asic-1` chạy thật (03/11/2026, `--try-from sim-1`, dừng tay ở vòng agent 1):** `--try-from` đo trước rồi thử theo
+  nhóm, nhận theo điểm họ, bỏ gate khi ứng viên nằm trên gốc của nó: chạy đúng. Năm ứng viên thành một nhóm
+  (`fpuOpt.dfma.fma`). Đo trên start (điểm họ −10,820): vòng 1, 2, 3 cùng 88,16 MHz (−1,343 ns), điểm họ −7,48 / −8,35 /
+  −9,24; vòng 6 87,09 MHz, −8,53; vòng 5 87,84 MHz (−1,385 ns), điểm họ **−6,32** → nhận (không gate, 7,7 phút), bốn
+  ứng viên kia BỎ QUA. Đường găng mới: `dcache.s2_req_addr → core.mem_reg_wdata` (load bypass). Vòng 5 thay
+  `postMul` của cả ba FMA (h/s chỉ đổi module, không thêm tầng), nên khối đã đổi có cả `hfma`, `sfma`. Chênh Fmax
+  giữa vòng 5 và vòng 1 (0,04 ns) nhỏ hơn mức dao động synth; điểm họ chọn vòng 5 vì nó gỡ nhiều họ FMA hơn.
+- **Mới kiểm bằng mock (03/11/2026):** bảng "Blocks already covered" trong prompt sim, synth sơ bộ ở pha sim, nhãn
+  `TARGET`/`VARIANT OF` (ứng viên của `sim-1` không có vì chạy code cũ).
 - **`sim-1` (xong 03/11/2026, code trước 03/11/2026, 6 vòng, khoảng 2,2 giờ):** 5 vòng qua gate (1, 2, 3, 5, 6), cycle
   +0,405 % (bằng điểm xuất phát), vòng 4 bị loại (`fastLoadWord = false`: qsort +7,6 %, tổng +3,11 %). Cả 5 ứng viên
   đều ở `fpuOpt.dfma.fma` và cùng tiêu tầng `Pipe` rảnh ở đầu ra FMA (tổng latency vẫn 5), nên loại trừ nhau:

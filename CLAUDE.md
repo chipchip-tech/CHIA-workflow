@@ -131,8 +131,8 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   pipeline, chỉ đo cycle bằng gate, ra danh sách ứng viên) và `--phase asic` (agent tối ưu timing, `--try-patches` thử
   ứng viên). Tốt nhất đã đo: 92,36 MHz (`fmax-r4`, flow `v2` synth phẳng); các đợt `fmax-y1`..`y4` sau đó 0 vòng
   nhận. Từ 02/11/2026: flow `v3` (synth phân cấp, `v3-start` chạy thật: 85,01 MHz), nhận theo tổng slack các họ
-  endpoint, `synth_ab` nhớ RTL đã đo. Từ 03/11/2026 (mock): pha sim ghi khối đã đổi, đánh dấu biến thể, synth sơ bộ;
-  `--try-from` thử theo nhóm biến thể. Claude không tự viết patch Chisel: mọi chỉnh sửa Chisel do agent trong loop làm.
+  endpoint, `synth_ab` nhớ RTL đã đo. Từ 03/11/2026: pha sim ghi khối đã đổi, đánh dấu biến thể, synth sơ bộ (mock);
+  `--try-from` thử theo nhóm biến thể (`asic-1` chạy thật: `v3` 85,01 → 87,84 MHz). Claude không tự viết patch Chisel: mọi chỉnh sửa Chisel do agent trong loop làm.
 
 ## Việc tiếp theo (gợi ý)
 
