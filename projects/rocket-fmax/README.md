@@ -8,7 +8,7 @@ Mục tiêu: **Fmax của `RocketTile` (Chipyard `RocketConfig`) > 100 MHz** ở
 
 | Pha | Lệnh | Thước đo | Trạng thái |
 |---|---|---|---|
-| Simulate | `--phase sim` | gate (riscv-tests + 8 benchmark), chi phí cycle; agent thêm tầng pipeline, mỗi vòng qua gate thành một ứng viên (kèm synth sơ bộ cả tile, khối đã đổi) | `sim-1` đang chạy (03/11/2026); synth sơ bộ, nhóm biến thể **mới kiểm bằng mock** |
+| Simulate | `--phase sim` | gate (riscv-tests + 8 benchmark), chi phí cycle; agent thêm tầng pipeline, mỗi vòng qua gate thành một ứng viên (kèm synth sơ bộ cả tile, khối đã đổi) | `sim-1` xong (03/11/2026, code cũ): 5 ứng viên, cả 5 trên FMA; synth sơ bộ, nhóm biến thể **mới kiểm bằng mock** |
 | ASIC, synth | `--phase asic` (mặc định), `--try-from <đợt sim>` | Yosys + OpenSTA sky130hd tt_025C_1v80, SRAM là hộp đen; gate như trên | r1–r4, y1–y4 đã chạy (flow `v2`); flow `v3` và nhận theo điểm họ **chưa chạy thật** |
 | ASIC, post-route | (chưa có) | ORFS sky130 | Chưa bắt đầu |
 | FPGA | (đã gỡ) | Vivado post-route, Arty A7-100T | **Tạm bỏ** ở 63,61 MHz (`fmax-r4`/`r5`); code ở commit `d2a1ac0` |
@@ -178,9 +178,13 @@ docker exec chia-chipyard-$USER-0 bash -lc 'cd /home/ray/chipyard/generators/roc
   nhớ Verilog đã đo, prompt `explore_pipeline.md`.
 - **Mới kiểm bằng mock (03/11/2026):** khối đã đổi và biến thể, bảng "Blocks already covered", synth sơ bộ ở pha sim,
   `--try-from` đo trước rồi thử theo nhóm, bỏ gate khi ứng viên nằm trên đúng gốc của nó.
-- **`sim-1` (đang chạy, code trước 03/11/2026):** vòng 1 và 2 đều qua gate, cycle +0,405 % (bằng điểm xuất phát: cả hai
-  chuyển thanh ghi `Pipe` ở đầu ra FMA vào trong FMA, tổng latency vẫn 5). Vòng 2 là biến thể của vòng 1 (cùng
-  `fpuOpt.dfma.fma`).
+- **`sim-1` (xong 03/11/2026, code trước 03/11/2026, 6 vòng, khoảng 2,2 giờ):** 5 vòng qua gate (1, 2, 3, 5, 6), cycle
+  +0,405 % (bằng điểm xuất phát), vòng 4 bị loại (`fastLoadWord = false`: qsort +7,6 %, tổng +3,11 %). Cả 5 ứng viên
+  đều ở `fpuOpt.dfma.fma` và cùng tiêu tầng `Pipe` rảnh ở đầu ra FMA (tổng latency vẫn 5), nên loại trừ nhau:
+  vòng 1 và 6 chia phép cộng 107 bit (họ `mulAddResult_r`), vòng 2 đặt thanh ghi trước bộ nhân (họ `ppl`/`pph`),
+  vòng 3 tách bộ nhân thành 4 tích + CSA, vòng 5 chia `postMul` (họ `roundRawFNToRecFN_io_in_r`). Ba họ FMA này nằm
+  trong 4 họ đầu của `v3-start`, nên một ứng viên chỉ gỡ được một họ. Agent vòng 6 tự ghi nhận "rounds 1, 2, 3 and 5
+  all targeted the same FMA family": lời nhắc dạng văn bản không đủ, đúng lý do thêm chống lặp bằng code.
 - **Flow `v3` chạy thật (`v3-start`, 03/11/2026):** tên đúng dạng `fpuOpt.dfma.fma.x[3]_reg` (không `/`, không `\`),
   bảng họ gom đúng. Điểm xuất phát (`fmax-r4`) ở `v3`: worst slack −1,763 ns, **85,01 MHz** (`v2`: 92,36 MHz). Các họ
   xấu nhất: FMA `mulAddResult_r`/`pph`/`ppl` (−1,76 … −1,63), `core.mem_reg_wdata` (−1,34), FMA
