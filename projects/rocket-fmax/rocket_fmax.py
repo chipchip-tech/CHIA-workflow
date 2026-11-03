@@ -892,9 +892,10 @@ def round_summary(d: Path) -> dict:
     """{"target": the agent's `TARGET:` line, "summary": the head of its answer}. The answer starts
     with TARGET and the files it changed: the tail alone (sim-1 rounds 1-2) lost both."""
     text = response_text(d).strip()
-    m = re.search(r"(?im)^[\W_]*TARGET\s*:\s*(.+)$", text)
+    # upper case, anywhere on a line: sim-2 round 2 put "TARGET:" right after a sentence of preamble
+    m = re.search(r"(?m)\bTARGET\s*:\s*(.+)$", text)
     target = re.sub(r"[`*]", "", m.group(1)).strip()[:200] if m else ""
-    m = re.search(r"(?im)^[\W_]*VARIANT OF\s*:\s*(.+)$", text)
+    m = re.search(r"(?m)\bVARIANT OF\s*:\s*(.+)$", text)
     return {"target": target, "variant_claim": m.group(1).strip()[:200] if m else "", "summary": text[:1500]}
 
 
@@ -1063,7 +1064,14 @@ def run_candidates(a, out: Path, elfs, snap, base, best, history, seen) -> dict:
     same_base = cand_base == start["patch"]
     fs0 = N.family_score(start["synth"].endpoints, a.family_k)
 
-    def record(label: str, r: dict, title: str, summary: str, t0: float):
+    def own_diff(c: dict) -> str:
+        """The candidate's own edits (the sim phase's cand_iterN.delta.patch). r["patch"] is the whole
+        tree against rocket head, start patch included: shown as "Patch đã bị loại" it told the
+        next agent not to repeat the start point (asic-2) and its 4000 chars cut the candidate off."""
+        f = src / c["patch"].replace(".patch", ".delta.patch")
+        return f.read_text() if f.is_file() else ""
+
+    def record(label: str, r: dict, title: str, summary: str, t0: float, delta: str = ""):
         r["minutes"] = (time.time() - t0) / 60
         append_csv(out / "results.csv", CSV_FIELDS,
                    {"iter": label, "accepted": r["accepted"], **synth_row(r.get("synth")), "isa_pass": r["isa_pass"],
@@ -1072,7 +1080,8 @@ def run_candidates(a, out: Path, elfs, snap, base, best, history, seen) -> dict:
                     "elapsed_min": f"{r['minutes']:.1f}", "synth_min": fmt(r.get("synth_min"), 1)})
         print(f"{label}: {'ACCEPT' if r['accepted'] else 'REJECT'} ({r['minutes']:.1f} min) - {r['reason'][:400]}",
               flush=True)
-        history.append(history_entry(0, r, summary[:800]).replace("### Vòng 0:", f"### {title}:", 1))
+        shown = {**r, "patch": delta, "candidate_diff": delta}
+        history.append(history_entry(0, shown, summary[:800]).replace("### Vòng 0:", f"### {title}:", 1))
         write(out / "history.md", "\n\n".join(history[len(a.history_from):]))
 
     # 1. measure every candidate on the start point
@@ -1099,7 +1108,8 @@ def run_candidates(a, out: Path, elfs, snap, base, best, history, seen) -> dict:
         summary = c.get("summary") or ""
         if s is None or not s.success:
             r["reason"] = r["reason"] or "không đo được"
-            record(label, r, f"Ứng viên {label} (pha sim; không đo được trên {start['name']})", summary, t0)
+            record(label, r, f"Ứng viên {label} (pha sim; không đo được trên {start['name']})", summary, t0,
+                   own_diff(c))
             continue
         fs = N.family_score(s.endpoints, a.family_k)
         items.append({"c": c, "label": label, "r": r, "paths": r["leaf_paths"], "score": fs,
@@ -1142,7 +1152,8 @@ def run_candidates(a, out: Path, elfs, snap, base, best, history, seen) -> dict:
             r["variant_of"] = [o["label"] for o in g if o is not it]
             if r.get("rtl_hash"):
                 seen.setdefault(r["rtl_hash"], label)
-            record(label, r, f"Ứng viên {label} (pha sim, không có agent ở pha asic)", it["summary"], t0)
+            record(label, r, f"Ứng viên {label} (pha sim, không có agent ở pha asic)", it["summary"], t0,
+                   own_diff(c))
             if r["accepted"]:
                 best = {"name": label, "patch": r["patch"], "rtl": r["rtl"], "synth": r["synth"], "cyc": r["cyc"]}
                 kept = label

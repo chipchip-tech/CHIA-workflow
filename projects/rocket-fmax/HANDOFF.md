@@ -5,9 +5,9 @@ và `README.md` (thư mục này).
 
 ## Trạng thái (03/11/2026)
 
-- Tốt nhất ở flow `v3`: **87,84 MHz** (`asic-1`, patch `~/rocket-fmax-v2/sim-1/patches/cand_iter5.patch`: tách
-  `postMul` của FMA double, dùng tầng `Pipe` rảnh ở đầu ra), cycle +0,405 %. Đường găng mới: `dcache.s2_req_addr →
-  core.mem_reg_wdata`.
+- Tốt nhất ở flow `v3`: **91,81 MHz** (`asic-2`, patch `~/rocket-fmax-v2/asic-2/best.patch` = `sim-1` vòng 5 + `sim-2`
+  vòng 4: `LW` đi đường bypass chậm), cycle **+2,655 %** (còn 0,345 % ngân sách; qsort +7,4 %, spmv +3,7 %). Đường găng:
+  `core.ex_reg_rs_lsb_1 → core.mem_reg_wdata` (bypass → ALU tầng ex). Trước đó: 87,84 MHz (`asic-1`, +0,405 %).
 - Tốt nhất: **92,36 MHz** Yosys `v2` (patch `~/rocket-fmax-v2/fmax-r4/patches/best.patch` trên máy người dùng),
   cycle +0,405 %, worst slack −0,827 ns. Các họ đường găng sát nhau: `core.div.remainder` (−0,83), FMA
   `mulAddResult_r`/`ppl`/`pph` (−0,80 … −0,70), `fpuOpt.regfile_ext.Memory` (−0,66), `divSqrt` `rem_Z`/`sigX_Z`
@@ -39,7 +39,14 @@ và `README.md` (thư mục này).
    vòng agent 1. Tiếp: `sim-2` từ `cand_iter5.patch` bằng code mới (lần đầu chạy thật bảng chống lặp và synth sơ bộ),
    rồi `--try-from sim-2 --iters 0`. Họ cần nhắm: `core.mem_reg_wdata` (sim-1 vòng 4 thử tắt `fastLoadWord` thì tốn
    +3,11 % cycle), `divSqrt`, các họ FMA còn lại.
-4. Sau đó: ASIC post-route (ORFS sky130) cho bản tốt nhất.
+4. Xong (03/11/2026): `sim-2` (6 ứng viên, 5 khối khác nhau, synth sơ bộ chạy đúng) và `asic-2 --try-from sim-2
+   --iters 0` nhận vòng 4 (87,84 → 91,81 MHz, cycle +2,655 %). Sửa sau đó (chưa chạy thật): history của `--try-from`
+   ghi patch riêng của ứng viên thay vì cả cây; đọc `TARGET:` ở giữa dòng. Vì ngân sách cycle gần hết, thêm tầng
+   pipeline gần như không còn chỗ: bước tiếp hợp lý là pha asic có agent (sửa logic, không tốn cycle) nhắm
+   `core.mem_reg_wdata` (ALU/bypass tầng ex), từ `asic-2/best.patch`. Ý tưởng chưa làm: cho agent pha sim thấy đường
+   xấu nhất của từng họ (hiện `timing_paths.rpt` chỉ có 10 đường, đều một họ; vòng 5 của `sim-2` phải đoán đường
+   `divSqrt`); nhóm biến thể xét thêm file nguồn.
+5. Sau đó: ASIC post-route (ORFS sky130) cho bản tốt nhất.
 
 ## Quy ước làm việc
 

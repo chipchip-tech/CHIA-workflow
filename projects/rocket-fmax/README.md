@@ -2,15 +2,15 @@
 
 Mục tiêu: **Fmax của `RocketTile` (Chipyard `RocketConfig`) > 100 MHz** ở chu kỳ 10 ns, đo bằng Yosys + OpenSTA trên
 `sky130_fd_sc_hd` (phần synth của nhánh ASIC), chi phí cycle tối đa +3 % so với RocketConfig gốc. Tốt nhất hiện có:
-**92,36 MHz** (flow `v2`, patch của `fmax-r4`, cycle +0,405 %). Ở flow `v3`: **87,84 MHz** (`asic-1`, ứng viên
-`sim-1` vòng 5, patch `~/rocket-fmax-v2/sim-1/patches/cand_iter5.patch`), từ 85,01 MHz. Báo cáo các đợt Yosys: [REPORT.md](REPORT.md).
+**92,36 MHz** (flow `v2`, patch của `fmax-r4`, cycle +0,405 %). Ở flow `v3`: **91,81 MHz**, cycle +2,655 % (`asic-2`,
+ứng viên `sim-2` vòng 4, patch `~/rocket-fmax-v2/asic-2/best.patch`), từ 85,01 → 87,84 (`asic-1`) → 91,81 MHz. Báo cáo các đợt Yosys: [REPORT.md](REPORT.md).
 
 ## Pha (theo `docs/workflow-phases.md`)
 
 | Pha | Lệnh | Thước đo | Trạng thái |
 |---|---|---|---|
-| Simulate | `--phase sim` | gate (riscv-tests + 8 benchmark), chi phí cycle; agent thêm tầng pipeline, mỗi vòng qua gate thành một ứng viên (kèm synth sơ bộ cả tile, khối đã đổi) | `sim-1` xong (03/11/2026, code cũ): 5 ứng viên, cả 5 trên FMA; synth sơ bộ, nhóm biến thể **mới kiểm bằng mock** |
-| ASIC, synth | `--phase asic` (mặc định), `--try-from <đợt sim>` | Yosys + OpenSTA sky130hd tt_025C_1v80, SRAM là hộp đen; gate như trên | r1–r4, y1–y4 đã chạy (flow `v2`); `asic-1` (`v3`, `--try-from sim-1`) chạy thật 03/11/2026: 85,01 → 87,84 MHz |
+| Simulate | `--phase sim` | gate (riscv-tests + 8 benchmark), chi phí cycle; agent thêm tầng pipeline, mỗi vòng qua gate thành một ứng viên (kèm synth sơ bộ cả tile, khối đã đổi) | `sim-1` xong (code cũ): 5 ứng viên, cả 5 trên FMA; `sim-2` xong (03/11/2026, code mới, chạy thật): 6 ứng viên ở 5 khối khác nhau, synth sơ bộ chạy đúng |
+| ASIC, synth | `--phase asic` (mặc định), `--try-from <đợt sim>` | Yosys + OpenSTA sky130hd tt_025C_1v80, SRAM là hộp đen; gate như trên | r1–r4, y1–y4 đã chạy (flow `v2`); `asic-1` (`v3`, `--try-from sim-1`) chạy thật 03/11/2026: 85,01 → 87,84 MHz; `asic-2` (`--try-from sim-2 --iters 0`): 87,84 → 91,81 MHz |
 | ASIC, post-route | (chưa có) | ORFS sky130 | Chưa bắt đầu |
 | FPGA | (đã gỡ) | Vivado post-route, Arty A7-100T | **Tạm bỏ** ở 63,61 MHz (`fmax-r4`/`r5`); code ở commit `d2a1ac0` |
 
@@ -184,8 +184,27 @@ docker exec chia-chipyard-$USER-0 bash -lc 'cd /home/ray/chipyard/generators/roc
   ứng viên kia BỎ QUA. Đường găng mới: `dcache.s2_req_addr → core.mem_reg_wdata` (load bypass). Vòng 5 thay
   `postMul` của cả ba FMA (h/s chỉ đổi module, không thêm tầng), nên khối đã đổi có cả `hfma`, `sfma`. Chênh Fmax
   giữa vòng 5 và vòng 1 (0,04 ns) nhỏ hơn mức dao động synth; điểm họ chọn vòng 5 vì nó gỡ nhiều họ FMA hơn.
-- **Mới kiểm bằng mock (03/11/2026):** bảng "Blocks already covered" trong prompt sim, synth sơ bộ ở pha sim, nhãn
-  `TARGET`/`VARIANT OF` (ứng viên của `sim-1` không có vì chạy code cũ).
+- **`sim-2` chạy thật (03/11/2026, từ `cand_iter5.patch`, 6 vòng, mỗi vòng 19–20 phút gồm synth sơ bộ 1,6 phút):**
+  bảng "Blocks already covered", synth sơ bộ, nhãn `TARGET`/`VARIANT OF` chạy đúng. Sáu vòng qua gate, ở năm khối khác
+  nhau (sim-1 cả 5 ở một khối). Synth sơ bộ so với start (87,84 MHz, điểm họ −6,322):
+  vòng 1 `core.div` chia mỗi bước chia làm 2 cycle (+0,522 %, 87,84, −6,57); vòng 2 `dcache` bản sao đảo của
+  `s2_req.addr(2)` để chia fanout (+0,405 %, **88,79**, −5,92); vòng 3 `fpuOpt` bỏ enable của `ex_reg_inst/ctrl`
+  (87,82, −6,93); vòng 4 `core` cho `LW` đi đường bypass chậm và lấy `data_raw` (+2,655 %, qsort +7,4 %, **91,81**,
+  −5,52); vòng 5 `fpuOpt` thanh ghi trước `divSqrt` (87,84, −7,01); vòng 6 `dfmaLatency` 5 → 6 (+0,752 %, spmv +6,2 %,
+  87,84, −7,27; agent tự ghi `VARIANT OF: round 5` và dẫn số synth sơ bộ của vòng 5). Vòng 2 thiếu `TARGET` vì agent
+  viết dòng đó dính sau một câu (đã sửa cách đọc, xem dưới).
+- **`asic-2` chạy thật (03/11/2026, `--try-from sim-2 --iters 0`, khoảng 1,4 giờ):** nhóm [4, 1] (`core` chứa
+  `core.div`), [2], [3, 5, 6] (`fpuOpt`). Nhận vòng 4: 87,84 → **91,81 MHz** (−0,892 ns, TNS −297 → −114 ns), cycle
+  +2,655 %, hiệu năng +2,23 %, không gate (11 phút). Vòng 1 BỎ QUA (cùng nhóm). Trên vòng 4: vòng 2 Fmax không đổi
+  (điểm họ +0,13), vòng 3 91,38 MHz, vòng 5 không đổi → LOẠI (cần > +1 %); vòng 6 cycle +3,076 % → LOẠI (trần 3 %).
+  Đường găng mới: `core.ex_reg_rs_lsb_1 → core.mem_reg_wdata` (bypass → ALU ở tầng ex). Ngân sách cycle còn 0,345 %.
+- **Hai lỗi lộ ra ở `sim-2`/`asic-2`, đã sửa 03/11/2026 (chưa chạy thật):** (1) `--try-from` ghi "Patch đã bị loại" bằng
+  patch cả cây (gồm cả patch start: ALU, AMOALU, `MulDiv`...), cắt ở 4000 ký tự nên mất phần của ứng viên và bảo agent
+  sau đừng lặp lại chính điểm xuất phát; nay ghi `cand_iterN.delta.patch` (chỉ phần ứng viên). (2) Dòng `TARGET:` /
+  `VARIANT OF:` nay đọc được ở bất kỳ đâu trên dòng (chữ hoa).
+- **Giới hạn đã biết của nhóm biến thể:** nhóm theo đường instance (trùng hoặc lồng nhau), nên `core` (sửa
+  `RocketCore.scala`) gộp với `core.div` (sửa `Multiplier.scala`) dù hai patch không đụng nhau. Ở `asic-2` không mất gì
+  (vòng 1 tự nó không tăng Fmax), nhưng về sau có thể cần xét thêm file nguồn bị sửa.
 - **`sim-1` (xong 03/11/2026, code trước 03/11/2026, 6 vòng, khoảng 2,2 giờ):** 5 vòng qua gate (1, 2, 3, 5, 6), cycle
   +0,405 % (bằng điểm xuất phát), vòng 4 bị loại (`fastLoadWord = false`: qsort +7,6 %, tổng +3,11 %). Cả 5 ứng viên
   đều ở `fpuOpt.dfma.fma` và cùng tiêu tầng `Pipe` rảnh ở đầu ra FMA (tổng latency vẫn 5), nên loại trừ nhau:
