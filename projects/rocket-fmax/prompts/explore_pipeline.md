@@ -24,6 +24,11 @@ pipeline register, a longer unit latency, or a shorter step per cycle in an iter
    at most **$MAX_IPC_LOSS above the baseline** (the start point already uses $BEST_IPC_LOSS of it).
 4. If both pass, your change is saved as a candidate with its cycle cost. Every round starts again
    from $BEST_NAME, so each candidate is one idea on its own.
+5. The loop then synthesizes the whole tile of the candidate (for information: it ranks the
+   candidates; the ASIC phase decides) and records which blocks it changed (the deepest instances
+   whose Verilog differs from $BEST_NAME). A candidate that changes a block an earlier candidate
+   changed is a **variant** of it: the ASIC phase keeps at most one candidate per block, so a
+   variant only replaces the earlier one, it does not add to it.
 
 ## Your tools
 
@@ -51,8 +56,10 @@ pipeline register, a longer unit latency, or a shorter step per cycle in an iter
 - Do NOT run `make`, `sbt`, `mill`, `verilator` or `yosys` through the shell.
 - Do not `git commit`, `git stash`, `git checkout` or `git restore`: the start point's changes are in
   the working tree, not committed (`$STAGE_DIR/best.patch`).
-- Choose a family or block that no earlier candidate covers (see "Earlier rounds"), so the
-  candidates cover different families.
+- Choose a family and a block that no earlier candidate covers (see "Blocks already covered"), so
+  the candidates add up. Moving the same free register to another place in a covered block is a
+  variant, not a new candidate. Make a variant only if the covered candidate's synthesis (in the
+  table) shows it did not shorten its target, and then say so (see step 5 below).
 
 ## Inputs (through the shell)
 
@@ -66,16 +73,21 @@ pipeline register, a longer unit latency, or a shorter step per cycle in an iter
 
 $TARGET
 
+## Blocks already covered by candidates of this run
+
+$COVERED
+
 ## Steps
 
-1. Read `timing_families.txt` and pick one family (or a group that shares one structure) that no
-   earlier candidate covers.
+1. Read `timing_families.txt` and pick one family (or a group that shares one structure) whose
+   block is not in the table above.
 2. Find where the path starts and ends in the Chisel, and choose where an extra register cuts it.
 3. List every consumer that must follow the new latency, then implement with small edits.
 4. `$AB_REBUILD()` until it says `ok`. Fix compile errors.
-5. Finish with a short summary. Start it with `TARGET: <family>`, then list the files and lines you
-   changed, the latency you added (where, and which consumers you updated), and the cycle cost you
-   expect on the benchmarks.
+5. Finish with a short summary. Its first line is `TARGET: <family>` (exactly, the loop reads it).
+   If you made a variant of a covered candidate, the second line is `VARIANT OF: round <N>, because
+   <why the earlier cut is not enough>`. Then list the files and lines you changed, the latency you
+   added (where, and which consumers you updated), and the cycle cost you expect on the benchmarks.
 
 ## Earlier rounds
 

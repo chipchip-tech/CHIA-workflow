@@ -8,7 +8,7 @@ Mục tiêu: **Fmax của `RocketTile` (Chipyard `RocketConfig`) > 100 MHz** ở
 
 | Pha | Lệnh | Thước đo | Trạng thái |
 |---|---|---|---|
-| Simulate | `--phase sim` | gate (riscv-tests + 8 benchmark), chi phí cycle; agent thêm tầng pipeline, mỗi vòng qua gate thành một ứng viên | Code 02/11/2026, **chưa chạy thật** |
+| Simulate | `--phase sim` | gate (riscv-tests + 8 benchmark), chi phí cycle; agent thêm tầng pipeline, mỗi vòng qua gate thành một ứng viên (kèm synth sơ bộ cả tile, khối đã đổi) | `sim-1` đang chạy (03/11/2026); synth sơ bộ, nhóm biến thể **mới kiểm bằng mock** |
 | ASIC, synth | `--phase asic` (mặc định), `--try-from <đợt sim>` | Yosys + OpenSTA sky130hd tt_025C_1v80, SRAM là hộp đen; gate như trên | r1–r4, y1–y4 đã chạy (flow `v2`); flow `v3` và nhận theo điểm họ **chưa chạy thật** |
 | ASIC, post-route | (chưa có) | ORFS sky130 | Chưa bắt đầu |
 | FPGA | (đã gỡ) | Vivado post-route, Arty A7-100T | **Tạm bỏ** ở 63,61 MHz (`fmax-r4`/`r5`); code ở commit `d2a1ac0` |
@@ -31,8 +31,19 @@ reset rocket-chip về bản tốt nhất (pha sim: luôn về điểm xuất ph
   ──► asic: nhận nếu chi phí cycle ≤ 1 + --max-ipc-loss VÀ một trong hai:
               Fmax / chi phí cycle > bản tốt nhất × (1 + --min-perf-gain)
               điểm họ tăng ≥ --min-family-gain và worst slack giảm ≤ --worst-tol
-      sim : qua gate trong ngân sách cycle → lưu thành ứng viên (bản tốt nhất không đổi)
+      sim : qua gate trong ngân sách cycle → lưu thành ứng viên (bản tốt nhất không đổi), rồi
+            synth cả tile (sơ bộ, cache theo hash Verilog) và ghi khối đã đổi; trùng khối ứng viên trước = biến thể
 ```
+
+**Chống lặp ở pha sim** (từ 03/11/2026, sau khi vòng 2 của `sim-1` làm lại ý của vòng 1 trên cùng FMA):
+- *Khối đã đổi* = các instance sâu nhất có Verilog khác điểm xuất phát (`changed_leaf_paths`; đổi tên module con
+  làm mọi module cha khác theo, nên chỉ giữ instance sâu nhất). Ứng viên đụng khối của ứng viên trước (trùng, hoặc
+  instance này nằm trong instance kia) được ghi là **biến thể** của nó.
+- Prompt sim có bảng "Blocks already covered": vòng, `TARGET`, khối đã đổi, cycle, synth sơ bộ. Agent chỉ được làm
+  biến thể khi synth của ứng viên cũ cho thấy chưa rút ngắn được, và phải ghi `VARIANT OF: round N` ở dòng 2.
+- `history.md` ghi dòng `TARGET` và khối đã đổi của mỗi vòng; tóm tắt agent lấy phần **đầu** câu trả lời (trước đây
+  lấy giữa đoạn cuối nên mất dòng `TARGET`).
+- `--no-sim-synth` tắt synth sơ bộ.
 
 **Điểm họ** = tổng worst slack của `--family-k` (8) họ endpoint xấu nhất, mỗi họ chặn ở 0. Có nhiều họ sát nhau
 (−0,48 đến −0,83 ns), nên Fmax chỉ tăng khi đã rút ngắn hết các họ đó; tiêu chí này cho phép nhận từng bước.
@@ -91,8 +102,14 @@ Mặc định: `--phase asic --period-ns 10 --synth-flow v3 --extra-bench mm spm
 
 - Đợt sau tiếp từ bản tốt nhất: `--start-patch ~/rocket-fmax-v2/<run>/patches/best.patch --history-from
   ~/rocket-fmax-v2/<run>`. Điểm xuất phát được build, gate và synth một lần, cache theo `baseline_start_<hash>_*`.
-- `--try-from <đợt sim>`: mỗi ứng viên (`candidates.json`) được áp lên bản tốt nhất (merge 3 chiều nếu bản tốt nhất đã
-  khác điểm xuất phát của đợt sim), build, synth, gate, nhận/loại như một vòng; ứng viên được nhận cộng dồn.
+- `--try-from <đợt sim>` (từ 03/11/2026):
+  1. Mỗi ứng viên được áp lên điểm xuất phát, build (1–2 phút) và synth (cache theo hash Verilog, nên ứng viên đã
+     synth ở pha sim không phải synth lại). Bảng kết quả ghi vào `history.md`.
+  2. Gom ứng viên đụng cùng khối thành nhóm (tính lại từ Verilog, nên dùng được cả `candidates.json` cũ). Thử các
+     nhóm theo điểm họ tốt nhất trước; trong nhóm thử ứng viên tốt nhất trước, chỉ thử ứng viên kế khi nó bị loại.
+     Mỗi nhóm giữ tối đa một ứng viên; các biến thể còn lại ghi `BỎ QUA`.
+  3. Tiêu chí nhận như một vòng. Khi bản tốt nhất vẫn là điểm xuất phát của đợt sim, không chạy lại gate (cycle lấy
+     từ pha sim, cùng patch trên cùng gốc). Khi bản tốt nhất đã đổi: áp (merge 3 chiều), build, synth, gate.
 - Khi Fmax vượt 100 MHz (slack dương ở 10 ns), hạ `--period-ns` (vd. 8); tag cache đổi theo.
 - Gặp "You've hit your limit" thì loop chờ tới giờ reset rồi gọi lại (`--quota-retries`, `--quota-max-wait`).
 - Tuỳ chọn khác: `--llm-timeout 1800`, `--debug-retries 2`, `--empty-retries 1`, `--build-fixes 2`, `--fix-timeout 900`,
@@ -159,6 +176,11 @@ docker exec chia-chipyard-$USER-0 bash -lc 'cd /home/ray/chipyard/generators/roc
   trước gate. Build RocketConfig 1,3–1,7 phút, Yosys `v2` cả tile 3–5 phút, image có Yosys 0.38.
 - **Mới kiểm bằng mock (02/11/2026):** `--phase sim`, `--try-from` (`apply_candidate`), nhận theo điểm họ, `synth_ab`
   nhớ Verilog đã đo, prompt `explore_pipeline.md`.
+- **Mới kiểm bằng mock (03/11/2026):** khối đã đổi và biến thể, bảng "Blocks already covered", synth sơ bộ ở pha sim,
+  `--try-from` đo trước rồi thử theo nhóm, bỏ gate khi ứng viên nằm trên đúng gốc của nó.
+- **`sim-1` (đang chạy, code trước 03/11/2026):** vòng 1 và 2 đều qua gate, cycle +0,405 % (bằng điểm xuất phát: cả hai
+  chuyển thanh ghi `Pipe` ở đầu ra FMA vào trong FMA, tổng latency vẫn 5). Vòng 2 là biến thể của vòng 1 (cùng
+  `fpuOpt.dfma.fma`).
 - **Flow `v3` chạy thật (`v3-start`, 03/11/2026):** tên đúng dạng `fpuOpt.dfma.fma.x[3]_reg` (không `/`, không `\`),
   bảng họ gom đúng. Điểm xuất phát (`fmax-r4`) ở `v3`: worst slack −1,763 ns, **85,01 MHz** (`v2`: 92,36 MHz). Các họ
   xấu nhất: FMA `mulAddResult_r`/`pph`/`ppl` (−1,76 … −1,63), `core.mem_reg_wdata` (−1,34), FMA

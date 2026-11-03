@@ -26,8 +26,12 @@ và `README.md` (thư mục này).
 1. Xong (03/11/2026): `v3-start` cho tên đúng dạng, điểm xuất phát 85,01 MHz ở `v3` (−1,763 ns, họ FMA đứng đầu).
    Số `v3` thấp hơn `v2` vì không tối ưu qua cổng module (hằng số không lan vào module con); khi báo kết quả cuối,
    synth lại bản tốt nhất bằng `v2` (và sau này ORFS) để so với 92,36 MHz.
-2. Chạy `sim-1`, đọc `candidates.json` và `results.csv`: ứng viên nào qua gate, tốn bao nhiêu cycle.
-3. Chạy `asic-1 --try-from sim-1`. Đọc lý do nhận/loại của từng ứng viên (cột `family_score`).
+2. `sim-1` đang chạy (code trước 03/11/2026). Vòng 1–2: hai biến thể retiming FMA (đưa tầng `Pipe` đầu ra vào trong
+   FMA), cycle như điểm xuất phát. Vì vòng 2 lặp ý vòng 1, 03/11/2026 đã thêm (mới kiểm bằng mock): khối đã đổi +
+   biến thể, bảng "Blocks already covered" trong prompt sim, sửa tóm tắt mất dòng `TARGET`, synth sơ bộ cả tile ở pha
+   sim, `--try-from` đo hết rồi thử theo nhóm biến thể (mỗi nhóm giữ một), bỏ gate khi ứng viên nằm trên gốc của nó.
+3. Chạy `asic-1 --try-from sim-1` bằng code mới. Đọc bảng ứng viên đo trên điểm xuất phát trong `history.md`, rồi lý do
+   nhận/loại (cột `family_score`).
 4. Sau đó: ASIC post-route (ORFS sky130) cho bản tốt nhất.
 
 ## Quy ước làm việc

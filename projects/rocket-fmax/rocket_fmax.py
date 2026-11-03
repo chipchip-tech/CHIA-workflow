@@ -14,7 +14,11 @@ One round, as CHIA's timing_opt example:
 Phases (docs/workflow-phases.md): --phase asic (above, default) and --phase sim: the agent adds a
 pipeline stage (no synthesis, rebuild only), the loop runs the gate and keeps every edit that passes
 within the cycle budget as a candidate (candidates.json; the best stays the start point).
---try-from <sim run> tries those candidates on top of the best before the asic rounds. Besides
+Each candidate is also synthesized (whole tile, informational) and labelled with the instances it
+changes (leaf instance paths); a candidate that changes the same block as an earlier one is marked
+as a variant of it. --try-from <sim run> measures every candidate on the start point (build +
+synth), groups the variants, and before the asic rounds tries the groups best-first, keeping at
+most one candidate per group (the next variant only when the better one is rejected). Besides
 Fmax / cycle cost, an asic round is also accepted when the family score (sum of the worst slacks of
 the --family-k worst endpoint families) rises by --min-family-gain without the worst slack dropping
 by more than --worst-tol.
@@ -143,6 +147,9 @@ def parse_args():
     p.add_argument("--try-from", default=None, metavar="SIM_RUN_DIR",
                    help="asic: before the agent rounds, try each candidate of this --phase sim run on top of "
                         "the best (build, synth, gate, same acceptance), no agent")
+    p.add_argument("--no-sim-synth", action="store_true",
+                   help="sim: do not synthesize the tile of a candidate that passed the gate (by default it is, "
+                        "with the asic flow, to rank the candidates and to show the next agent the result)")
     p.add_argument("--synth-flow", choices=sorted(N.SYNTH_FLOWS), default="v3",
                    help="v3: hierarchical (an edit leaves other modules' netlists as they were); v2: synth "
                         "-flatten (fmax-r1..r4, y1..y4)")
@@ -322,6 +329,12 @@ def run_synth(a, out: Path, label: str, rtl, tag: str | None = None):
 # build and gate
 # ---------------------------------------------------------------------------
 
+def rtl_synth_tag(a, h: str) -> str:
+    """Cache tag of the synth of a tile Verilog (rtl_hash): the same Verilog gives the same result,
+    so a sim candidate's synth is reused by --try-from and by later runs."""
+    return synth_tag(a, f"rtl_{h}")
+
+
 def build(a, name: str):
     """Build of RocketConfig (values only: with the profiler on, a ref passed on to another task
     would arrive as a _ProfiledResult wrapper)."""
@@ -490,7 +503,7 @@ def render_prompt(a, i: int, best: dict, history: list[str], target_md: str) -> 
         HISTORY="\n\n".join(history) or "(no earlier round)", **tool_text())
 
 
-def render_sim_prompt(a, i: int, best: dict, history: list[str], target_md: str) -> str:
+def render_sim_prompt(a, i: int, best: dict, history: list[str], target_md: str, covered: str = "") -> str:
     s = best["synth"]
     return string.Template(PROMPT_SIM.read_text()).safe_substitute(
         ITER=i, MAX_ITERS=a.iters, LLM_MIN=round(a.llm_timeout / 60), CONFIG_DESC=N.CONFIG,
@@ -498,6 +511,7 @@ def render_sim_prompt(a, i: int, best: dict, history: list[str], target_md: str)
         BEST_FMAX=fmt(s.fmax_mhz, 2), BEST_IPC_LOSS=f"{(best.get('cyc', 1.0) - 1) * 100:+.2f} %",
         MAX_IPC_LOSS=f"{a.max_ipc_loss:.1%}", DEBUG_RETRIES=a.debug_retries, FLOW=a.synth_flow,
         BENCHES=", ".join((*N.BENCHMARKS, *a.extra_bench)), STAGE_DIR=N.STAGE_DIR, TARGET=target_md,
+        COVERED=covered or "(no candidate yet)",
         HISTORY="\n\n".join(history) or "(no earlier round)", **tool_text())
 
 
@@ -732,18 +746,20 @@ def tile_rtl(art, r: dict):
 
 
 def gate_and_judge(a, out: Path, label: str, art, rtl, elfs, base: dict, best: dict, r: dict,
-                   seen: dict) -> dict:
+                   seen: dict, known_cyc: float | None = None) -> dict:
     """Synth, then the gate, then the decision. A round whose Fmax cannot beat the best even at
     the baseline's cycle count stops after synth (the gate takes ~19 min, synth 3-4). A
     functional failure sets r["functional_fail"] (the text for the debug agent). Verilog identical
-    to one already measured (`seen`: rtl_hash -> label) is rejected without either."""
+    to one already measured (`seen`: rtl_hash -> label) is rejected without either. known_cyc: the
+    cycle cost of this exact tree is already known (--try-from: a sim candidate on its own start
+    point), so the gate is not run again."""
     d = out / "runs" / label
     r["rtl"], r["rtl_hash"] = rtl, rtl_hash(rtl)
     if r["rtl_hash"] in seen:
         r["reason"] = f"Verilog {N.TOP} trùng hệt {seen[r['rtl_hash']]} (đã đo); bỏ qua synth và gate"
         return r
     t0 = time.time()
-    synth = run_synth(a, out, label, rtl)
+    synth = run_synth(a, out, label, rtl, rtl_synth_tag(a, r["rtl_hash"]))
     r["synth"], r["synth_min"] = synth, (time.time() - t0) / 60
     if not synth.success:
         r["reason"] = f"Yosys/OpenSTA lỗi: {synth.error}"[:1000]
@@ -762,17 +778,21 @@ def gate_and_judge(a, out: Path, label: str, art, rtl, elfs, base: dict, best: d
                        f"{fam_text} (cần +{a.min_family_gain:.2f} ns, worst slack giảm tối đa {a.worst_tol:.2f}); "
                        f"đường găng {synth.crit_start} -> {synth.crit_end}; không chạy gate")
         return r
-    gate = get(N.run_gate.chia_remote(art, elfs))
-    save_gate(d, gate)
-    res = ironlaw(a, base["gate"], gate)
-    write(d / "gate_compare.txt", "\n".join(res["lines"]))
-    r["isa_pass"] = not any(f.startswith("ISA") for f in res["fails"])
-    if res["fails"]:
-        r["reason"] = "gate không đạt (chức năng): " + "; ".join(res["fails"][:10])
-        logs = "\n\n".join(f"===== {n}\n{t[-2500:]}" for n, t in list(gate.fail_logs.items())[:6])
-        r["functional_fail"] = "\n".join(res["fails"][:40]) + ("\n\n" + logs if logs else "")
-        return r
-    cyc = res["cyc"]
+    if known_cyc is None:
+        gate = get(N.run_gate.chia_remote(art, elfs))
+        save_gate(d, gate)
+        res = ironlaw(a, base["gate"], gate)
+        write(d / "gate_compare.txt", "\n".join(res["lines"]))
+        r["isa_pass"] = not any(f.startswith("ISA") for f in res["fails"])
+        if res["fails"]:
+            r["reason"] = "gate không đạt (chức năng): " + "; ".join(res["fails"][:10])
+            logs = "\n\n".join(f"===== {n}\n{t[-2500:]}" for n, t in list(gate.fail_logs.items())[:6])
+            r["functional_fail"] = "\n".join(res["fails"][:40]) + ("\n\n" + logs if logs else "")
+            return r
+        cyc = res["cyc"]
+    else:
+        cyc, r["isa_pass"] = known_cyc, True
+        fam_text += "; cycle lấy từ pha sim (cùng patch trên cùng điểm xuất phát), không chạy lại gate"
     new_perf = synth.fmax_mhz / cyc
     gain = new_perf / perf(best) - 1
     r.update(cyc=cyc, cycle_pct=f"{(cyc - 1) * 100:.3f}", perf=f"{new_perf:.3f}", perf_gain_pct=f"{gain * 100:.3f}")
@@ -815,9 +835,80 @@ def judge_sim(a, out: Path, label: str, art, rtl, elfs, base: dict, best: dict, 
             + "; ".join(l for l in res["lines"] if l.startswith(("mm", "spmv", "multiply", "qsort", "cycle cost"))))
     if cyc > 1 + a.max_ipc_loss:
         r["reason"] = f"tốn quá nhiều cycle: {text}; cho phép tối đa +{a.max_ipc_loss:.1%}"
-    else:
-        r["accepted"], r["reason"] = True, f"ứng viên (qua gate): {text}"
+        return r
+    r["accepted"], r["reason"] = True, f"ứng viên (qua gate): {text}"
+    r["leaf_paths"] = changed_leaf_paths(best["rtl"], rtl)
+    if not a.no_sim_synth:
+        # informational: ranks the candidates for --try-from (cached by rtl_hash) and shows the next
+        # agent what this cut did; the asic phase decides
+        t0 = time.time()
+        s = run_synth(a, out, label, rtl, rtl_synth_tag(a, r["rtl_hash"]))
+        r["synth"], r["synth_min"] = s, (time.time() - t0) / 60
+        r["reason"] += "; synth sơ bộ (cả tile, chưa phải quyết định): " + synth_delta_text(a, best["synth"], s)
     return r
+
+
+def synth_delta_text(a, old, new) -> str:
+    if new is None or not new.success:
+        return f"lỗi ({getattr(new, 'error', '') or 'không có kết quả'})"[:300]
+    fo, fn = N.family_score(old.endpoints, a.family_k), N.family_score(new.endpoints, a.family_k)
+    return (f"Fmax {old.fmax_mhz:.2f} -> {new.fmax_mhz:.2f} MHz, worst slack {old.worst_slack_ns:.3f} -> "
+            f"{new.worst_slack_ns:.3f} ns, điểm họ {fo:.3f} -> {fn:.3f} ({fn - fo:+.3f}), đường găng "
+            f"{new.crit_start} -> {new.crit_end}")
+
+
+# ---------------------------------------------------------------------------
+# which blocks a candidate changes (anti-repeat, variant groups)
+# ---------------------------------------------------------------------------
+
+def changed_leaf_paths(parent_rtl, child_rtl) -> list[str]:
+    """Instance paths present in both tiles whose module text differs, keeping only the deepest
+    ones: a renamed child module (MulAddRecFNPipe_..._sp -> ..._spx) changes every ancestor's text
+    too, but the block the edit is about is the leaf. "" = RocketTile itself."""
+    pp, cp = N.instance_paths(parent_rtl), N.instance_paths(child_rtl)
+    pt, ct = AB.module_texts(parent_rtl), AB.module_texts(child_rtl)
+    changed = {p for p in pp.keys() & cp.keys() if pt.get(pp[p]) != ct.get(cp[p])}
+    return sorted(p for p in changed
+                  if not any(q != p and (p == "" or q.startswith(p + ".")) for q in changed))
+
+
+def paths_overlap(xs, ys) -> bool:
+    """Two leaf-path lists touch the same block (equal, or one inside the other)."""
+    return any(x == y or (x and y and (x.startswith(y + ".") or y.startswith(x + "."))) for x in xs for y in ys)
+
+
+def show_paths(paths) -> str:
+    return ", ".join(f"`{p or N.TOP}`" for p in paths) or "(không xác định)"
+
+
+def response_text(d: Path) -> str:
+    """The round's last agent answer (agent_response.md or retryN_response.md), whole."""
+    files = sorted(d.glob("retry*_response.md"), key=lambda p: int(re.sub(r"\D", "", p.stem) or 0))
+    files = files or [d / "agent_response.md"]
+    return files[-1].read_text(errors="replace") if files[-1].exists() else ""
+
+
+def round_summary(d: Path) -> dict:
+    """{"target": the agent's `TARGET:` line, "summary": the head of its answer}. The answer starts
+    with TARGET and the files it changed: the tail alone (sim-1 rounds 1-2) lost both."""
+    text = response_text(d).strip()
+    m = re.search(r"(?im)^[\W_]*TARGET\s*:\s*(.+)$", text)
+    target = re.sub(r"[`*]", "", m.group(1)).strip()[:200] if m else ""
+    m = re.search(r"(?im)^[\W_]*VARIANT OF\s*:\s*(.+)$", text)
+    return {"target": target, "variant_claim": m.group(1).strip()[:200] if m else "", "summary": text[:1500]}
+
+
+def covered_text(candidates: list) -> str:
+    """Table of the candidates so far for the sim prompt."""
+    if not candidates:
+        return ""
+    rows = ["| Round | TARGET (agent) | Changed blocks (deepest instances) | Cycle vs baseline | Whole-tile synth (loop) |",
+            "|---|---|---|---|---|"]
+    for c in candidates:
+        rows.append(f"| {c['iter']}{' (variant of ' + ', '.join(map(str, c['variant_of'])) + ')' if c.get('variant_of') else ''} "
+                    f"| {c.get('target') or '?'} | {show_paths(c.get('leaf_paths') or [])} | {c.get('cycle_pct')} % "
+                    f"| {c.get('synth_text') or '-'} |")
+    return "\n".join(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -873,6 +964,13 @@ def history_entry(i: int, r: dict, resp_summary: str) -> str:
         lines.append(f"Test lỗi, agent debug {r['debug_fixes']} lần.")
     if r.get("build_fixes"):
         lines.append(f"Build lỗi, agent sửa lỗi build {r['build_fixes']} lần.")
+    if r.get("target"):
+        lines.append(f"Họ agent nhắm tới (TARGET): {r['target']}")
+    if r.get("leaf_paths") is not None and r["accepted"]:
+        lines.append(f"Khối đã đổi (instance sâu nhất có Verilog khác): {show_paths(r['leaf_paths'])}"
+                     + (" — **biến thể của " + ", ".join(f"vòng {x}" if isinstance(x, int) else str(x)
+                                                         for x in r["variant_of"]) + "** (cùng khối)"
+                        if r.get("variant_of") else ""))
     if resp_summary:
         lines.append(f"Tóm tắt của agent: {resp_summary[:800]}")
     if r.get("tried") and not r["accepted"]:
@@ -908,38 +1006,64 @@ def run_flow(run_dir: str) -> str:
         return "v2"
 
 
+def cand_cyc(c: dict) -> float | None:
+    """Cycle cost a sim candidate measured on its start point."""
+    if c.get("cyc"):
+        return float(c["cyc"])
+    try:
+        return 1 + float(c["cycle_pct"]) / 100
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def build_candidate(a, out: Path, label: str, snap, onto: dict, cand_patch: str, cand_base: str, r: dict):
+    """Rocket-chip at onto's patch plus a candidate's edits, built. Returns the tile RTL, or None
+    with r["reason"] set."""
+    ap = get(N.apply_candidate.chia_remote(snap["rocket_head"], onto["patch"], cand_patch, cand_base))
+    if not ap["ok"]:
+        r["reason"] = f"không áp được lên {onto['name']}: {ap['error']}"
+        return None, None
+    diff = get(N.collect_diff.chia_remote(snap["rocket_head"], snap["outside"]))
+    r["patch"] = diff["patch"]
+    write(out / "patches" / f"{label}.patch", diff["patch"])
+    art = build(a, label)
+    save_build(out / "runs" / label, art)
+    if not art.success:
+        r["reason"] = "build lỗi:\n" + build_errors(art)
+        return None, None
+    return art, tile_rtl(art, r)
+
+
+def group_variants(items: list) -> list[list]:
+    """Groups of candidates that change overlapping blocks (union of overlaps), best-first."""
+    groups: list[list] = []
+    for it in items:
+        hit = [g for g in groups if any(paths_overlap(it["paths"], o["paths"]) for o in g)]
+        merged = [it] + [o for g in hit for o in g]
+        groups = [g for g in groups if g not in hit] + [merged]
+    for g in groups:
+        g.sort(key=lambda o: o["score"], reverse=True)
+    return sorted(groups, key=lambda g: g[0]["score"], reverse=True)
+
+
 def run_candidates(a, out: Path, elfs, snap, base, best, history, seen) -> dict:
-    """--try-from: each candidate of a --phase sim run on top of the best, without agent: build,
-    synth, gate and the same acceptance as a round. Returns the best."""
+    """--try-from: the candidates of a --phase sim run, without agent.
+    1. Each candidate is built on the start point and synthesized (cached by rtl_hash, so a candidate
+       the sim phase already synthesized costs only the build): its family score ranks it.
+    2. Candidates that change overlapping blocks (variants: the same free stage put in different
+       places) form a group. Groups are tried best-first; in a group the best-ranked candidate is
+       tried first and the next one only if it is rejected, so at most one per group is kept.
+    3. Trying = the same acceptance as a round. On the start point the gate is not run again (the
+       sim phase measured this exact tree); on a newer best the candidate is applied (3-way), built,
+       synthesized and gated. Returns the best."""
     src = Path(a.try_from)
     info = json.loads((src / "candidates.json").read_text())
     cand_base = (src / info["base_patch"]).read_text()
-    for c in info["candidates"]:
-        label = f"cand_{src.name}_{c['iter']}"
-        t0 = time.time()
-        r = new_round()
-        print(f"\n######## candidate {label} (sim cycle {c.get('cycle_pct')} %)", flush=True)
-        try:
-            ap = get(N.apply_candidate.chia_remote(snap["rocket_head"], best["patch"],
-                                                  (src / c["patch"]).read_text(), cand_base))
-            if not ap["ok"]:
-                r["reason"] = f"không áp được lên {best['name']}: {ap['error']}"
-            else:
-                diff = get(N.collect_diff.chia_remote(snap["rocket_head"], snap["outside"]))
-                r["patch"] = diff["patch"]
-                write(out / "patches" / f"{label}.patch", diff["patch"])
-                art = build(a, label)
-                save_build(out / "runs" / label, art)
-                if not art.success:
-                    r["reason"] = "build lỗi:\n" + build_errors(art)
-                else:
-                    rtl = tile_rtl(art, r)
-                    if rtl is not None:
-                        r = gate_and_judge(a, out, label, art, rtl, elfs, base, best, r, seen)
-                        r.pop("functional_fail", None)
-        except Exception as e:                                       # noqa: BLE001
-            write(out / "runs" / label / "error.txt", traceback.format_exc())
-            r["reason"] = f"lỗi hạ tầng: {type(e).__name__}: {e}"[:1000]
+    start = best
+    same_base = cand_base == start["patch"]
+    fs0 = N.family_score(start["synth"].endpoints, a.family_k)
+
+    def record(label: str, r: dict, title: str, summary: str, t0: float):
         r["minutes"] = (time.time() - t0) / 60
         append_csv(out / "results.csv", CSV_FIELDS,
                    {"iter": label, "accepted": r["accepted"], **synth_row(r.get("synth")), "isa_pass": r["isa_pass"],
@@ -948,13 +1072,86 @@ def run_candidates(a, out: Path, elfs, snap, base, best, history, seen) -> dict:
                     "elapsed_min": f"{r['minutes']:.1f}", "synth_min": fmt(r.get("synth_min"), 1)})
         print(f"{label}: {'ACCEPT' if r['accepted'] else 'REJECT'} ({r['minutes']:.1f} min) - {r['reason'][:400]}",
               flush=True)
-        if r.get("rtl_hash"):
-            seen.setdefault(r["rtl_hash"], label)
-        if r["accepted"]:
-            best = {"name": label, "patch": r["patch"], "rtl": r["rtl"], "synth": r["synth"], "cyc": r["cyc"]}
-        entry = history_entry(0, r, (c.get("summary") or "")[:800]).replace(
-            "### Vòng 0:", f"### Ứng viên {label} (pha sim, không có agent ở pha asic):", 1)
-        history.append(entry)
+        history.append(history_entry(0, r, summary[:800]).replace("### Vòng 0:", f"### {title}:", 1))
+        write(out / "history.md", "\n\n".join(history[len(a.history_from):]))
+
+    # 1. measure every candidate on the start point
+    items, table = [], []
+    for c in info["candidates"]:
+        label = f"cand_{src.name}_{c['iter']}"
+        t0 = time.time()
+        r = new_round()
+        print(f"\n######## candidate {label}: build + synth on {start['name']} (sim cycle {c.get('cycle_pct')} %)",
+              flush=True)
+        cpatch = (src / c["patch"]).read_text()
+        try:
+            _, rtl = build_candidate(a, out, label, snap, start, cpatch, cand_base, r)
+            if rtl is not None:
+                r["rtl"], r["rtl_hash"] = rtl, rtl_hash(rtl)
+                r["synth"] = run_synth(a, out, label, rtl, rtl_synth_tag(a, r["rtl_hash"]))
+                r["leaf_paths"] = changed_leaf_paths(start["rtl"], rtl)
+                if not r["synth"].success:
+                    r["reason"] = f"Yosys/OpenSTA lỗi: {r['synth'].error}"[:1000]
+        except Exception as e:                                       # noqa: BLE001
+            write(out / "runs" / label / "error.txt", traceback.format_exc())
+            r["reason"] = f"lỗi hạ tầng: {type(e).__name__}: {e}"[:1000]
+        s = r.get("synth")
+        summary = c.get("summary") or ""
+        if s is None or not s.success:
+            r["reason"] = r["reason"] or "không đo được"
+            record(label, r, f"Ứng viên {label} (pha sim; không đo được trên {start['name']})", summary, t0)
+            continue
+        fs = N.family_score(s.endpoints, a.family_k)
+        items.append({"c": c, "label": label, "r": r, "paths": r["leaf_paths"], "score": fs,
+                      "patch": cpatch, "summary": summary, "t0": t0})
+        table.append(f"| {label} | {c.get('target') or '?'} | {show_paths(r['leaf_paths'])} | {c.get('cycle_pct')} % | "
+                     f"{s.fmax_mhz:.2f} | {s.worst_slack_ns:.3f} | {fs:.3f} ({fs - fs0:+.3f}) |")
+    groups = group_variants(items)
+    gtext = "; ".join("[" + ", ".join(o["label"] for o in g) + "]" for g in groups)
+    print(f"candidate groups (variants together, best first): {gtext}", flush=True)
+    if table:
+        history.append(f"### Ứng viên của {src.name} đo trên {start['name']} (build + synth, chưa quyết định)\n\n"
+                       f"Điểm họ của {start['name']}: {fs0:.3f}. Nhóm (các biến thể cùng khối, tốt trước): {gtext}\n\n"
+                       "| Ứng viên | TARGET | Khối đã đổi | Cycle (sim) | Fmax | Worst slack | Điểm họ |\n"
+                       "|---|---|---|---|---|---|---|\n" + "\n".join(table))
+        write(out / "history.md", "\n\n".join(history[len(a.history_from):]))
+
+    # 2.-3. groups best-first, at most one candidate per group
+    for g in groups:
+        kept = None
+        for k, it in enumerate(g):
+            c, label = it["c"], it["label"]
+            t0 = time.time()
+            known = cand_cyc(c) if same_base else None
+            try:
+                if best is start and known is not None:
+                    r = it["r"]
+                    r = gate_and_judge(a, out, label, None, r["rtl"], elfs, base, best, r, seen, known_cyc=known)
+                    t0 = it["t0"]
+                else:
+                    label = f"{label}@{best['name']}"
+                    r = new_round()
+                    art, rtl = build_candidate(a, out, label, snap, best, it["patch"], cand_base, r)
+                    if rtl is not None:
+                        r = gate_and_judge(a, out, label, art, rtl, elfs, base, best, r, seen)
+                r.pop("functional_fail", None)
+            except Exception as e:                                   # noqa: BLE001
+                write(out / "runs" / label / "error.txt", traceback.format_exc())
+                r = {**new_round(), "reason": f"lỗi hạ tầng: {type(e).__name__}: {e}"[:1000]}
+            r["target"], r["leaf_paths"] = c.get("target", ""), it["paths"]
+            r["variant_of"] = [o["label"] for o in g if o is not it]
+            if r.get("rtl_hash"):
+                seen.setdefault(r["rtl_hash"], label)
+            record(label, r, f"Ứng viên {label} (pha sim, không có agent ở pha asic)", it["summary"], t0)
+            if r["accepted"]:
+                best = {"name": label, "patch": r["patch"], "rtl": r["rtl"], "synth": r["synth"], "cyc": r["cyc"]}
+                kept = label
+                break
+        if kept:
+            for o in g[k + 1:]:
+                print(f"{o['label']}: bỏ qua, biến thể cùng khối với {kept} (đã nhận)", flush=True)
+                history.append(f"### Ứng viên {o['label']}: BỎ QUA\nLý do: biến thể cùng khối "
+                               f"({show_paths(o['paths'])}) với {kept}, đã nhận; mỗi nhóm giữ tối đa một ứng viên.")
         write(out / "history.md", "\n\n".join(history[len(a.history_from):]))
     get(N.reset_rocket.chia_remote(snap["rocket_head"], best["patch"]))
     return best
@@ -975,7 +1172,7 @@ def new_round() -> dict:
     return {"accepted": False, "reason": "", "synth": None, "rtl": None, "patch": "", "isa_pass": "", "build_fixes": 0}
 
 
-def run_round(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best, history, seen) -> dict:
+def run_round(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best, history, seen, covered: str = "") -> dict:
     """One round. Returns {"accepted", "reason", "synth", "rtl", "patch", "cyc", ...}."""
     d = out / "runs" / f"iter{i}"
     r = new_round()
@@ -983,7 +1180,8 @@ def run_round(a, i: int, out: Path, llm, fix_llm, elfs, snap, base, best, histor
     get(N.stage_for_agent.chia_remote(stage_files(best, history)))
     sim = a.phase == "sim"
     judge = judge_sim if sim else gate_and_judge
-    prompt = (render_sim_prompt if sim else render_prompt)(a, i, best, history, chia_target(best))
+    prompt = (render_sim_prompt(a, i, best, history, chia_target(best), covered) if sim
+              else render_prompt(a, i, best, history, chia_target(best)))
     write(d / "prompt.md", prompt)
     AB_STATE["label"] = f"{a.run_name} round {i}"
 
@@ -1083,7 +1281,7 @@ def run(a, out: Path):
         t0 = time.time()
         print(f"\n######## round {i}/{a.iters}", flush=True)
         try:
-            r = run_round(a, i, out, llm, fix_llm, elfs, snap, base, best, history, seen)
+            r = run_round(a, i, out, llm, fix_llm, elfs, snap, base, best, history, seen, covered_text(candidates))
         except SystemExit:
             raise
         except Exception as e:                                       # noqa: BLE001
@@ -1092,7 +1290,11 @@ def run(a, out: Path):
         r["minutes"] = (time.time() - t0) / 60
         if r.get("notes"):
             r["reason"] = r["reason"] + " [" + "; ".join(r["notes"]) + "]"
-        resp_summary = last_response(out / "runs" / f"iter{i}")
+        rs = round_summary(out / "runs" / f"iter{i}")
+        r["target"] = rs["target"]
+        if r["accepted"] and a.phase == "sim":
+            r["variant_of"] = [c["iter"] for c in candidates if paths_overlap(r.get("leaf_paths") or [],
+                                                                               c.get("leaf_paths") or [])]
         write(out / "runs" / f"iter{i}" / "decision.json",
               json.dumps({k: v for k, v in r.items() if k not in ("synth", "rtl", "patch")},
                          indent=2, ensure_ascii=False, default=str))
@@ -1110,13 +1312,25 @@ def run(a, out: Path):
             r["candidate_diff"] = get(N.round_diff.chia_remote(snap["rocket_head"], best["patch"]))
             write(out / "patches" / f"cand_iter{i}.patch", r["patch"])
             write(out / "patches" / f"cand_iter{i}.delta.patch", r["candidate_diff"])
-            candidates.append({"iter": i, "patch": f"patches/cand_iter{i}.patch", "cycle_pct": r.get("cycle_pct"),
-                               "summary": resp_summary[-1500:]})
+            s = r.get("synth")
+            candidates.append({
+                "iter": i, "patch": f"patches/cand_iter{i}.patch", "cycle_pct": r.get("cycle_pct"),
+                "cyc": r.get("cyc"), "rtl_hash": r.get("rtl_hash"), "target": rs["target"],
+                "variant_claim": rs["variant_claim"], "leaf_paths": r.get("leaf_paths") or [],
+                "variant_of": r.get("variant_of") or [], "flow": a.synth_flow, "period_ns": a.period_ns,
+                "synth": ({"fmax_mhz": round(s.fmax_mhz, 3), "slack_ns": round(s.worst_slack_ns, 4),
+                           "family_score": round(N.family_score(s.endpoints, a.family_k), 4)}
+                          if s is not None and s.success else None),
+                "synth_text": (f"{s.fmax_mhz:.2f} MHz, slack {s.worst_slack_ns:.3f}, family score "
+                               f"{N.family_score(s.endpoints, a.family_k):.3f} (start "
+                               f"{N.family_score(best['synth'].endpoints, a.family_k):.3f})"
+                               if s is not None and s.success else ""),
+                "summary": rs["summary"]})
             write(out / "candidates.json", json.dumps({"base": best["name"], "base_patch": "patches/base.patch",
                                                        "candidates": candidates}, indent=2, ensure_ascii=False))
         elif r["accepted"]:
             best = {"name": f"iter{i}", "patch": r["patch"], "rtl": r["rtl"], "synth": r["synth"], "cyc": r["cyc"]}
-        history.append(history_entry(i, r, resp_summary))
+        history.append(history_entry(i, r, rs["summary"][:800]))
         write(out / "history.md", "\n\n".join(history[len(a.history_from):]))
 
     write(out / "patches" / "best.patch", best["patch"])
