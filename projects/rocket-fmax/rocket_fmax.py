@@ -676,6 +676,14 @@ def after_agent(out: Path, d: Path, i: int, snap: dict, best: dict, r: dict, age
     # an unchanged tree is the best patch itself: keeping it would list the accepted patch
     # under "Patch đã bị loại" in history.md and tell the next agent not to repeat it
     r["patch"] = "" if diff["patch"] == best["patch"] else diff["patch"]
+    # the round's own edits (on top of the best): r["patch"] is the whole tree vs rocket head, start
+    # patch included, so showing it under "Patch đã bị loại" told the next agent (asic-3) not to
+    # repeat the start point and the 4000-char cut hid the round's edits
+    try:
+        r["round_delta"] = get(N.round_diff.chia_remote(snap["rocket_head"], best["patch"])) if r["patch"] else ""
+    except Exception as e:                                           # noqa: BLE001
+        r["round_delta"] = ""
+        print(f"round {i}: round_diff failed ({type(e).__name__}: {e}); history keeps no rejected patch", flush=True)
     if why:
         r["reason"] = "; ".join(x for x in (label, agent_reason, why) if x)
         return None
@@ -923,6 +931,16 @@ def last_response(d: Path) -> str:
     return files[-1].read_text()[-1500:] if files[-1].exists() else ""
 
 
+def clip_mid(text: str, n: int) -> str:
+    """At most about n chars: the head (file and hunk headers) and the tail, the middle cut.
+    A tail-only cut (asic-3) started diffs mid-line, without the file name."""
+    if len(text) <= n:
+        return text
+    head = text[:n // 3].rsplit("\n", 1)[0]
+    tail = text[-(n - n // 3):].split("\n", 1)[-1]
+    return f"{head}\n... ({len(text) - len(head) - len(tail)} ký tự bị cắt) ...\n{tail}"
+
+
 def tried_edits(d: Path, diff_chars: int = 3000, max_chars: int = 12000) -> str:
     """The synth_ab measurements of the round so far (the A/B log is per round, so the last
     session's *_ab_experiments.jsonl holds them all), grouped by edit: each edit's diff on top of
@@ -947,7 +965,7 @@ def tried_edits(d: Path, diff_chars: int = 3000, max_chars: int = 12000) -> str:
         edits.setdefault(e.get("diff") or "(diff not logged)", []).append(f"[{e.get('t')}] {res}")
     out = []
     for n, (diff, res) in enumerate(edits.items(), 1):
-        out += [f"Edit {n}:", *[f"- {x}" for x in res], "", "```diff", diff[-diff_chars:].strip(), "```", ""]
+        out += [f"Edit {n}:", *[f"- {x}" for x in res], "", "```diff", clip_mid(diff, diff_chars).strip(), "```", ""]
     text = "\n".join(out).strip()
     return text if len(text) <= max_chars else "...(earlier edits cut)\n" + text[-max_chars:]
 
@@ -977,8 +995,10 @@ def history_entry(i: int, r: dict, resp_summary: str) -> str:
     if r.get("tried") and not r["accepted"]:
         lines.append("Các sửa đổi agent đã đo bằng synth_ab trong vòng này (đều không được giữ; đừng thử lại "
                      "y nguyên hay cùng ý trên cùng logic):\n\n" + r["tried"])
-    if not r["accepted"] and r["patch"]:
-        lines.append("Patch đã bị loại (đã revert, đừng lặp lại y nguyên):\n```diff\n" + r["patch"][:4000] + "\n```")
+    rejected = r.get("round_delta", r["patch"])
+    if not r["accepted"] and rejected:
+        lines.append("Patch đã bị loại (phần sửa của vòng này trên bản tốt nhất; đã revert, đừng lặp lại y nguyên):"
+                     "\n```diff\n" + clip_mid(rejected, 4000) + "\n```")
     if r["accepted"] and r.get("candidate_diff"):
         lines.append("Ứng viên đã lưu (đừng làm lại cùng ý trên cùng khối; chọn khối hoặc họ endpoint khác):\n"
                      "```diff\n" + r["candidate_diff"][-4000:] + "\n```")
@@ -1080,7 +1100,7 @@ def run_candidates(a, out: Path, elfs, snap, base, best, history, seen) -> dict:
                     "elapsed_min": f"{r['minutes']:.1f}", "synth_min": fmt(r.get("synth_min"), 1)})
         print(f"{label}: {'ACCEPT' if r['accepted'] else 'REJECT'} ({r['minutes']:.1f} min) - {r['reason'][:400]}",
               flush=True)
-        shown = {**r, "patch": delta, "candidate_diff": delta}
+        shown = {**r, "patch": delta, "round_delta": delta, "candidate_diff": delta}
         history.append(history_entry(0, shown, summary[:800]).replace("### Vòng 0:", f"### {title}:", 1))
         write(out / "history.md", "\n\n".join(history[len(a.history_from):]))
 
@@ -1307,7 +1327,7 @@ def run(a, out: Path):
             r["variant_of"] = [c["iter"] for c in candidates if paths_overlap(r.get("leaf_paths") or [],
                                                                                c.get("leaf_paths") or [])]
         write(out / "runs" / f"iter{i}" / "decision.json",
-              json.dumps({k: v for k, v in r.items() if k not in ("synth", "rtl", "patch")},
+              json.dumps({k: v for k, v in r.items() if k not in ("synth", "rtl", "patch", "round_delta")},
                          indent=2, ensure_ascii=False, default=str))
         append_csv(out / "results.csv", CSV_FIELDS,
                    {"iter": i, "accepted": r["accepted"], **synth_row(r.get("synth")), "isa_pass": r["isa_pass"],

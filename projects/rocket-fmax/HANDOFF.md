@@ -3,11 +3,13 @@
 File này dành cho session Claude Code tiếp quản project. Đọc cùng `CLAUDE.md` (gốc repo), `docs/workflow-phases.md`
 và `README.md` (thư mục này).
 
-## Trạng thái (03/11/2026)
+## Trạng thái (04/11/2026)
 
-- Tốt nhất ở flow `v3`: **91,81 MHz** (`asic-2`, patch `~/rocket-fmax-v2/asic-2/patches/best.patch` = `sim-1` vòng 5 + `sim-2`
-  vòng 4: `LW` đi đường bypass chậm), cycle **+2,655 %** (còn 0,345 % ngân sách; qsort +7,4 %, spmv +3,7 %). Đường găng:
-  `core.ex_reg_rs_lsb_1 → core.mem_reg_wdata` (bypass → ALU tầng ex). Trước đó: 87,84 MHz (`asic-1`, +0,405 %).
+- Tốt nhất ở flow `v3`: **93,17 MHz** (`asic-3`, patch `~/rocket-fmax-v2/asic-3/patches/best.patch` = `sim-1` vòng 5 +
+  `sim-2` vòng 4 (`LW` đi đường bypass chậm) + `asic-3` vòng 1 (mux bypass one-hot) + vòng 2 (`negated_remainder` cây
+  OR)), cycle **+2,655 %** (còn 0,345 % ngân sách; qsort +7,4 %, spmv +3,7 %), worst slack −0,734 ns, TNS −20,4 ns.
+  Đường găng: FMA `mulAddResult_ppl → mulAddResult_r`; ngay sau là `core.div.remainder` (−0,708 khi FMA được sửa).
+  Trước đó: 91,81 (`asic-2`), 87,84 MHz (`asic-1`).
 - Tốt nhất: **92,36 MHz** Yosys `v2` (patch `~/rocket-fmax-v2/fmax-r4/patches/best.patch` trên máy người dùng),
   cycle +0,405 %, worst slack −0,827 ns. Các họ đường găng sát nhau: `core.div.remainder` (−0,83), FMA
   `mulAddResult_r`/`ppl`/`pph` (−0,80 … −0,70), `fpuOpt.regfile_ext.Memory` (−0,66), `divSqrt` `rem_Z`/`sigX_Z`
@@ -46,7 +48,13 @@ và `README.md` (thư mục này).
    `core.mem_reg_wdata` (ALU/bypass tầng ex), từ `asic-2/patches/best.patch`. Ý tưởng chưa làm: cho agent pha sim thấy đường
    xấu nhất của từng họ (hiện `timing_paths.rpt` chỉ có 10 đường, đều một họ; vòng 5 của `sim-2` phải đoán đường
    `divSqrt`); nhóm biến thể xét thêm file nguồn.
-5. Sau đó: ASIC post-route (ORFS sky130) cho bản tốt nhất.
+5. Xong (04/11/2026): `asic-3` (5 vòng agent từ `asic-2/patches/best.patch`) nhận vòng 1, 2: 91,81 → 93,17 MHz, cycle
+   không đổi. Vòng 3–5 nhắm FMA `mulAddResult_*`: carry-save/carry-select xấu hơn; module riêng cho cộng cuối
+   (`FmaFinalAdd2`) lời +0,198 ns ở họ đó nhưng `core.div.remainder` lên thay (+0,24 %, LOẠI). Sửa sau đó (chưa chạy
+   thật): "Patch đã bị loại" ghi phần sửa của vòng trên bản tốt nhất; diff `synth_ab` cắt giữa thay vì lấy đuôi. Hướng
+   tiếp: các họ đứng đầu sát nhau (~−0,7 ns), cần sửa FMA và `core.div.remainder` trong cùng một vòng, hoặc chấp nhận
+   từng bước theo điểm họ (vòng 5 được +0,124, ngưỡng `--min-family-gain` là 0,15).
+6. Sau đó: ASIC post-route (ORFS sky130) cho bản tốt nhất.
 
 ## Quy ước làm việc
 
