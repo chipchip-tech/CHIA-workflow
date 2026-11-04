@@ -67,7 +67,12 @@ và `README.md` (thư mục này).
    chỉ −0,0087), nhưng history không có điểm họ. Sửa sau đó (mới kiểm bằng dữ liệu giả): history ghi điểm họ mỗi lần
    `synth_ab` và đánh dấu lần đo trùng. Cần hỏi người dùng điểm họ của lần đo `negOf` (`grep` trong
    `*ab_experiments.jsonl`) trước khi chọn hướng tiếp.
-8. Sau đó: ASIC post-route (ORFS sky130) cho bản tốt nhất.
+8. Xong (04/11/2026): `asic-6` (như `asic-5`, agent `--model opus --effort medium`) nhận vòng 2–5: 93,88 →
+   **109,17 MHz**, worst slack +0,840 ns, cycle −0,006 %, hiệu năng +19,4 %. Mục tiêu > 100 MHz đạt ở mức synth. Vòng 4
+   kéo cycle từ +2,685 % về −0,006 % (bypass, BHT): cần xem `asic-6/patches/best.patch` để hiểu vì sao. Agent Opus làm
+   được nhiều sửa lớn trong một vòng (vòng 2 sửa cả `MulDiv` lẫn FMA), đúng chỗ Sonnet bị kẹt ở `asic-3`..`asic-5`.
+9. Sau đó: kiểm thêm chức năng của `asic-6/patches/best.patch` (ngoài riscv-tests và benchmark của gate), rồi ASIC
+   post-route (ORFS sky130) cho bản tốt nhất.
 
 ## Quy ước làm việc
 
