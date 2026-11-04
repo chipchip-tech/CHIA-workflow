@@ -353,7 +353,8 @@ class SynthABTool(ChiaTool):
                 self._jobs[handle] = {"module": module, "text": text}
                 self._log({"event": "ab", "handle": handle, "module": module, "memo": True, "child_key": key,
                            "diff": child.get("diff", "")[-6000:], "child": old.get("child", {}),
-                           "parent": old.get("parent", {}), "delta_ns": old.get("delta_ns")})
+                           "parent": old.get("parent", {}), "delta_ns": old.get("delta_ns"),
+                           "text": old["text"][-8000:]})
                 return f"handle={handle}: already measured, call synth_ab_ab_result(handle=\"{handle}\") for the result"
             job = {"module": module, "key": key, "started": time.time(), "whole": whole, "diff": child.get("diff", ""),
                    "child": N.synth_sta.options(**res).chia_remote(c_rtl, self._period_ns, self._flow,

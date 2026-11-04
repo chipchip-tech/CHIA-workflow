@@ -10,7 +10,7 @@ patch `~/rocket-fmax-v2/asic-4/patches/best.patch`, sha256 `b16798766e65…`), t
 | Pha | Lệnh | Thước đo | Trạng thái |
 |---|---|---|---|
 | Simulate | `--phase sim` | gate (riscv-tests + 8 benchmark), chi phí cycle; agent thêm tầng pipeline, mỗi vòng qua gate thành một ứng viên (kèm synth sơ bộ cả tile, khối đã đổi) | `sim-1` xong (code cũ): 5 ứng viên, cả 5 trên FMA; `sim-2` xong (03/11/2026, code mới, chạy thật): 6 ứng viên ở 5 khối khác nhau, synth sơ bộ chạy đúng |
-| ASIC, synth | `--phase asic` (mặc định), `--try-from <đợt sim>` | Yosys + OpenSTA sky130hd tt_025C_1v80, SRAM là hộp đen; gate như trên | r1–r4, y1–y4 đã chạy (flow `v2`); `asic-1` (`v3`, `--try-from sim-1`) chạy thật 03/11/2026: 85,01 → 87,84 MHz; `asic-2` (`--try-from sim-2 --iters 0`): 87,84 → 91,81 MHz; `asic-3` (5 vòng agent): 91,81 → 93,17 MHz; `asic-4`: → 93,88 MHz |
+| ASIC, synth | `--phase asic` (mặc định), `--try-from <đợt sim>` | Yosys + OpenSTA sky130hd tt_025C_1v80, SRAM là hộp đen; gate như trên | r1–r4, y1–y4 đã chạy (flow `v2`); `asic-1` (`v3`, `--try-from sim-1`) chạy thật 03/11/2026: 85,01 → 87,84 MHz; `asic-2` (`--try-from sim-2 --iters 0`): 87,84 → 91,81 MHz; `asic-3` (5 vòng agent): 91,81 → 93,17 MHz; `asic-4`: → 93,88 MHz; `asic-5`: 0 vòng nhận |
 | ASIC, post-route | (chưa có) | ORFS sky130 | Chưa bắt đầu |
 | FPGA | (đã gỡ) | Vivado post-route, Arty A7-100T | **Tạm bỏ** ở 63,61 MHz (`fmax-r4`/`r5`); code ở commit `d2a1ac0` |
 
@@ -230,6 +230,17 @@ docker exec chia-chipyard-$USER-0 bash -lc 'cd /home/ray/chipyard/generators/roc
 - **Sửa thêm sau `asic-4` (04/11/2026):** khi đọc `--history-from`, khối "Patch đã bị loại" nhãn cũ (cả cây so với
   rocket head) bị bỏ ở mọi vòng có mục "Các sửa đổi agent đã đo bằng synth_ab" (`asic-3` vòng 5, `asic-4` vòng 2), không
   chỉ vòng "agent không thay đổi gì". Đã thử trên hai file history đó: không còn khối cũ, ba mục `synth_ab` giữ nguyên.
+- **`asic-5` chạy thật (04/11/2026, `--start-patch asic-4/patches/best.patch --iters 5 --min-family-gain 0.1`,
+  `--history-from sim-2 asic-2 asic-3 asic-4`):** lần đầu chạy bằng code có `clip_mid` và history mới (đã kiểm: diff
+  `synth_ab` giữ tên file, khối cũ không còn). **0 vòng nhận**, cả 5 vòng agent tự revert. Đã đo: FMA cây Wallace
+  (−0,24 … −0,28 ns), toán hạng ALU AND-OR one-hot (−0,14), chỉ phủ định nửa thấp (−0,058), ghi `remainder` lúc
+  `io.req.fire` (−0,209), bộ chia hai pha (−0,058), FMA tách ba tích (−1,12), và hai bộ phủ định song song sau mux
+  `resHi` (`negOf`, −0,0087; vòng 5 đo lại y nguyên hai lần, `ALREADY MEASURED`). Sửa `negOf` đẩy đường găng khỏi
+  `core.div` sang `fpuOpt.dfma.fma.mulAddResult_pph` (−0,661), tức worst slack chỉ giảm 0,0087 (trong `--worst-tol`
+  0,02); history không ghi điểm họ nên chưa biết vòng đó có đủ +0,1 để loop nhận hay không.
+- **Sửa thêm sau `asic-5` (04/11/2026, mới kiểm bằng dữ liệu giả):** mục "Các sửa đổi agent đã đo bằng synth_ab" ghi
+  thêm điểm họ cha → con của mỗi lần đo (lấy từ dòng `family score` trong kết quả `synth_ab`) và đánh dấu lần đo trùng
+  (`ALREADY MEASURED`); `ab_tool.py` ghi cả văn bản kết quả cho lần đo trùng.
 - **Giới hạn đã biết của nhóm biến thể:** nhóm theo đường instance (trùng hoặc lồng nhau), nên `core` (sửa
   `RocketCore.scala`) gộp với `core.div` (sửa `Multiplier.scala`) dù hai patch không đụng nhau. Ở `asic-2` không mất gì
   (vòng 1 tự nó không tăng Fmax), nhưng về sau có thể cần xét thêm file nguồn bị sửa.

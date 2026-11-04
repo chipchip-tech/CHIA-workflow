@@ -62,7 +62,12 @@ và `README.md` (thư mục này).
    93,88 MHz, cycle +2,685 %. Vòng 4, 5 nhắm `resHi → remainder` (tách fanout, `s_neg_output` hai bước) đều xấu hơn.
    Sửa sau đó: history nhãn cũ bỏ khối cả cây ở vòng có mục `synth_ab`. Hướng tiếp: `core.div` (`resHi` → mux → phủ định)
    và bypass/ALU tầng ex; ngân sách cycle còn 0,315 %.
-7. Sau đó: ASIC post-route (ORFS sky130) cho bản tốt nhất.
+7. Xong (04/11/2026): `asic-5` (code mới, 5 vòng agent từ `asic-4/patches/best.patch`): 0 vòng nhận. Sửa đáng xem
+   lại: hai bộ phủ định song song sau mux `resHi` (`negOf`) đẩy đường găng sang FMA `mulAddResult_pph` (−0,661, worst
+   chỉ −0,0087), nhưng history không có điểm họ. Sửa sau đó (mới kiểm bằng dữ liệu giả): history ghi điểm họ mỗi lần
+   `synth_ab` và đánh dấu lần đo trùng. Cần hỏi người dùng điểm họ của lần đo `negOf` (`grep` trong
+   `*ab_experiments.jsonl`) trước khi chọn hướng tiếp.
+8. Sau đó: ASIC post-route (ORFS sky130) cho bản tốt nhất.
 
 ## Quy ước làm việc
 

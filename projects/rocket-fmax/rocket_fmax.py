@@ -960,8 +960,12 @@ def tried_edits(d: Path, diff_chars: int = 3000, max_chars: int = 12000) -> str:
         if e.get("error") or not c.get("ok"):
             res = f"{e.get('module')}: failed ({(e.get('error') or c.get('error') or '')[:150]})"
         else:
+            fam = re.search(r"family score [^\n]*?parent (-?[\d.]+), child (-?[\d.]+), delta ([+-]?[\d.]+)",
+                            e.get("text") or "")
             res = (f"{e.get('module')}: child {c.get('slack_ns')} ns vs parent {p.get('slack_ns')} ns, "
-                   f"delta {e.get('delta_ns')} ns, child worst path {c.get('crit')}")
+                   f"delta {e.get('delta_ns')} ns, child worst path {c.get('crit')}"
+                   + (f"; điểm họ {fam[1]} -> {fam[2]} ({fam[3]} ns)" if fam else "")
+                   + (" (ALREADY MEASURED: Verilog giống hệt một lần đo trước)" if e.get("memo") else ""))
         edits.setdefault(e.get("diff") or "(diff not logged)", []).append(f"[{e.get('t')}] {res}")
     out = []
     for n, (diff, res) in enumerate(edits.items(), 1):
