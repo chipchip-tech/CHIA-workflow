@@ -3,7 +3,7 @@
 Mục tiêu: **Fmax của `RocketTile` (Chipyard `RocketConfig`) > 100 MHz** ở chu kỳ 10 ns, đo bằng Yosys + OpenSTA trên
 `sky130_fd_sc_hd` (phần synth của nhánh ASIC), chi phí cycle tối đa +3 % so với RocketConfig gốc. Tốt nhất hiện có:
 **92,36 MHz** (flow `v2`, patch của `fmax-r4`, cycle +0,405 %). Ở flow `v3`: **91,81 MHz**, cycle +2,655 % (`asic-2`,
-ứng viên `sim-2` vòng 4, patch `~/rocket-fmax-v2/asic-2/best.patch`), từ 85,01 → 87,84 (`asic-1`) → 91,81 MHz. Báo cáo các đợt Yosys: [REPORT.md](REPORT.md).
+ứng viên `sim-2` vòng 4, patch `~/rocket-fmax-v2/asic-2/patches/best.patch`), từ 85,01 → 87,84 (`asic-1`) → 91,81 MHz. Báo cáo các đợt Yosys: [REPORT.md](REPORT.md).
 
 ## Pha (theo `docs/workflow-phases.md`)
 

@@ -5,7 +5,7 @@ và `README.md` (thư mục này).
 
 ## Trạng thái (03/11/2026)
 
-- Tốt nhất ở flow `v3`: **91,81 MHz** (`asic-2`, patch `~/rocket-fmax-v2/asic-2/best.patch` = `sim-1` vòng 5 + `sim-2`
+- Tốt nhất ở flow `v3`: **91,81 MHz** (`asic-2`, patch `~/rocket-fmax-v2/asic-2/patches/best.patch` = `sim-1` vòng 5 + `sim-2`
   vòng 4: `LW` đi đường bypass chậm), cycle **+2,655 %** (còn 0,345 % ngân sách; qsort +7,4 %, spmv +3,7 %). Đường găng:
   `core.ex_reg_rs_lsb_1 → core.mem_reg_wdata` (bypass → ALU tầng ex). Trước đó: 87,84 MHz (`asic-1`, +0,405 %).
 - Tốt nhất: **92,36 MHz** Yosys `v2` (patch `~/rocket-fmax-v2/fmax-r4/patches/best.patch` trên máy người dùng),
@@ -43,7 +43,7 @@ và `README.md` (thư mục này).
    --iters 0` nhận vòng 4 (87,84 → 91,81 MHz, cycle +2,655 %). Sửa sau đó (chưa chạy thật): history của `--try-from`
    ghi patch riêng của ứng viên thay vì cả cây; đọc `TARGET:` ở giữa dòng. Vì ngân sách cycle gần hết, thêm tầng
    pipeline gần như không còn chỗ: bước tiếp hợp lý là pha asic có agent (sửa logic, không tốn cycle) nhắm
-   `core.mem_reg_wdata` (ALU/bypass tầng ex), từ `asic-2/best.patch`. Ý tưởng chưa làm: cho agent pha sim thấy đường
+   `core.mem_reg_wdata` (ALU/bypass tầng ex), từ `asic-2/patches/best.patch`. Ý tưởng chưa làm: cho agent pha sim thấy đường
    xấu nhất của từng họ (hiện `timing_paths.rpt` chỉ có 10 đường, đều một họ; vòng 5 của `sim-2` phải đoán đường
    `divSqrt`); nhóm biến thể xét thêm file nguồn.
 5. Sau đó: ASIC post-route (ORFS sky130) cho bản tốt nhất.
