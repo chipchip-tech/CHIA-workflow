@@ -6,8 +6,9 @@ và `README.md` (thư mục này).
 ## Trạng thái (04/11/2026)
 
 - Tốt nhất ở flow `v3`: **93,17 MHz** (`asic-3`, patch `~/rocket-fmax-v2/asic-3/patches/best.patch` = `sim-1` vòng 5 +
-  `sim-2` vòng 4 (`LW` đi đường bypass chậm) + `asic-3` vòng 1 (mux bypass one-hot) + vòng 2 (`negated_remainder` cây
-  OR)), cycle **+2,655 %** (còn 0,345 % ngân sách; qsort +7,4 %, spmv +3,7 %), worst slack −0,734 ns, TNS −20,4 ns.
+  `sim-2` vòng 4 (`LW` đi đường bypass chậm) + `asic-3` vòng 1 (mux bypass one-hot, thêm thanh ghi trước đầu vào
+  `divSqrt`) + vòng 2 (`negated_remainder` cây OR); sha256 `e7d7db2a34af…`, 479 dòng, 5 file: `ALU`, `AMOALU`,
+  `Multiplier`, `RocketCore`, `FPU`), cycle **+2,655 %** (còn 0,345 % ngân sách; qsort +7,4 %, spmv +3,7 %), worst slack −0,734 ns, TNS −20,4 ns.
   Đường găng: FMA `mulAddResult_ppl → mulAddResult_r`; ngay sau là `core.div.remainder` (−0,708 khi FMA được sửa).
   Trước đó: 91,81 (`asic-2`), 87,84 MHz (`asic-1`).
 - Tốt nhất: **92,36 MHz** Yosys `v2` (patch `~/rocket-fmax-v2/fmax-r4/patches/best.patch` trên máy người dùng),
