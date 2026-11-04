@@ -12,7 +12,7 @@ patch `~/rocket-fmax-v2/asic-4/patches/best.patch`, sha256 `b16798766e65…`), t
 | Simulate | `--phase sim` | gate (riscv-tests + 8 benchmark), chi phí cycle; agent thêm tầng pipeline, mỗi vòng qua gate thành một ứng viên (kèm synth sơ bộ cả tile, khối đã đổi) | `sim-1` xong (code cũ): 5 ứng viên, cả 5 trên FMA; `sim-2` xong (03/11/2026, code mới, chạy thật): 6 ứng viên ở 5 khối khác nhau, synth sơ bộ chạy đúng |
 | ASIC, synth | `--phase asic` (mặc định), `--try-from <đợt sim>` | Yosys + OpenSTA sky130hd tt_025C_1v80, SRAM là hộp đen; gate như trên | r1–r4, y1–y4 đã chạy (flow `v2`); `asic-1` (`v3`, `--try-from sim-1`) chạy thật 03/11/2026: 85,01 → 87,84 MHz; `asic-2` (`--try-from sim-2 --iters 0`): 87,84 → 91,81 MHz; `asic-3` (5 vòng agent): 91,81 → 93,17 MHz; `asic-4`: → 93,88 MHz; `asic-5`: 0 vòng nhận; `asic-6` (agent Opus): → **109,17 MHz**, cycle −0,006 % |
 | ASIC, post-route | (chưa có) | ORFS sky130 | Chưa bắt đầu |
-| FPGA | `soc_bitstream.py` (bitstream cả SoC qua `fpga/` của Chipyard, không agent, không board) | Vivado post-route cả SoC, Arty A7-100T, clock cố định (50 MHz) | Loop **tạm bỏ** ở 63,61 MHz (`fmax-r4`/`r5`, code ở `d2a1ac0`). `viv-asic6` (04/11/2026, out-of-context như `fmax-r4`, chạy thật): `asic-6` **63,27 MHz**, gần như không đổi so với 63,61. Sau đó bỏ worker `vivado` (`vivado_check.py`, commit `2dd99af`), chuyển sang bitstream SoC (chưa chạy) |
+| FPGA | `soc_bitstream.py` (bitstream cả SoC qua `fpga/` của Chipyard, không agent, không board) | Vivado post-route cả SoC, Arty A7-100T, clock cố định (50 MHz) | Loop **tạm bỏ** ở 63,61 MHz (`fmax-r4`/`r5`, code ở `d2a1ac0`). `viv-asic6` (04/11/2026, out-of-context như `fmax-r4`, chạy thật): `asic-6` **63,27 MHz**, gần như không đổi so với 63,61. Sau đó bỏ worker `vivado` (`vivado_check.py`, commit `2dd99af`), chuyển sang bitstream SoC. `soc-asic6` (chạy thật, 50 MHz): cả hai điểm ra bitstream và đạt timing, WNS baseline 0,129 / `asic-6` 0,372 ns (Fmax ước tính 50,32 / 50,95 MHz, chỉ là cận dưới) |
 
 Ngân sách chung: chi phí cycle (trung bình nhân `mcycle / mcycle baseline` trên 8 benchmark) ≤ 1,03; mọi test pass
 với `minstret` bằng baseline. `rv64ui-p-ma_data` fail ngay trên baseline nên bị loại khỏi gate.
@@ -322,6 +322,13 @@ docker exec chia-chipyard-$USER-0 bash -lc 'cd /home/ray/chipyard/generators/roc
 - **`soc_bitstream.py`, lần chạy đầu `soc-asic6` (04/11/2026):** đã kiểm Vivado 2025.1 và board files Digilent thấy
   được trong container chipyard. Cả hai điểm dừng sau 0,5 phút vì `chipyard_fpga` không compile (thiếu `wf_active`,
   xem mục Cài đặt); đã thêm bước vá harness lúc chạy (kiểm trên bản sao `chia_artifact`: đúng 6 file, chạy lại không
-  vá lần hai). Chưa kiểm: phần sau compile Scala, patch `asic-6` dưới Chisel 6, tên clock và tìm instance `RocketTile`
-  sau `-flatten_hierarchy rebuilt`.
+  vá lần hai).
+- **`soc-asic6` chạy lại (04/11/2026, chạy thật):** cả hai điểm compile, route và ra bitstream ở 50 MHz (khoảng 12 phút
+  mỗi điểm), clock lõi `clk_out1_harnessSysPLLNode`, tìm được instance `RocketTile`. WNS baseline 0,129 ns, `asic-6`
+  0,372 ns, không endpoint âm; vì Vivado dừng tối ưu khi đã đạt timing, Fmax ước tính 50,32 / 50,95 MHz chỉ là cận
+  dưới. Đường găng trong tile: baseline `fpuOpt/divSqrt` → `fpuOpt/regfile_ext/Memory`; `asic-6` chuyển sang
+  `frontend/icache/s2_tag_hit` → CE của `frontend/fq` (giống out-of-context). Tài nguyên tile: `asic-6` LUT +23,8 %,
+  FF +8,7 %, DSP 25 → 0 (cũng 0 DSP trong `viv-asic6`). Mỗi lần chạy lại `soc.csv` giữ cả dòng lỗi cũ (ghi nối).
+  Khi đặt `--freq-mhz` cao hơn mức đạt được, fpga-shells dừng sau route (`Failed to meet timing`), không có
+  bitstream nhưng vẫn đo WNS trên `post_route.dcp`.
 - Tính đúng chức năng chỉ dựa vào riscv-tests và 8 benchmark (như example), không kiểm tương đương.

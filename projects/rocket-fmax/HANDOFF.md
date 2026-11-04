@@ -79,7 +79,9 @@ và `README.md` (thư mục này).
 10. Đang làm (04/11/2026): bitstream cả SoC bằng flow `fpga/` của Chipyard, không có board, chỉ gen file và đo
    (`soc_bitstream.py`, node `vivado_nodes.soc_bitstream` trên worker chipyard; Vivado và board files Digilent mount
    từ `~/tools/Xilinx`). Lệnh trong README, mục Chạy. Lần chạy đầu (`soc-asic6`) dừng ở compile Scala: harness `fpga/` của
-   `chia_artifact` thiếu `wf_active`; node nay tự vá lúc chạy. Đang chạy lại. Nếu lỗi, đọc `runs/<điểm>/make_log_tail.txt`.
+   `chia_artifact` thiếu `wf_active`; node nay tự vá lúc chạy. Chạy lại thành công ở 50 MHz: cả hai điểm có bitstream,
+   WNS baseline 0,129 / `asic-6` 0,372 ns (Fmax chỉ là cận dưới), `asic-6` tile LUT +23,8 %, DSP 25 → 0. Bước kế:
+   `--freq-mhz 70` (`soc-asic6-f70`) để WNS âm, đo Fmax thật của SoC.
 11. Sau đó: kiểm thêm chức năng của `asic-6/patches/best.patch` (ngoài riscv-tests và benchmark của gate), rồi ASIC
    post-route (ORFS sky130) cho bản tốt nhất.
 
