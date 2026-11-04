@@ -12,7 +12,7 @@ patch `~/rocket-fmax-v2/asic-4/patches/best.patch`, sha256 `b16798766e65…`), t
 | Simulate | `--phase sim` | gate (riscv-tests + 8 benchmark), chi phí cycle; agent thêm tầng pipeline, mỗi vòng qua gate thành một ứng viên (kèm synth sơ bộ cả tile, khối đã đổi) | `sim-1` xong (code cũ): 5 ứng viên, cả 5 trên FMA; `sim-2` xong (03/11/2026, code mới, chạy thật): 6 ứng viên ở 5 khối khác nhau, synth sơ bộ chạy đúng |
 | ASIC, synth | `--phase asic` (mặc định), `--try-from <đợt sim>` | Yosys + OpenSTA sky130hd tt_025C_1v80, SRAM là hộp đen; gate như trên | r1–r4, y1–y4 đã chạy (flow `v2`); `asic-1` (`v3`, `--try-from sim-1`) chạy thật 03/11/2026: 85,01 → 87,84 MHz; `asic-2` (`--try-from sim-2 --iters 0`): 87,84 → 91,81 MHz; `asic-3` (5 vòng agent): 91,81 → 93,17 MHz; `asic-4`: → 93,88 MHz; `asic-5`: 0 vòng nhận; `asic-6` (agent Opus): → **109,17 MHz**, cycle −0,006 % |
 | ASIC, post-route | (chưa có) | ORFS sky130 | Chưa bắt đầu |
-| FPGA | `vivado_check.py` (đo một lần, không agent) | Vivado post-route, Arty A7-100T | Loop **tạm bỏ** ở 63,61 MHz (`fmax-r4`/`r5`, code loop ở commit `d2a1ac0`). 04/11/2026: thêm lại `vivado_nodes.py` + worker `vivado` để đo một lần bản `asic-6` (chưa chạy) |
+| FPGA | `soc_bitstream.py` (bitstream cả SoC qua `fpga/` của Chipyard, không agent, không board) | Vivado post-route cả SoC, Arty A7-100T, clock cố định (50 MHz) | Loop **tạm bỏ** ở 63,61 MHz (`fmax-r4`/`r5`, code ở `d2a1ac0`). `viv-asic6` (04/11/2026, out-of-context như `fmax-r4`, chạy thật): `asic-6` **63,27 MHz**, gần như không đổi so với 63,61. Sau đó bỏ worker `vivado` (`vivado_check.py`, commit `2dd99af`), chuyển sang bitstream SoC (chưa chạy) |
 
 Ngân sách chung: chi phí cycle (trung bình nhân `mcycle / mcycle baseline` trên 8 benchmark) ≤ 1,03; mọi test pass
 với `minstret` bằng baseline. `rv64ui-p-ma_data` fail ngay trên baseline nên bị loại khỏi gate.
@@ -72,16 +72,23 @@ chia status        # chipyard 1, verilator_run 4, claude_creds 1, eda 1
 
 Worker `hello_claude` mount `~/.claude` của host: đăng nhập `claude` trên host trước.
 
-Worker `rocket_vivado` (chỉ `vivado_check.py` dùng) cần Vivado cài sẵn ở `~/tools/Xilinx` (đã cài 2025.1 hồi
-`fmax-r4`) và image `chia-vivado`:
+`soc_bitstream.py` chạy Vivado trong container chipyard: `cluster.yaml` mount `~/tools/Xilinx` (Vivado 2025.1, cài
+hồi `fmax-r4`) vào đó, chỉ đọc. Image `chia-chisel-build` đã có `libtinfo5` và locale `en_US.UTF-8` cho Vivado, và đã
+có `fpga/fpga-shells`. Flow của fpga-shells đặt board part `digilentinc.com:arty-a7-100:part0:1.1`, nên cần board files
+của Digilent. Một lần, lúc không có job nào đang chạy:
 
 ```bash
-cd ~/CHIA-workflow/projects/rocket-fmax/docker
-docker image inspect chia-vivado:latest >/dev/null 2>&1 || docker build -f VivadoDockerfile -t chia-vivado:latest .
-chia up ~/CHIA-workflow/projects/rocket-fmax/cluster.yaml -y      # lúc không có job nào đang chạy
-chia status        # thêm vivado 1
-docker exec chia-vivado-$USER-0 bash -lc 'ls /tools/Xilinx/*/Vivado/bin/vivado /tools/Xilinx/Vivado/*/bin/vivado 2>/dev/null'
+git clone --depth 1 https://github.com/Digilent/vivado-boards ~/tools/Xilinx/vivado-boards
+ls ~/tools/Xilinx/vivado-boards/new/board_files/arty-a7-100      # có thư mục phiên bản (E.0)
+CL=~/CHIA-workflow/projects/rocket-fmax/cluster.yaml
+docker rm -f chia-chipyard-$USER-0 chia-vivado-$USER-0    # chipyard: tạo lại với mount mới; vivado: đã bỏ
+chia up --add $CL -y
+chia status        # chipyard 1, verilator_run 4, claude_creds 1, eda 1
+docker exec chia-chipyard-$USER-0 bash -lc 'V=$(ls /tools/Xilinx/Vivado/*/bin/vivado /tools/Xilinx/*/Vivado/bin/vivado 2>/dev/null | tail -1); echo "$V"; "$V" -version | head -1; ls /tools/Xilinx/vivado-boards/new/board_files/arty-a7-100 /home/ray/chipyard/fpga/fpga-shells/xilinx/arty_a7_100/tcl'
 ```
+
+Image có sẵn một `vivado` giả ở `/usr/local/bin` (cho FireSim); `soc_bitstream.py` đặt một wrapper lên đầu `PATH` nên
+Makefile gọi Vivado thật. Container chipyard mới chưa có cache build: lần build `RocketConfig` đầu tiên sau đó lâu hơn.
 
 ## Chạy
 
@@ -108,17 +115,23 @@ chia job submit --no-wait --submission-id asic-1 --working-dir . -- \
 chia job logs -f <id>          # dừng: chia job stop <id>
 ```
 
-Đo Vivado post-route một lần (`vivado_check.py`, không agent, không gate): build từng điểm, rồi `synth_design` và
-place + route `RocketTile` trên `xc7a100tcsg324-1` ở 10 ns, out-of-context, chiến lược `explore` và `extratiming`
-(lấy bản tốt hơn), SRAM thành BRAM/LUTRAM; flow và tag cache giống loop Vivado của `fmax-r4`/`r5`, nên điểm đã đo
-hồi đó (`fmax-r4/patches/best.patch`, 63,61 MHz) lấy từ cache nếu còn. Ra `summary.md` (Fmax post-route, WNS/TNS,
-LUT, LUTRAM, FF, BRAM, DSP, chênh lệch so với điểm đầu, họ endpoint), `vivado_impl.csv`, `runs/<điểm>/impl_*/`.
-Mỗi điểm chưa có trong cache: build ~10 phút + place + route ~25 phút mỗi chiến lược.
+Bitstream cả SoC (`soc_bitstream.py`, không agent, không gate, không cần board): với từng điểm, trên worker chipyard,
+áp patch rồi `make bitstream` trong `chipyard/fpga` (`SUB_PROJECT=arty100t`, `RocketArty100TConfig` = `RocketConfig`
+\+ harness Arty: DDR3 qua MIG, UART, JTAG, không L2, một clock cho cả SoC, mặc định 50 MHz; Chisel 6 như Makefile
+`fpga/` đặt). Flow của fpga-shells: synth `-flatten_hierarchy rebuilt`, opt/place/phys_opt/route `Explore`, ghi
+bitstream. Sau đó một lần Vivado nữa trên `post_route.dcp` lấy WNS/TNS từng clock, tài nguyên cả chip và của instance
+`RocketTile`, đường xấu nhất và họ endpoint trong tile. Ra `summary.md`, `soc.csv`, `runs/<điểm>/` (`Arty100THarness.bit`,
+`result.json`, `reports/`, `make_log_tail.txt`). Điểm đã có bitstream thì không chạy lại (`--force` để chạy lại).
+Mỗi điểm ước chừng 1–2 giờ (elaborate cả SoC + Vivado), chạy lần lượt.
+
+Khác với đo out-of-context (`fmax-r4`, `viv-asic6`: chỉ `RocketTile`, 10 ns, clock từ BUFG): đây là SoC thật ở một
+clock cố định. Vivado ngừng tối ưu khi đã đạt timing, nên "Fmax ước tính" = 1000 / (chu kỳ − WNS) là cận dưới khi WNS
+dương. Muốn ép Vivado hơn thì chạy lại với `--freq-mhz` cao hơn (ví dụ 65): script ghi tạm một class config
+`RocketArty100TF<N>Config` (chỉ đổi tần số, không đổi phần cứng) vào `fpga/src/main/scala/arty100t/`, xoá sau khi chạy.
 
 ```bash
-chia job submit --no-wait --submission-id viv-asic6 --working-dir . -- \
-  python vivado_check.py --run-name viv-asic6 --baseline \
-    --patch fmax-r4=~/rocket-fmax-v2/fmax-r4/patches/best.patch \
+chia job submit --no-wait --submission-id soc-asic6 --working-dir . -- \
+  python soc_bitstream.py --run-name soc-asic6 --baseline \
     --patch asic-6=~/rocket-fmax-v2/asic-6/patches/best.patch
 ```
 
@@ -168,8 +181,17 @@ Cache đang dùng: `baseline_rtl2`, `baseline_gate_b2_mm_spmv`, `baseline_start_
 | `fmax-y2` (01/11) | Yosys `v2` | — | | | dừng ở vòng 1: Yosys treo > 30 phút → thêm `--synth-timeout` |
 | `fmax-y3` (01/11) | Yosys `v2` | 0/5 | 92,36 MHz | +0,405 % | `history.md` ghi nhầm patch xuất phát là "bị loại" (đã sửa) |
 | `fmax-y4` (02/11) | Yosys `v2` | 0/3 | 92,36 MHz | +0,405 % | tốt nhất +0,4 %; dao động của flow `v2` lớn hơn ngưỡng |
+| `viv-asic6` (04/11) | Vivado post-route, đo một lần | — | `asic-6`: 63,27 MHz (Yosys `v3` 109,17 MHz) | −0,006 % | out-of-context như `fmax-r4` (63,61); xem dưới |
 
 Chi tiết từng vòng của r1–r3b, `fmax-r4`, `fmax-r5` có trong git (README trước commit của ngày 02/11/2026) và REPORT.md.
+
+`viv-asic6` (04/11/2026, `vivado_check.py` ở commit `2dd99af`, chỉ đo `asic-6/patches/best.patch`): xc7a100tcsg324-1,
+10 ns, out-of-context. `extratiming` 63,27 MHz (WNS −5,805 ns, TNS −10 655 ns, ≥ 2000 endpoint âm), `explore` 63,20 MHz;
+synth 62,18 MHz. LUT 36 626, LUTRAM 130, FF 14 439, BRAM 48, DSP 0. So với các lần đo Vivado trước (cùng flow): baseline
+58,67, `fmax-r3b` 67,53, `fmax-r4` 63,61 MHz. Các sửa của `asic-6` (+18 % ở Yosys sky130) gần như không đổi Fmax trên
+FPGA (−0,5 % so với `fmax-r4`, trong mức nhiễu P&R 1–2 %). Đường găng trên FPGA khác hẳn sky130: FMA →
+`fpuOpt/regfile_ext/Memory_reg` (thanh ghi FPU thành flip-flop, 379 bit âm) và chân CE của `frontend/fq/elts_*` (từ
+`icache/s2_tag_hit`), rồi `dcache/io_cpu_resp_bits_data_load_bypass_REG`. Không có số tài nguyên của `fmax-r4` để so.
 
 ## Đầu ra: `<out-dir>/<run>/`
 
@@ -290,4 +312,9 @@ docker exec chia-chipyard-$USER-0 bash -lc 'cd /home/ray/chipyard/generators/roc
   xấu nhất: FMA `mulAddResult_r`/`pph`/`ppl` (−1,76 … −1,63), `core.mem_reg_wdata` (−1,34), FMA
   `roundRawFNToRecFN_io_in_r_sig` (−1,30), `divSqrt` `rem_Z`/`sigX_Z` (−1,04/−1,02). `core.div.remainder` và
   `regfile_ext.Memory` (họ xấu nhất của `v2`) không còn trong 16 họ đầu.
+- **`viv-asic6` chạy thật (04/11/2026):** `vivado_check.py` và worker `vivado` chạy đúng (build, Vivado synth, hai
+  chiến lược place + route). Đã bỏ cả hai sau lần đo này.
+- **`soc_bitstream.py` chưa chạy (04/11/2026):** mới kiểm cách đọc báo cáo và `summary.md` bằng dữ liệu giả. Chưa
+  kiểm: Vivado chạy trong container chipyard, board files Digilent, flow `fpga/` của nhánh `chia_artifact` với patch
+  `asic-6` (Chisel 6), tên clock và tìm instance `RocketTile` sau `-flatten_hierarchy rebuilt`.
 - Tính đúng chức năng chỉ dựa vào riscv-tests và 8 benchmark (như example), không kiểm tương đương.

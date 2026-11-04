@@ -3,18 +3,14 @@
 #   extract_tile_rtl -> baseline_rtl2, baseline_start_<hash>_rtl2
 #   run_gate         -> baseline_gate_b2_mm_spmv, baseline_start_<hash>_gate_b2_mm_spmv
 #   synth_sta        -> baseline_synth_<flow>_p<period>, baseline_start_<hash>_synth_<flow>_p<period>
-#   vivado_impl      -> baseline_vivimpl4_<part>_p<period>_<strategies>, baseline_start_<hash>_vivimpl4_...
-#                       (vivado_check.py; same tags as the Vivado loop of fmax-r4/r5)
 # Results are written on the first run and replayed on later runs (bypass gated on a
 # real cache hit, see cache_hit_cond in fmax_nodes.py). Rounds are never cached.
 cache:
   extract_tile_rtl: {cache: true, tags: ["baseline_.*"]}
   run_gate:         {cache: true, tags: ["baseline_.*"]}
   synth_sta:        {cache: true, tags: ["baseline_.*"]}
-  vivado_impl:      {cache: true, tags: ["baseline_.*"]}
 
 bypass:
   extract_tile_rtl: {bypass: true, tags: ["baseline_.*"]}
   run_gate:         {bypass: true, tags: ["baseline_.*"]}
   synth_sta:        {bypass: true, tags: ["baseline_.*"]}
-  vivado_impl:      {bypass: true, tags: ["baseline_.*"]}

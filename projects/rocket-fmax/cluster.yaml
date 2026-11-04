@@ -1,11 +1,12 @@
-# CHIA cluster for projects/rocket-fmax (5 workers):
-#   - hello_chipyard: build, git tree, agent tools (chipyard)
+# CHIA cluster for projects/rocket-fmax (4 workers):
+#   - hello_chipyard: build, git tree, agent tools, and Chipyard's FPGA flow of soc_bitstream.py
+#     (chipyard; Vivado installed on the head under ~/tools/Xilinx, mounted read-only)
 #   - hello_verilator: gate, 4 simulators at once (verilator_run)
 #   - hello_claude: Claude Code, the agent (claude_creds)
 #   - rocket_eda: Yosys + OpenSTA + sky130hd liberty, the loop's synth and synth_ab (eda; image
 #     built locally, docker/EdaDockerfile)
-#   - rocket_vivado: Vivado place + route of vivado_check.py (vivado; image docker/VivadoDockerfile,
-#     Vivado installed on the head under ~/tools/Xilinx). The loop itself does not use it.
+#   The `vivado` worker (rocket_vivado, out-of-context RocketTile) was dropped on 04/11/2026
+#   (last version: commit 2dd99af).
 # Node type names match configs/cluster-local.yaml, so this is the same cluster ("default").
 # The opencode worker of cluster-local.yaml is gone: after `chia up` with this file, remove its
 # old container once (README, "Chuẩn bị").
@@ -35,6 +36,10 @@ available_node_types:
             container_name: "chia-chipyard-${USER}"
             run_options:
                 - --shm-size=10.24gb
+                # soc_bitstream.py: Vivado and the Digilent board files (~/tools/Xilinx/vivado-boards).
+                # label=disable: SELinux on Bazzite would otherwise need a relabel (:z) of the whole tree.
+                - "-v ~/tools/Xilinx:/tools/Xilinx:ro"
+                - --security-opt label=disable
             pull_timeout: 7200   # chia-chisel-build is large
             pull_before_run: false   # keep the local image: a new :latest would change the build under the cache
 
@@ -80,23 +85,6 @@ available_node_types:
             run_options:
                 - --shm-size=4gb
                 - --memory=10g       # a runaway Yosys kills only this container
-
-    # vivado_nodes.py: Vivado installed on the head under ~/tools/Xilinx, mounted read-only.
-    # label=disable: SELinux on Bazzite would otherwise need a relabel (:z) of the whole Vivado tree.
-    rocket_vivado:
-        resources: {"vivado": 1}
-        num_workers: 1
-        compatible_ips: ["${THIS_MACHINE}"]
-        docker:
-            image: "chia-vivado:latest"
-            container_name: "chia-vivado-${USER}"
-            pull_before_run: false   # built locally: docker build -f docker/VivadoDockerfile ...
-            run_options:
-                - "-v ~/tools/Xilinx:/tools/Xilinx:ro"
-                - --security-opt label=disable
-                - --shm-size=2gb
-                - --memory=18g       # synth_design peaked at ~9.5 GB (forked workers); place + route ~5 GB
-                - --memory-swap=26g  # + up to 8 GB of host swap (zram on Bazzite) instead of an OOM kill
 
 head_env_commands: ["source ~/.bashrc && conda activate chia_env"]
 head_setup_commands: ["source ~/.bashrc && conda activate chia_env"]

@@ -1,123 +1,133 @@
-"""Vivado timing of RocketTile: synth_design (vivado_synth, the agent's synth_ab A/B) and
-place + route (vivado_impl, what the loop accepts or rejects on).
+"""Chipyard's FPGA flow for the whole SoC (soc_bitstream.py): bitstream, timing and resources.
 
-Runs on the `vivado` worker (cluster.yaml: rocket_vivado, docker/VivadoDockerfile, Vivado
-installed on the head and mounted at /tools/Xilinx). Out-of-context on rtl.top, one clock
-`clock` at a fixed period, I/O with 0 delay against it. The SRAM *_ext modules are their
-behavioral models (rtl.sram_models: the *_ext texts Chipyard generates for simulation plus the
-split_*_ext modules they instantiate), which Vivado maps to BRAM / LUTRAM.
+soc_bitstream runs on the `chipyard` worker: Chipyard's fpga/ Makefile (SUB_PROJECT=arty100t,
+Arty A7-100T, fpga-shells scripts) elaborates the SoC with the rocket-chip patch applied, then
+Vivado synthesizes, places, routes and writes the bitstream. Vivado is installed on the head
+under ~/tools/Xilinx and mounted read-only at /tools/Xilinx (cluster.yaml); the Digilent board
+files go to ~/tools/Xilinx/vivado-boards. A second Vivado run on post_route.dcp reports timing
+per clock and the resources and timing of the RocketTile instance.
 
-Every Vivado process runs in its own session (process group), so chia_cancel of the task also
-kills it and the synth workers it forks.
+The chipyard image ships a stub `vivado` (FireSim) in /usr/local/bin: the Makefile gets a
+wrapper put first on PATH, which sets the board repository and maxThreads, then sources the
+script the Makefile gave. Every process runs in its own session (process group), so a timeout
+or chia_cancel of the task kills Vivado too.
+
+The report helpers (endpoint_families, compare_families, first_path, _util) come from the
+Vivado loop of fmax-r4/r5 (commit d2a1ac0); its out-of-context nodes vivado_synth/vivado_impl
+and the `vivado` worker were dropped on 04/11/2026 (last version: commit 2dd99af).
 """
 from __future__ import annotations
 
 import glob
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
 import tempfile
 import time
-from dataclasses import dataclass, field
 
 from chia.base.ChiaFunction import ChiaFunction
 
-RETRY_THREADS = 2
+import fmax_nodes as N
+
 VIVADO_GLOBS = ["/tools/Xilinx/Vivado/*/bin/vivado", "/tools/Xilinx/*/Vivado/bin/vivado"]
-
-CLOCK_XDC = """\
-create_clock -name clk -period {period_ns} [get_ports clock]
-set_input_delay 0 -clock clk [get_ports -filter {{DIRECTION == IN && NAME != clock}}]
-set_output_delay 0 -clock clk [get_ports -filter {{DIRECTION == OUT}}]
-"""
-
-# Reports of the design in memory (after synth_design or route_design). endpoints.txt: the worst
-# ENDPOINTS endpoints, one per line: "<pin> <slack>".
-TIMING_TCL = """\
-report_timing_summary -max_paths 10 -file timing_summary.rpt
-report_timing -setup -max_paths 10 -nworst 1 -input_pins -file paths.rpt
-report_utilization -file util.rpt
-set p [get_timing_paths -setup -max_paths 1 -nworst 1]
-puts "@@SLACK [get_property SLACK $p]"
-puts "@@START [get_property STARTPOINT_PIN $p]"
-puts "@@END [get_property ENDPOINT_PIN $p]"
-set eps [get_timing_paths -setup -max_paths 2000 -nworst 1 -slack_lesser_than 0]
-set tns 0.0
-foreach e $eps {{ set tns [expr {{$tns + [get_property SLACK $e]}}] }}
-puts "@@TNS2000 $tns"
-puts "@@FAILING [llength $eps]"
-set fh [open endpoints.txt w]
-foreach e [get_timing_paths -setup -max_paths {endpoints} -nworst 1] {{
-    puts $fh "[get_property ENDPOINT_PIN $e] [get_property SLACK $e]"
-}}
-close $fh
-"""
+BOARD_REPOS = ["/tools/Xilinx/vivado-boards/new/board_files"]   # git clone of Digilent/vivado-boards
+FPGA_DIR = f"{N.CHIPYARD}/fpga"
+SUB_PROJECT = "arty100t"
+MODEL = "Arty100THarness"
+CONFIG_PACKAGE = "chipyard.fpga.arty100t"
+BOARD_GLOB = "*arty-a7-100*"
+FREQ_SCALA = f"{FPGA_DIR}/src/main/scala/arty100t/ChiaFreqConfigs.scala"   # only while a run needs it
 ENDPOINTS = 500
+REPORT_CAP = 3_000_000   # characters kept of each report
 
-SYNTH_TCL = """\
-set_param general.maxThreads {threads}
-read_verilog -sv {files}
-read_xdc clock.xdc
-synth_design -top {top} -part {part} -mode out_of_context
-{extra}""" + TIMING_TCL
+# vivado wrapper for the fpga Makefile: `-source X` becomes `-source pre.tcl`, which sources X.
+WRAPPER_SH = """#!/bin/bash
+args=()
+while [ $# -gt 0 ]; do
+  if [ "$1" = "-source" ]; then export CHIA_NEXT_TCL="$2"; args+=(-source "@PRE@"); shift 2
+  else args+=("$1"); shift; fi
+done
+exec "@VIVADO@" "${args[@]}"
+"""
 
-# Place-and-route directives of one vivado_impl run each (all from the same synth checkpoint).
-# viv-impl2 (30/10/2026): `default` was never the best, so the loop runs explore + extratiming.
-IMPL_STRATEGIES = {
-    "default": dict(opt="Default", place="Default", phys="Default", route="Default", post=""),
-    "explore": dict(opt="Explore", place="Explore", phys="AggressiveExplore", route="AggressiveExplore",
-                    post="AggressiveExplore"),
-    "extratiming": dict(opt="Explore", place="ExtraTimingOpt", phys="AggressiveExplore", route="Explore",
-                        post="AggressiveExplore"),
+PRE_TCL = """set_param general.maxThreads @THREADS@
+if {"@REPO@" ne ""} { set_param board.repoPaths [list @REPO@] }
+if {[llength [get_board_parts -quiet @BOARD@]] == 0} {
+  puts "@@NO_BOARD board files @BOARD@ not found (board.repoPaths: @REPO@)"
+  exit 3
 }
+source $::env(CHIA_NEXT_TCL)
+"""
 
-# The clock comes from a global buffer outside the OOC block (otherwise it is routed on
-# general fabric, with a skew no real board has).
-IMPL_TCL = """\
-set_param general.maxThreads {threads}
-open_checkpoint ../synth.dcp
-set_property HD.CLK_SRC BUFGCTRL_X0Y0 [get_ports clock]
-opt_design -directive {opt}
-place_design -directive {place}
-puts "@@PLACE_SLACK [get_property SLACK [get_timing_paths -setup -max_paths 1 -nworst 1]]"
-phys_opt_design -directive {phys}
-route_design -directive {route}
-if {{"{post}" ne "" && [get_property SLACK [get_timing_paths -setup -max_paths 1 -nworst 1]] < 0}} {{
-    phys_opt_design -directive {post}
-}}
+# On post_route.dcp. argv: dcp, tile module, number of tile endpoints to list.
+# @@CLOCK <name> <period> <wns> <tns over the worst 5000 failing endpoints> <failing endpoints>
+# @@TILE <instance>;  @@TILE_PATH <slack> <period> <clock> <start pin> <end pin>
+METRICS_TCL = """set dcp [lindex $argv 0]
+set tile_mod [lindex $argv 1]
+set n_ep [lindex $argv 2]
+open_checkpoint $dcp
+report_utilization -file top_util.rpt
+report_utilization -hierarchical -hierarchical_depth 6 -file hier_util.rpt
+report_timing_summary -max_paths 10 -file timing_summary.rpt
 report_route_status -file route_status.rpt
-""" + TIMING_TCL
+report_clocks -file clocks.rpt
+foreach c [get_clocks] {
+  set n [get_property NAME $c]
+  set p [get_timing_paths -quiet -setup -group $n -max_paths 1 -nworst 1]
+  if {[llength $p] == 0} continue
+  set eps [get_timing_paths -quiet -setup -group $n -max_paths 5000 -nworst 1 -slack_lesser_than 0]
+  set tns 0.0
+  foreach e $eps { set tns [expr {$tns + [get_property SLACK $e]}] }
+  puts "@@CLOCK $n [get_property PERIOD $c] [get_property SLACK $p] $tns [llength $eps]"
+}
+set tiles [get_cells -quiet -hier -filter "IS_PRIMITIVE == 0 && (ORIG_REF_NAME == $tile_mod || REF_NAME == $tile_mod)"]
+if {[llength $tiles] == 0} {
+  set tiles [get_cells -quiet -hier -filter {IS_PRIMITIVE == 0 && NAME =~ *element_reset_domain_rockettile}]
+}
+if {[llength $tiles] > 0} {
+  set t [lindex $tiles 0]
+  set tn [get_property NAME $t]
+  puts "@@TILE $tn"
+  report_utilization -cells $t -file tile_util.rpt
+  set seq [get_cells -quiet -hier -filter "NAME =~ $tn/* && IS_SEQUENTIAL"]
+  set p [get_timing_paths -quiet -setup -to $seq -max_paths 1 -nworst 1]
+  if {[llength $p] > 0} {
+    set ck [get_property ENDPOINT_CLOCK $p]
+    set per ""
+    catch { set per [get_property PERIOD [get_clocks $ck]] }
+    puts "@@TILE_PATH [get_property SLACK $p] $per $ck [get_property STARTPOINT_PIN $p] [get_property ENDPOINT_PIN $p]"
+    report_timing -setup -to $seq -max_paths 10 -nworst 1 -input_pins -file tile_paths.rpt
+    set fh [open endpoints.txt w]
+    foreach e [get_timing_paths -quiet -setup -to $seq -max_paths $n_ep -nworst 1] {
+      puts $fh "[get_property ENDPOINT_PIN $e] [get_property SLACK $e]"
+    }
+    close $fh
+  }
+} else {
+  puts "@@TILE none"
+}
+exit 0
+"""
+
+FREQ_CONFIG = """// Written by projects/rocket-fmax soc_bitstream.py for one run, removed after it.
+package chipyard.fpga.arty100t
+
+import org.chipsalliance.cde.config.Config
+
+class {name} extends Config(
+  new WithArty100TTweaks(freqMHz = {mhz}) ++
+  new chipyard.config.WithBroadcastManager ++
+  new chipyard.RocketConfig)
+"""
 
 
-@dataclass
-class VivadoResult:
-    success: bool
-    part: str
-    period_ns: float
-    worst_slack_ns: float | None = None
-    fmax_mhz: float | None = None         # 1000 / (period - worst slack)
-    tns_ns: float | None = None           # sum over the worst 2000 failing endpoints
-    failing_endpoints: int | None = None  # capped at 2000
-    crit_start: str = ""                  # pins, e.g. dcache/s2_data_reg[13]/C
-    crit_end: str = ""
-    luts: int | None = None
-    ffs: int | None = None
-    dsps: int | None = None
-    brams: float | None = None            # Block RAM tiles
-    lutram: int | None = None             # LUT as memory
-    paths: str = ""                       # report_timing -input_pins, top 10
-    summary: str = ""                     # report_timing_summary (+ route status)
-    utilization: str = ""
-    log_tail: str = ""
-    version: str = ""
-    seconds: float = 0.0
-    threads: int = 0                      # maxThreads of the run that produced the result
-    returncodes: list = field(default_factory=list)  # one per run; two when retried
-    error: str = ""
-    endpoints: str = ""                   # worst ENDPOINTS endpoints: "<pin> <slack>" per line
-    families: str = ""                    # endpoint_families(endpoints)
+def freq_config(mhz: int) -> tuple[str, str]:
+    """(config name, Scala source) of RocketArty100TConfig at `mhz` instead of 50 MHz."""
+    name = f"RocketArty100TF{mhz}Config"
+    return name, FREQ_CONFIG.format(name=name, mhz=mhz)
 
 
 def find_vivado() -> str:
@@ -128,24 +138,6 @@ def find_vivado() -> str:
         if hits:
             return hits[-1]
     return ""
-
-
-# ---------------------------------------------------------------------------
-# names and reports (pure Python, also used by the loop and the A/B tool)
-# ---------------------------------------------------------------------------
-
-def cell_of(pin: str) -> str:
-    """Register (cell) of a Vivado pin, bit index and replica suffix dropped:
-    "dcache/s2_req_addr_reg[2]_replica_3/C" -> "dcache/s2_req_addr_reg"."""
-    cell = pin.rsplit("/", 1)[0] if "/" in pin else pin
-    cell = re.sub(r"_replica(_\d+)?$", "", cell)
-    return re.sub(r"\[\d+\]", "", cell)
-
-
-def dotted(pin: str) -> str:
-    """A Vivado pin as the dotted instance name fmax_nodes.pick_target takes:
-    "core/mem_reg_wdata_reg[6]/D" -> "core.mem_reg_wdata_reg"."""
-    return cell_of(pin).replace("/", ".")
 
 
 def family_table(endpoints: str) -> dict:
@@ -216,42 +208,6 @@ def _util_f(text: str, name: str) -> float | None:
     return float(m.group(1)) if m else None
 
 
-def parse_vivado(log: str, period_ns: float) -> dict:
-    def val(tag):
-        m = re.search(rf"^@@{tag} (.*)$", log, re.M)
-        return m.group(1).strip() if m else ""
-
-    def num(tag):
-        try:
-            return float(val(tag))
-        except ValueError:
-            return None
-
-    slack = num("SLACK")
-    fail = num("FAILING")
-    return dict(worst_slack_ns=slack, tns_ns=num("TNS2000"),
-                failing_endpoints=int(fail) if fail is not None else None,
-                crit_start=val("START"), crit_end=val("END"),
-                fmax_mhz=1000.0 / (period_ns - slack) if slack is not None and period_ns - slack > 0 else None)
-
-
-# ---------------------------------------------------------------------------
-# running Vivado
-# ---------------------------------------------------------------------------
-
-def _read(work: str, name: str) -> str:
-    path = os.path.join(work, name)
-    return open(path, errors="replace").read() if os.path.exists(path) else ""
-
-
-def _start(vivado: str, d: str) -> subprocess.Popen:
-    with open(os.path.join(d, "stdout.txt"), "w") as log:
-        p = subprocess.Popen([vivado, "-mode", "batch", "-nojournal", "-log", "vivado.log", "-source", "run.tcl"],
-                             cwd=d, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
-    p.t0, p.dir = time.time(), d
-    return p
-
-
 def _kill(p: subprocess.Popen):
     try:
         os.killpg(p.pid, signal.SIGKILL)
@@ -272,180 +228,157 @@ def _wait(p: subprocess.Popen, timeout: int) -> int:
         raise
 
 
-def _result(d: str, rc: int, part: str, period_ns: float, vivado: str, threads: int, t0: float) -> VivadoResult:
-    out = _read(d, "stdout.txt")
-    r = VivadoResult(success=False, part=part, period_ns=period_ns, version=vivado, threads=threads,
-                     returncodes=[rc], seconds=time.time() - t0, log_tail=out[-20000:],
-                     paths=_read(d, "paths.rpt"), utilization=_read(d, "util.rpt"),
-                     summary=(_read(d, "timing_summary.rpt") + "\n" + _read(d, "route_status.rpt")).strip(),
-                     endpoints=_read(d, "endpoints.txt"))
-    for k, v in parse_vivado(out, period_ns).items():
-        setattr(r, k, v)
-    r.luts = _util(r.utilization, "Slice LUTs") or _util(r.utilization, "CLB LUTs")
-    r.ffs = _util(r.utilization, "Slice Registers") or _util(r.utilization, "CLB Registers")
-    r.dsps = _util(r.utilization, "DSPs")
-    r.brams = _util_f(r.utilization, "Block RAM Tile")
-    r.lutram = _util(r.utilization, "LUT as Memory")
-    r.families = endpoint_families(r.endpoints) if r.endpoints else ""
-    if rc != 0 or r.worst_slack_ns is None:
-        r.error = (f"vivado returncode {rc}" + (" (timeout)" if rc == -1 else "")
-                   + (" (killed: OOM?)" if rc in (137, -9) else "") + ", slack not found")
-    return r
+def _sub(text: str, **kw) -> str:
+    for k, v in kw.items():
+        text = text.replace(f"@{k}@", str(v))
+    return text
 
 
-def _write_inputs(work: str, rtl, period_ns: float) -> list[str]:
-    """RTL, SRAM models and clock constraint into `work`; the Verilog files to read."""
-    os.makedirs(os.path.join(work, "rtl"), exist_ok=True)
-    for name, text in rtl.files.items():
-        with open(os.path.join(work, "rtl", name), "w") as f:
-            f.write(text)
-    files = [f"rtl/{n}" for n in sorted(rtl.files)]
-    if rtl.blackboxes:
-        if not getattr(rtl, "sram_models", ""):
-            raise ValueError("rtl has no sram_models (TileRTL cached before the field existed: bump its tag)")
-        with open(os.path.join(work, "mems.v"), "w") as f:
-            f.write(rtl.sram_models)
-        files.append("mems.v")
-    with open(os.path.join(work, "clock.xdc"), "w") as f:
-        f.write(CLOCK_XDC.format(period_ns=period_ns))
-    return files
+def _run(cmd: str, cwd: str, log: str, timeout: int) -> int:
+    """`cmd` under bash in its own session, output to `log`; -1 after a timeout."""
+    with open(log, "w") as f:
+        p = subprocess.Popen(["bash", "-c", cmd], cwd=cwd, stdout=f, stderr=subprocess.STDOUT,
+                             start_new_session=True)
+    return _wait(p, timeout)
 
 
-def _synth(vivado: str, work: str, rtl, period_ns: float, part: str, threads: int, timeout: int,
-           extra: str = "") -> VivadoResult:
-    """synth_design in `work`; a run killed for memory (OOM: 137/-9, no slack) is retried once
-    with RETRY_THREADS (fewer forked synth workers, lower peak memory)."""
-    files = _write_inputs(work, rtl, period_ns)
-    rcs = []
-    for nthr in [threads] + ([RETRY_THREADS] if threads > RETRY_THREADS else []):
-        with open(os.path.join(work, "run.tcl"), "w") as f:
-            f.write(SYNTH_TCL.format(threads=nthr, top=rtl.top, part=part, files=" ".join(files),
-                                     extra=extra, endpoints=ENDPOINTS))
-        t0 = time.time()
-        rc = _wait(_start(vivado, work), timeout)
-        rcs.append(rc)
-        res = _result(work, rc, part, period_ns, vivado, nthr, t0)
-        if rc not in (137, -9) or res.worst_slack_ns is not None:
-            break
-    res.returncodes = rcs
-    res.success = not res.error
-    return res
+def _tail(path: str, n: int) -> str:
+    if not os.path.exists(path):
+        return ""
+    with open(path, errors="replace") as f:
+        text = f.read()
+    return text[-n:]
 
 
-@ChiaFunction(resources={"vivado": 1}, num_cpus=4, max_retries=0)
-def vivado_synth(rtl, period_ns: float, part: str, threads: int = 8, timeout: int = 3 * 3600) -> VivadoResult:
-    """synth_design of rtl.top (a sub-block or the whole tile): the A/B of synth_ab."""
-    vivado = find_vivado()
-    if not vivado:
-        return VivadoResult(success=False, part=part, period_ns=period_ns,
-                            error=f"vivado not found ({', '.join(VIVADO_GLOBS)}; or set VIVADO)")
-    work = tempfile.mkdtemp(prefix="rocket_fmax_vivado_")
-    try:
-        return _synth(vivado, work, rtl, period_ns, part, threads, timeout)
-    except ValueError as e:
-        return VivadoResult(success=False, part=part, period_ns=period_ns, error=str(e))
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
+def _reports(d: str, names) -> dict:
+    out = {}
+    for name in names:
+        path = os.path.join(d, name)
+        if os.path.exists(path):
+            with open(path, errors="replace") as f:
+                out[name] = f.read()[:REPORT_CAP]
+    return out
 
 
-@dataclass
-class VivadoImplResult:
-    success: bool                         # synth ok and at least one strategy routed with a slack
-    part: str
-    period_ns: float
-    synth: VivadoResult | None = None     # synth_design of the impl input
-    runs: dict = field(default_factory=dict)   # {strategy: VivadoResult, post-route}
-    place_slack: dict = field(default_factory=dict)  # {strategy: worst slack after place_design}
-    best: str = ""                        # strategy with the best post-route worst slack
-    error: str = ""
-
-    @property
-    def result(self) -> VivadoResult | None:
-        return self.runs.get(self.best)
-
-
-@ChiaFunction(resources={"vivado": 1}, num_cpus=4, max_retries=0)
-def vivado_impl(rtl, period_ns: float, part: str, strategies=("explore", "extratiming"),
-                threads: int = 8, impl_threads: int = 4, parallel: int = 1,
-                timeout: int = 4 * 3600) -> VivadoImplResult:
-    """synth_design, then one place + route per strategy, at most `parallel` at a time from the
-    same checkpoint; a run killed for memory is redone alone afterwards. The best post-route
-    worst slack is the result."""
-    res = VivadoImplResult(success=False, part=part, period_ns=period_ns)
-    vivado = find_vivado()
-    if not vivado:
-        res.error = f"vivado not found ({', '.join(VIVADO_GLOBS)}; or set VIVADO)"
-        return res
-    unknown = [s for s in strategies if s not in IMPL_STRATEGIES]
-    if unknown:
-        res.error = f"unknown strategies {unknown} (have {sorted(IMPL_STRATEGIES)})"
-        return res
-    work = tempfile.mkdtemp(prefix="rocket_fmax_vivimpl_")
-    try:
+def parse_metrics(log: str) -> dict:
+    """@@ lines of METRICS_TCL: clocks, tile instance, worst tile path."""
+    clocks = []
+    for m in re.finditer(r"^@@CLOCK (\S+) (\S+) (\S+) (\S+) (\d+)\s*$", log, re.M):
         try:
-            res.synth = syn = _synth(vivado, work, rtl, period_ns, part, threads, timeout,
-                                     extra="write_checkpoint -force synth.dcp\n")
-        except ValueError as e:
-            res.error = str(e)
+            clocks.append({"name": m.group(1), "period_ns": float(m.group(2)), "wns_ns": float(m.group(3)),
+                           "tns_ns": float(m.group(4)), "failing": int(m.group(5))})
+        except ValueError:
+            continue
+    t = re.search(r"^@@TILE (\S+)", log, re.M)
+    tile = t.group(1) if t and t.group(1) != "none" else ""
+    path = {}
+    m = re.search(r"^@@TILE_PATH (\S+) (\S*) (\S+) (\S+) (\S+)\s*$", log, re.M)
+    if m:
+        try:
+            path = {"slack_ns": float(m.group(1)), "period_ns": float(m.group(2)) if m.group(2) else None,
+                    "clock": m.group(3), "start": m.group(4), "end": m.group(5)}
+        except ValueError:
+            path = {}
+    return {"clocks": clocks, "tile": tile, "tile_path": path}
+
+
+def util_numbers(text: str) -> dict:
+    """LUT, LUTRAM, FF, BRAM tiles, DSP of a report_utilization table."""
+    return {"luts": _util(text, "Slice LUTs"), "lutram": _util(text, "LUT as Memory"),
+            "ffs": _util(text, "Slice Registers"), "brams": _util_f(text, "Block RAM Tile"),
+            "dsps": _util(text, "DSPs")}
+
+
+@ChiaFunction(resources={"chipyard": 1}, max_retries=0)
+def soc_bitstream(rocket_head: str, patch: str, config: str, config_scala: str = "", threads: int = 8,
+                  make_jobs: int = 8, timeout: int = 5 * 3600) -> dict:
+    """Apply `patch` to rocket-chip, `make bitstream` of fpga/ (SUB_PROJECT=arty100t, CONFIG=`config`;
+    `config_scala` is written to FREQ_SCALA for the run when not empty), then report post-route
+    timing and resources. Leaves rocket-chip clean at `rocket_head`.
+
+    Returns a dict (no dataclass: nothing to import when the head reads it back): ok (bitstream
+    written), error, make_rc, metrics_rc, minutes, vivado, build_dir, make_log_tail, reports
+    ({file: text}), clocks, tile, tile_path, util (whole chip), tile_util, endpoints, bit (bytes).
+    """
+    t0 = time.time()
+    res = {"ok": False, "error": "", "make_rc": None, "metrics_rc": None, "minutes": 0.0, "vivado": "",
+           "build_dir": "", "make_log_tail": "", "reports": {}, "clocks": [], "tile": "", "tile_path": {},
+           "util": {}, "tile_util": {}, "endpoints": "", "bit": b""}
+    vivado = find_vivado()
+    if not vivado:
+        res["error"] = (f"không thấy Vivado ({', '.join(VIVADO_GLOBS)}): cluster.yaml phải mount "
+                        "~/tools/Xilinx vào container chipyard")
+        return res
+    res["vivado"] = vivado
+    repo = next((r for r in BOARD_REPOS if os.path.isdir(r)), "")
+    work = tempfile.mkdtemp(prefix="chia_soc_")
+    try:
+        status = N.reset_rocket_local(rocket_head, patch)
+        if config_scala:
+            with open(FREQ_SCALA, "w") as f:
+                f.write(config_scala)
+        pre = os.path.join(work, "pre.tcl")
+        with open(pre, "w") as f:
+            f.write(_sub(PRE_TCL, THREADS=threads, REPO=repo, BOARD=BOARD_GLOB))
+        os.makedirs(os.path.join(work, "bin"))
+        wrapper = os.path.join(work, "bin", "vivado")
+        with open(wrapper, "w") as f:
+            f.write(_sub(WRAPPER_SH, PRE=pre, VIVADO=vivado))
+        os.chmod(wrapper, 0o755)
+        make = (f"make SUB_PROJECT={SUB_PROJECT} CONFIG={config} CONFIG_PACKAGE={CONFIG_PACKAGE}")
+        env = (f"source {N.CHIPYARD}/env.sh && export PATH={shlex.quote(os.path.join(work, 'bin'))}:$PATH "
+               f"&& export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8")
+        log = os.path.join(work, "make.log")
+        with open(log, "w") as f:
+            f.write(f"rocket-chip: {status.strip() or 'clean'}\n")
+        rc = _run(f"{env} && {make} clean && {make} -j {make_jobs} bitstream >> {shlex.quote(log)} 2>&1",
+                  FPGA_DIR, os.path.join(work, "make_outer.log"), timeout)
+        res["make_rc"] = rc
+        res["make_log_tail"] = _tail(log, 60000) + _tail(os.path.join(work, "make_outer.log"), 5000)
+        build = glob.glob(f"{FPGA_DIR}/generated-src/*.{MODEL}.{config}")
+        if not build:
+            res["error"] = f"make returncode {rc}" + (" (timeout)" if rc == -1 else "") + ": không có thư mục build"
             return res
-        if not os.path.exists(os.path.join(work, "synth.dcp")):
-            syn.success = False
-            res.error = syn.error = f"synth_design returncode {syn.returncodes}, no checkpoint"
-            return res
-
-        def start(name):
-            d = os.path.join(work, name)
-            os.makedirs(d, exist_ok=True)
-            with open(os.path.join(d, "run.tcl"), "w") as f:
-                f.write(IMPL_TCL.format(threads=impl_threads, endpoints=ENDPOINTS, **IMPL_STRATEGIES[name]))
-            return _start(vivado, d)
-
-        def finish(name, p, rc):
-            r = _result(p.dir, rc, part, period_ns, vivado, impl_threads, p.t0)
-            m = re.search(r"^@@PLACE_SLACK (\S+)", _read(p.dir, "stdout.txt"), re.M)
-            try:
-                res.place_slack[name] = float(m.group(1)) if m else None
-            except ValueError:
-                res.place_slack[name] = None
-            errs = re.search(r"# of nets with routing errors\.*\s*:\s*(\d+)", r.summary)
-            if not r.error and errs and int(errs.group(1)) > 0:
-                r.error = f"{errs.group(1)} nets with routing errors"
-            r.success = not r.error
-            return r
-
-        def run_all(names, width):
-            todo, running, done = list(names), {}, {}
-            try:
-                while todo or running:
-                    while todo and len(running) < width:
-                        n = todo.pop(0)
-                        running[n] = start(n)
-                    time.sleep(5)
-                    for n, p in list(running.items()):
-                        rc = p.poll()
-                        if rc is None and time.time() - p.t0 > timeout:
-                            _kill(p)
-                            rc = -1
-                        if rc is not None:
-                            done[n] = finish(n, running.pop(n), rc)
-            except BaseException:            # cancelled: no Vivado left behind
-                for p in running.values():
-                    _kill(p)
-                raise
-            return done
-
-        res.runs = run_all(list(strategies), max(1, parallel))
-        oom = [n for n, r in res.runs.items() if r.returncodes[0] in (137, -9)]
-        if oom and parallel > 1:
-            for n, r in run_all(oom, 1).items():
-                r.returncodes = res.runs[n].returncodes + r.returncodes
-                res.runs[n] = r
-        ok = {n: r for n, r in res.runs.items() if r.success}
-        if not ok:
-            res.error = "; ".join(f"{n}: {r.error}" for n, r in res.runs.items())
-            return res
-        res.best = max(ok, key=lambda n: ok[n].worst_slack_ns)
-        res.success = True
+        build_dir = build[0]
+        res["build_dir"] = build_dir
+        obj = os.path.join(build_dir, "obj")
+        bit = os.path.join(obj, f"{MODEL}.bit")
+        if os.path.exists(bit):
+            with open(bit, "rb") as f:
+                res["bit"] = f.read()
+        res["reports"] = {f"fpga_shells_{k}": v for k, v in
+                          _reports(os.path.join(obj, "report"), ("timing.txt", "utilization.txt", "clocks.txt",
+                                                                 "drc.txt")).items()}
+        dcp = os.path.join(obj, "post_route.dcp")
+        if os.path.exists(dcp):
+            mdir = os.path.join(work, "metrics")
+            os.makedirs(mdir)
+            with open(os.path.join(mdir, "metrics.tcl"), "w") as f:
+                f.write(METRICS_TCL)
+            mrc = _run(f"export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 && {shlex.quote(wrapper)} -mode batch -nojournal "
+                       f"-log vivado.log -source metrics.tcl -tclargs {shlex.quote(dcp)} {N.TOP} {ENDPOINTS}",
+                       mdir, os.path.join(mdir, "stdout.txt"), 3600)
+            res["metrics_rc"] = mrc
+            out = _tail(os.path.join(mdir, "stdout.txt"), 10_000_000)
+            res.update(parse_metrics(out))
+            res["reports"].update(_reports(mdir, ("top_util.rpt", "hier_util.rpt", "timing_summary.rpt",
+                                                  "route_status.rpt", "clocks.rpt", "tile_util.rpt",
+                                                  "tile_paths.rpt")))
+            res["reports"]["metrics_stdout.txt"] = out[-50000:]
+            res["endpoints"] = _reports(mdir, ("endpoints.txt",)).get("endpoints.txt", "")
+            res["util"] = util_numbers(res["reports"].get("top_util.rpt", ""))
+            res["tile_util"] = util_numbers(res["reports"].get("tile_util.rpt", ""))
+        res["ok"] = bool(res["bit"])
+        if not res["ok"]:
+            res["error"] = (f"make returncode {rc}" + (" (timeout)" if rc == -1 else "")
+                            + (" (killed: OOM?)" if rc in (137, -9) else "")
+                            + ("; chưa tới route" if not os.path.exists(dcp) else "") + ": không có bitstream")
+            if "@@NO_BOARD" in res["make_log_tail"]:
+                res["error"] += f"; thiếu board files {BOARD_GLOB} (BOARD_REPOS: {BOARD_REPOS})"
         return res
     finally:
+        res["minutes"] = (time.time() - t0) / 60
+        if config_scala and os.path.exists(FREQ_SCALA):
+            os.unlink(FREQ_SCALA)
+        N.reset_rocket_local(rocket_head, "")
         shutil.rmtree(work, ignore_errors=True)

@@ -71,11 +71,15 @@ và `README.md` (thư mục này).
    **109,17 MHz**, worst slack +0,840 ns, cycle −0,006 %, hiệu năng +19,4 %. Mục tiêu > 100 MHz đạt ở mức synth. Vòng 4
    kéo cycle từ +2,685 % về −0,006 % (bypass, BHT): cần xem `asic-6/patches/best.patch` để hiểu vì sao. Agent Opus làm
    được nhiều sửa lớn trong một vòng (vòng 2 sửa cả `MulDiv` lẫn FMA), đúng chỗ Sonnet bị kẹt ở `asic-3`..`asic-5`.
-9. Đang làm (04/11/2026): người dùng muốn đo `asic-6/patches/best.patch` (sha `7dcfc16657bb`, sửa 11 file) bằng
-   Vivado post-route để so với các lần đo Vivado trước (baseline 58,67, `fmax-r4` 63,61 MHz). Đã thêm lại
-   `vivado_nodes.py`, `docker/VivadoDockerfile` (từ `d2a1ac0`), worker `rocket_vivado` trong `cluster.yaml`, cache
-   `vivado_impl` trong `exp.yaml`, và `vivado_check.py` (đo một lần, không agent). Chưa chạy thật.
-10. Sau đó: kiểm thêm chức năng của `asic-6/patches/best.patch` (ngoài riscv-tests và benchmark của gate), rồi ASIC
+9. Xong (04/11/2026): `viv-asic6`, Vivado post-route out-of-context của `asic-6/patches/best.patch` (sha
+   `7dcfc16657bb`, sửa 11 file): **63,27 MHz** (WNS −5,805 ns), LUT 36 626, LUTRAM 130, FF 14 439, BRAM 48, DSP 0.
+   Gần như không đổi so với `fmax-r4` (63,61 MHz): các sửa cho sky130 không giúp FPGA. Đường găng FPGA: FMA →
+   `fpuOpt/regfile_ext/Memory_reg`, CE của `frontend/fq`. Người dùng bỏ worker `vivado` (`vivado_check.py`,
+   `docker/VivadoDockerfile` xoá; bản cuối ở commit `2dd99af`).
+10. Đang làm (04/11/2026): bitstream cả SoC bằng flow `fpga/` của Chipyard, không có board, chỉ gen file và đo
+   (`soc_bitstream.py`, node `vivado_nodes.soc_bitstream` trên worker chipyard; Vivado và board files Digilent mount
+   từ `~/tools/Xilinx`). Lệnh trong README, mục Chạy. Chưa chạy thật. Nếu lỗi, đọc `runs/<điểm>/make_log_tail.txt`.
+11. Sau đó: kiểm thêm chức năng của `asic-6/patches/best.patch` (ngoài riscv-tests và benchmark của gate), rồi ASIC
    post-route (ORFS sky130) cho bản tốt nhất.
 
 ## Quy ước làm việc
