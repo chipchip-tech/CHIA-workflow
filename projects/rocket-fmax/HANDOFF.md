@@ -5,12 +5,15 @@ và `README.md` (thư mục này).
 
 ## Trạng thái (04/11/2026)
 
-- Tốt nhất ở flow `v3`: **93,17 MHz** (`asic-3`, patch `~/rocket-fmax-v2/asic-3/patches/best.patch` = `sim-1` vòng 5 +
+- Tốt nhất ở flow `v3`: **93,88 MHz** (`asic-4`, patch `~/rocket-fmax-v2/asic-4/patches/best.patch` = `sim-1` vòng 5 +
   `sim-2` vòng 4 (`LW` đi đường bypass chậm) + `asic-3` vòng 1 (mux bypass one-hot, thêm thanh ghi trước đầu vào
-  `divSqrt`) + vòng 2 (`negated_remainder` cây OR); sha256 `e7d7db2a34af…`, 479 dòng, 5 file: `ALU`, `AMOALU`,
-  `Multiplier`, `RocketCore`, `FPU`), cycle **+2,655 %** (còn 0,345 % ngân sách; qsort +7,4 %, spmv +3,7 %), worst slack −0,734 ns, TNS −20,4 ns.
-  Đường găng: FMA `mulAddResult_ppl → mulAddResult_r`; ngay sau là `core.div.remainder` (−0,708 khi FMA được sửa).
-  Trước đó: 91,81 (`asic-2`), 87,84 MHz (`asic-1`).
+  `divSqrt`) + vòng 2 (`negated_remainder` cây OR) + `asic-4` vòng 1 (cộng cuối FMA carry-save + Kogge-Stone,
+  `ex_reg_inst`/`ex_reg_ctrl` FPU thành `RegNext`) + vòng 3 (early-out bộ chia qua thanh ghi `eoPos`); sha256
+  `b16798766e65…`, 547 dòng, 5 file: `ALU`, `AMOALU`, `Multiplier`, `RocketCore`, `FPU`), cycle **+2,685 %** (còn
+  0,315 % ngân sách), worst slack −0,652 ns, TNS −16,0 ns, điểm họ −2,989.
+  Đường găng: `core.div.resHi → remainder[63]` (chọn nửa kết quả rồi phủ định); họ ALU/bypass `core.ex_reg_rs_oh →
+  mem_reg_wdata` ở khoảng −0,74.
+  Trước đó: 93,17 (`asic-3`), 91,81 (`asic-2`), 87,84 MHz (`asic-1`).
 - Tốt nhất: **92,36 MHz** Yosys `v2` (patch `~/rocket-fmax-v2/fmax-r4/patches/best.patch` trên máy người dùng),
   cycle +0,405 %, worst slack −0,827 ns. Các họ đường găng sát nhau: `core.div.remainder` (−0,83), FMA
   `mulAddResult_r`/`ppl`/`pph` (−0,80 … −0,70), `fpuOpt.regfile_ext.Memory` (−0,66), `divSqrt` `rem_Z`/`sigX_Z`
@@ -55,7 +58,11 @@ và `README.md` (thư mục này).
    thật): "Patch đã bị loại" ghi phần sửa của vòng trên bản tốt nhất; diff `synth_ab` cắt giữa thay vì lấy đuôi. Hướng
    tiếp: các họ đứng đầu sát nhau (~−0,7 ns), cần sửa FMA và `core.div.remainder` trong cùng một vòng, hoặc chấp nhận
    từng bước theo điểm họ (vòng 5 được +0,124, ngưỡng `--min-family-gain` là 0,15).
-6. Sau đó: ASIC post-route (ORFS sky130) cho bản tốt nhất.
+6. Xong (04/11/2026): `asic-4` (`--min-family-gain 0.1`, chạy bằng `rocket_fmax.py` cũ) nhận vòng 1, 3: 93,17 →
+   93,88 MHz, cycle +2,685 %. Vòng 4, 5 nhắm `resHi → remainder` (tách fanout, `s_neg_output` hai bước) đều xấu hơn.
+   Sửa sau đó: history nhãn cũ bỏ khối cả cây ở vòng có mục `synth_ab`. Hướng tiếp: `core.div` (`resHi` → mux → phủ định)
+   và bypass/ALU tầng ex; ngân sách cycle còn 0,315 %.
+7. Sau đó: ASIC post-route (ORFS sky130) cho bản tốt nhất.
 
 ## Quy ước làm việc
 

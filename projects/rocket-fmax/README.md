@@ -2,15 +2,15 @@
 
 Mục tiêu: **Fmax của `RocketTile` (Chipyard `RocketConfig`) > 100 MHz** ở chu kỳ 10 ns, đo bằng Yosys + OpenSTA trên
 `sky130_fd_sc_hd` (phần synth của nhánh ASIC), chi phí cycle tối đa +3 % so với RocketConfig gốc. Tốt nhất hiện có:
-**92,36 MHz** (flow `v2`, patch của `fmax-r4`, cycle +0,405 %). Ở flow `v3`: **93,17 MHz**, cycle +2,655 % (`asic-3`,
-patch `~/rocket-fmax-v2/asic-3/patches/best.patch`, sha256 `e7d7db2a34af…`), từ 85,01 → 87,84 (`asic-1`) → 91,81 (`asic-2`) → 93,17 MHz. Báo cáo các đợt Yosys: [REPORT.md](REPORT.md).
+**92,36 MHz** (flow `v2`, patch của `fmax-r4`, cycle +0,405 %). Ở flow `v3`: **93,88 MHz**, cycle +2,685 % (`asic-4`,
+patch `~/rocket-fmax-v2/asic-4/patches/best.patch`, sha256 `b16798766e65…`), từ 85,01 → 87,84 (`asic-1`) → 91,81 (`asic-2`) → 93,17 (`asic-3`) → 93,88 MHz. Báo cáo các đợt Yosys: [REPORT.md](REPORT.md).
 
 ## Pha (theo `docs/workflow-phases.md`)
 
 | Pha | Lệnh | Thước đo | Trạng thái |
 |---|---|---|---|
 | Simulate | `--phase sim` | gate (riscv-tests + 8 benchmark), chi phí cycle; agent thêm tầng pipeline, mỗi vòng qua gate thành một ứng viên (kèm synth sơ bộ cả tile, khối đã đổi) | `sim-1` xong (code cũ): 5 ứng viên, cả 5 trên FMA; `sim-2` xong (03/11/2026, code mới, chạy thật): 6 ứng viên ở 5 khối khác nhau, synth sơ bộ chạy đúng |
-| ASIC, synth | `--phase asic` (mặc định), `--try-from <đợt sim>` | Yosys + OpenSTA sky130hd tt_025C_1v80, SRAM là hộp đen; gate như trên | r1–r4, y1–y4 đã chạy (flow `v2`); `asic-1` (`v3`, `--try-from sim-1`) chạy thật 03/11/2026: 85,01 → 87,84 MHz; `asic-2` (`--try-from sim-2 --iters 0`): 87,84 → 91,81 MHz; `asic-3` (5 vòng agent): 91,81 → 93,17 MHz |
+| ASIC, synth | `--phase asic` (mặc định), `--try-from <đợt sim>` | Yosys + OpenSTA sky130hd tt_025C_1v80, SRAM là hộp đen; gate như trên | r1–r4, y1–y4 đã chạy (flow `v2`); `asic-1` (`v3`, `--try-from sim-1`) chạy thật 03/11/2026: 85,01 → 87,84 MHz; `asic-2` (`--try-from sim-2 --iters 0`): 87,84 → 91,81 MHz; `asic-3` (5 vòng agent): 91,81 → 93,17 MHz; `asic-4`: → 93,88 MHz |
 | ASIC, post-route | (chưa có) | ORFS sky130 | Chưa bắt đầu |
 | FPGA | (đã gỡ) | Vivado post-route, Arty A7-100T | **Tạm bỏ** ở 63,61 MHz (`fmax-r4`/`r5`); code ở commit `d2a1ac0` |
 
@@ -217,6 +217,19 @@ docker exec chia-chipyard-$USER-0 bash -lc 'cd /home/ray/chipyard/generators/roc
   của vòng; nay ghi phần sửa của vòng trên bản tốt nhất (`round_diff`, tính ngay sau lượt agent). (2) Diff trong "Các
   sửa đổi agent đã đo bằng synth_ab" bị cắt lấy đuôi nên bắt đầu giữa dòng, mất tên file; nay giữ đầu và đuôi, cắt
   giữa (`clip_mid`).
+- **`asic-4` chạy thật (04/11/2026, `--start-patch asic-3/patches/best.patch --iters 5 --min-family-gain 0.1`):**
+  **chạy bằng `rocket_fmax.py` cũ** (history vẫn nhãn cũ, diff `synth_ab` vẫn cắt đuôi), tức chưa có hai bản sửa của
+  `asic-3`. Vòng 1 NHẬN theo điểm họ (+0,531 ns, Fmax 93,17 → 93,09, hiệu năng −0,08 %, worst slack −0,734 → −0,743 trong
+  `--worst-tol`): cộng ba toán hạng cuối của FMA (nhánh tách nhân) thành carry-save + Kogge-Stone, và `ex_reg_inst` /
+  `ex_reg_ctrl` của FPU thành `RegNext` (bỏ enable); đường găng về `core.ex_reg_rs_oh → mem_reg_wdata`. Vòng 2 LOẠI:
+  `InlineInstance` cho `ALU`, 93,38 MHz (+0,32 %) nhưng điểm họ −0,044. Vòng 3 NHẬN theo điểm họ (+0,278): early-out của
+  bộ chia tính `Log2`/trừ ở chu kỳ chia đầu vào thanh ghi `eoPos` (mỗi phép chia thêm 1 chu kỳ), **93,88 MHz**, cycle
+  +2,655 → +2,685 %, hiệu năng +0,82 %; đường găng `core.div.resHi → remainder[63]`. Vòng 4, 5: tách fanout `resHi`,
+  `s_neg_output` hai bước, nhân đôi bộ phủ định; đều xấu hơn, agent tự revert. Cả đợt: 93,17 → 93,88 MHz, hiệu năng
+  90,76 → 91,42 (+0,73 %), điểm họ −3,798 → −2,989.
+- **Sửa thêm sau `asic-4` (04/11/2026):** khi đọc `--history-from`, khối "Patch đã bị loại" nhãn cũ (cả cây so với
+  rocket head) bị bỏ ở mọi vòng có mục "Các sửa đổi agent đã đo bằng synth_ab" (`asic-3` vòng 5, `asic-4` vòng 2), không
+  chỉ vòng "agent không thay đổi gì". Đã thử trên hai file history đó: không còn khối cũ, ba mục `synth_ab` giữ nguyên.
 - **Giới hạn đã biết của nhóm biến thể:** nhóm theo đường instance (trùng hoặc lồng nhau), nên `core` (sửa
   `RocketCore.scala`) gộp với `core.div` (sửa `Multiplier.scala`) dù hai patch không đụng nhau. Ở `asic-2` không mất gì
   (vòng 1 tự nó không tăng Fmax), nhưng về sau có thể cần xét thêm file nguồn bị sửa.

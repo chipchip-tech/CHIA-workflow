@@ -1190,12 +1190,17 @@ def run_candidates(a, out: Path, elfs, snap, base, best, history, seen) -> dict:
 
 def drop_unchanged_patch(text: str) -> str:
     """History written before 02/11/2026 listed the start patch itself as "Patch đã bị loại" in
-    rounds where the agent changed nothing (fmax-y3); drop that block from such rounds."""
+    rounds where the agent changed nothing (fmax-y3); drop that block from such rounds.
+    History written before 04/11/2026 (asic-3 round 5, asic-4 round 2) showed the whole tree
+    against rocket head under that old label, start patch and accepted rounds included, so the
+    next agent read the best patch as rejected. Such rounds also list the agent's own measured
+    edits ("Các sửa đổi agent đã đo bằng synth_ab"), so drop the old block there too."""
     parts = re.split(r"(?m)^(?=### Vòng )", text)
     pat = re.compile(r"\nPatch đã bị loại \(đã revert, đừng lặp lại y nguyên\):\n```diff\n.*?\n```", re.S)
     def clean(x: str) -> str:
         lines = x.split("\n", 2)
-        return pat.sub("", x) if len(lines) > 1 and "agent không thay đổi gì" in lines[1] else x
+        unchanged = len(lines) > 1 and "agent không thay đổi gì" in lines[1]
+        return pat.sub("", x) if unchanged or "Các sửa đổi agent đã đo bằng synth_ab" in x else x
     return "".join(clean(x) for x in parts)
 
 
