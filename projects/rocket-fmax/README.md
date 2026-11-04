@@ -12,7 +12,7 @@ patch `~/rocket-fmax-v2/asic-4/patches/best.patch`, sha256 `b16798766e65…`), t
 | Simulate | `--phase sim` | gate (riscv-tests + 8 benchmark), chi phí cycle; agent thêm tầng pipeline, mỗi vòng qua gate thành một ứng viên (kèm synth sơ bộ cả tile, khối đã đổi) | `sim-1` xong (code cũ): 5 ứng viên, cả 5 trên FMA; `sim-2` xong (03/11/2026, code mới, chạy thật): 6 ứng viên ở 5 khối khác nhau, synth sơ bộ chạy đúng |
 | ASIC, synth | `--phase asic` (mặc định), `--try-from <đợt sim>` | Yosys + OpenSTA sky130hd tt_025C_1v80, SRAM là hộp đen; gate như trên | r1–r4, y1–y4 đã chạy (flow `v2`); `asic-1` (`v3`, `--try-from sim-1`) chạy thật 03/11/2026: 85,01 → 87,84 MHz; `asic-2` (`--try-from sim-2 --iters 0`): 87,84 → 91,81 MHz; `asic-3` (5 vòng agent): 91,81 → 93,17 MHz; `asic-4`: → 93,88 MHz; `asic-5`: 0 vòng nhận; `asic-6` (agent Opus): → **109,17 MHz**, cycle −0,006 % |
 | ASIC, post-route | (chưa có) | ORFS sky130 | Chưa bắt đầu |
-| FPGA | (đã gỡ) | Vivado post-route, Arty A7-100T | **Tạm bỏ** ở 63,61 MHz (`fmax-r4`/`r5`); code ở commit `d2a1ac0` |
+| FPGA | `vivado_check.py` (đo một lần, không agent) | Vivado post-route, Arty A7-100T | Loop **tạm bỏ** ở 63,61 MHz (`fmax-r4`/`r5`, code loop ở commit `d2a1ac0`). 04/11/2026: thêm lại `vivado_nodes.py` + worker `vivado` để đo một lần bản `asic-6` (chưa chạy) |
 
 Ngân sách chung: chi phí cycle (trung bình nhân `mcycle / mcycle baseline` trên 8 benchmark) ≤ 1,03; mọi test pass
 với `minstret` bằng baseline. `rv64ui-p-ma_data` fail ngay trên baseline nên bị loại khỏi gate.
@@ -72,6 +72,17 @@ chia status        # chipyard 1, verilator_run 4, claude_creds 1, eda 1
 
 Worker `hello_claude` mount `~/.claude` của host: đăng nhập `claude` trên host trước.
 
+Worker `rocket_vivado` (chỉ `vivado_check.py` dùng) cần Vivado cài sẵn ở `~/tools/Xilinx` (đã cài 2025.1 hồi
+`fmax-r4`) và image `chia-vivado`:
+
+```bash
+cd ~/CHIA-workflow/projects/rocket-fmax/docker
+docker image inspect chia-vivado:latest >/dev/null 2>&1 || docker build -f VivadoDockerfile -t chia-vivado:latest .
+chia up ~/CHIA-workflow/projects/rocket-fmax/cluster.yaml -y      # lúc không có job nào đang chạy
+chia status        # thêm vivado 1
+docker exec chia-vivado-$USER-0 bash -lc 'ls /tools/Xilinx/*/Vivado/bin/vivado /tools/Xilinx/Vivado/*/bin/vivado 2>/dev/null'
+```
+
 ## Chạy
 
 Luôn submit **từ thư mục này** (cache lưu dataclass của `fmax_nodes`, lúc đọc lại phải import được). Mỗi lần chạy dùng
@@ -95,6 +106,20 @@ chia job submit --no-wait --submission-id asic-1 --working-dir . -- \
   --history-from ~/rocket-fmax-v2/sim-1 --run-name asic-1 --iters 5
 
 chia job logs -f <id>          # dừng: chia job stop <id>
+```
+
+Đo Vivado post-route một lần (`vivado_check.py`, không agent, không gate): build từng điểm, rồi `synth_design` và
+place + route `RocketTile` trên `xc7a100tcsg324-1` ở 10 ns, out-of-context, chiến lược `explore` và `extratiming`
+(lấy bản tốt hơn), SRAM thành BRAM/LUTRAM; flow và tag cache giống loop Vivado của `fmax-r4`/`r5`, nên điểm đã đo
+hồi đó (`fmax-r4/patches/best.patch`, 63,61 MHz) lấy từ cache nếu còn. Ra `summary.md` (Fmax post-route, WNS/TNS,
+LUT, LUTRAM, FF, BRAM, DSP, chênh lệch so với điểm đầu, họ endpoint), `vivado_impl.csv`, `runs/<điểm>/impl_*/`.
+Mỗi điểm chưa có trong cache: build ~10 phút + place + route ~25 phút mỗi chiến lược.
+
+```bash
+chia job submit --no-wait --submission-id viv-asic6 --working-dir . -- \
+  python vivado_check.py --run-name viv-asic6 --baseline \
+    --patch fmax-r4=~/rocket-fmax-v2/fmax-r4/patches/best.patch \
+    --patch asic-6=~/rocket-fmax-v2/asic-6/patches/best.patch
 ```
 
 Mặc định: `--phase asic --period-ns 10 --synth-flow v3 --extra-bench mm spmv --exclude-isa rv64ui-p-ma_data
