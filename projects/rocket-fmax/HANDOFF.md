@@ -78,7 +78,8 @@ và `README.md` (thư mục này).
    `docker/VivadoDockerfile` xoá; bản cuối ở commit `2dd99af`).
 10. Đang làm (04/11/2026): bitstream cả SoC bằng flow `fpga/` của Chipyard, không có board, chỉ gen file và đo
    (`soc_bitstream.py`, node `vivado_nodes.soc_bitstream` trên worker chipyard; Vivado và board files Digilent mount
-   từ `~/tools/Xilinx`). Lệnh trong README, mục Chạy. Chưa chạy thật. Nếu lỗi, đọc `runs/<điểm>/make_log_tail.txt`.
+   từ `~/tools/Xilinx`). Lệnh trong README, mục Chạy. Lần chạy đầu (`soc-asic6`) dừng ở compile Scala: harness `fpga/` của
+   `chia_artifact` thiếu `wf_active`; node nay tự vá lúc chạy. Đang chạy lại. Nếu lỗi, đọc `runs/<điểm>/make_log_tail.txt`.
 11. Sau đó: kiểm thêm chức năng của `asic-6/patches/best.patch` (ngoài riscv-tests và benchmark của gate), rồi ASIC
    post-route (ORFS sky130) cho bản tốt nhất.
 

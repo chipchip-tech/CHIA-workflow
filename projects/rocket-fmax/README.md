@@ -90,6 +90,11 @@ docker exec chia-chipyard-$USER-0 bash -lc 'V=$(ls /tools/Xilinx/Vivado/*/bin/vi
 Image có sẵn một `vivado` giả ở `/usr/local/bin` (cho FireSim); `soc_bitstream.py` đặt một wrapper lên đầu `PATH` nên
 Makefile gọi Vivado thật. Container chipyard mới chưa có cache build: lần build `RocketConfig` đầu tiên sau đó lâu hơn.
 
+Nhánh `chia_artifact` của Chipyard thêm `def wf_active: Bool` vào `HasHarnessInstantiators` nhưng không sửa các harness
+trong `fpga/src` (arty, arty100t, datastorm, nexysvideo, vc707, vcu118), nên `chipyard_fpga` không compile (`class
+VCU118FPGATestHarnessImp needs to be abstract`, 6 lỗi). Node `soc_bitstream` thêm `def wf_active = false.B` sau `def
+success` của từng harness trong lúc chạy và trả file về như cũ sau đó (sửa hạ tầng, không đụng RocketTile).
+
 ## Chạy
 
 Luôn submit **từ thư mục này** (cache lưu dataclass của `fmax_nodes`, lúc đọc lại phải import được). Mỗi lần chạy dùng
@@ -314,7 +319,9 @@ docker exec chia-chipyard-$USER-0 bash -lc 'cd /home/ray/chipyard/generators/roc
   `regfile_ext.Memory` (họ xấu nhất của `v2`) không còn trong 16 họ đầu.
 - **`viv-asic6` chạy thật (04/11/2026):** `vivado_check.py` và worker `vivado` chạy đúng (build, Vivado synth, hai
   chiến lược place + route). Đã bỏ cả hai sau lần đo này.
-- **`soc_bitstream.py` chưa chạy (04/11/2026):** mới kiểm cách đọc báo cáo và `summary.md` bằng dữ liệu giả. Chưa
-  kiểm: Vivado chạy trong container chipyard, board files Digilent, flow `fpga/` của nhánh `chia_artifact` với patch
-  `asic-6` (Chisel 6), tên clock và tìm instance `RocketTile` sau `-flatten_hierarchy rebuilt`.
+- **`soc_bitstream.py`, lần chạy đầu `soc-asic6` (04/11/2026):** đã kiểm Vivado 2025.1 và board files Digilent thấy
+  được trong container chipyard. Cả hai điểm dừng sau 0,5 phút vì `chipyard_fpga` không compile (thiếu `wf_active`,
+  xem mục Cài đặt); đã thêm bước vá harness lúc chạy (kiểm trên bản sao `chia_artifact`: đúng 6 file, chạy lại không
+  vá lần hai). Chưa kiểm: phần sau compile Scala, patch `asic-6` dưới Chisel 6, tên clock và tìm instance `RocketTile`
+  sau `-flatten_hierarchy rebuilt`.
 - Tính đúng chức năng chỉ dựa vào riscv-tests và 8 benchmark (như example), không kiểm tương đương.

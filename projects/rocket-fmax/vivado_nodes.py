@@ -41,6 +41,11 @@ CONFIG_PACKAGE = "chipyard.fpga.arty100t"
 BOARD_GLOB = "*arty-a7-100*"
 FREQ_SCALA = f"{FPGA_DIR}/src/main/scala/arty100t/ChiaFreqConfigs.scala"   # only while a run needs it
 ENDPOINTS = 500
+# chipyard chia_artifact added `def wf_active: Bool` to HasHarnessInstantiators (waveform window) but did
+# not update the fpga/ harnesses, so chipyard_fpga does not compile. soc_bitstream adds the member to each
+# harness for the run (after its `def success`) and restores the files afterwards.
+FPGA_SCALA_GLOB = f"{FPGA_DIR}/src/main/scala/*/*.scala"
+WF_ACTIVE_LINE = "def wf_active = false.B  // CHIA: chia_artifact HasHarnessInstantiators member, no waveform on FPGA"
 REPORT_CAP = 3_000_000   # characters kept of each report
 
 # vivado wrapper for the fpga Makefile: `-source X` becomes `-source pre.tcl`, which sources X.
@@ -234,6 +239,30 @@ def _sub(text: str, **kw) -> str:
     return text
 
 
+def fix_fpga_harnesses(pattern: str = FPGA_SCALA_GLOB) -> dict:
+    """Add `def wf_active` after `def success` in fpga harnesses that implement HasHarnessInstantiators
+    without it. Returns {path: original text} for restore_files."""
+    orig = {}
+    for path in sorted(glob.glob(pattern)):
+        with open(path) as f:
+            text = f.read()
+        if "HasHarnessInstantiators" not in text or "wf_active" in text:
+            continue
+        new = re.sub(r"^([ \t]*)(def success\b.*)$", lambda m: f"{m.group(1)}{m.group(2)}\n{m.group(1)}{WF_ACTIVE_LINE}",
+                     text, flags=re.M)
+        if new != text:
+            orig[path] = text
+            with open(path, "w") as f:
+                f.write(new)
+    return orig
+
+
+def restore_files(orig: dict) -> None:
+    for path, text in orig.items():
+        with open(path, "w") as f:
+            f.write(text)
+
+
 def _run(cmd: str, cwd: str, log: str, timeout: int) -> int:
     """`cmd` under bash in its own session, output to `log`; -1 after a timeout."""
     with open(log, "w") as f:
@@ -312,8 +341,10 @@ def soc_bitstream(rocket_head: str, patch: str, config: str, config_scala: str =
     res["vivado"] = vivado
     repo = next((r for r in BOARD_REPOS if os.path.isdir(r)), "")
     work = tempfile.mkdtemp(prefix="chia_soc_")
+    harness_orig = {}
     try:
         status = N.reset_rocket_local(rocket_head, patch)
+        harness_orig = fix_fpga_harnesses()
         if config_scala:
             with open(FREQ_SCALA, "w") as f:
                 f.write(config_scala)
@@ -331,6 +362,7 @@ def soc_bitstream(rocket_head: str, patch: str, config: str, config_scala: str =
         log = os.path.join(work, "make.log")
         with open(log, "w") as f:
             f.write(f"rocket-chip: {status.strip() or 'clean'}\n")
+            f.write(f"fpga harness wf_active added: {sorted(os.path.relpath(p, FPGA_DIR) for p in harness_orig)}\n")
         rc = _run(f"{env} && {make} clean && {make} -j {make_jobs} bitstream >> {shlex.quote(log)} 2>&1",
                   FPGA_DIR, os.path.join(work, "make_outer.log"), timeout)
         res["make_rc"] = rc
@@ -373,6 +405,8 @@ def soc_bitstream(rocket_head: str, patch: str, config: str, config_scala: str =
             res["error"] = (f"make returncode {rc}" + (" (timeout)" if rc == -1 else "")
                             + (" (killed: OOM?)" if rc in (137, -9) else "")
                             + ("; chưa tới route" if not os.path.exists(dcp) else "") + ": không có bitstream")
+            if "Compilation failed" in res["make_log_tail"]:
+                res["error"] += "; Scala không compile (xem [error] trong make_log_tail.txt)"
             if "@@NO_BOARD" in res["make_log_tail"]:
                 res["error"] += f"; thiếu board files {BOARD_GLOB} (BOARD_REPOS: {BOARD_REPOS})"
         return res
@@ -380,5 +414,6 @@ def soc_bitstream(rocket_head: str, patch: str, config: str, config_scala: str =
         res["minutes"] = (time.time() - t0) / 60
         if config_scala and os.path.exists(FREQ_SCALA):
             os.unlink(FREQ_SCALA)
+        restore_files(harness_orig)
         N.reset_rocket_local(rocket_head, "")
         shutil.rmtree(work, ignore_errors=True)
