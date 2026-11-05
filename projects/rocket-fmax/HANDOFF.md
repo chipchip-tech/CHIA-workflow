@@ -85,8 +85,15 @@ và `README.md` (thư mục này).
    `asic-6` là `frontend/icache/s2_dout` → CE của `frontend/fq`. fpga-shells vẫn ghi bitstream khi không đạt timing
    (summary nay ghi rõ). Chi tiết ở README, mục kiểm chứng. Nhánh FPGA dừng ở đây trừ khi người dùng muốn tối ưu
    riêng cho FPGA (`frontend/fq` CE, lấy lại DSP cho bộ nhân).
-11. Ưu tiên tiếp (gợi ý 05/11/2026): kiểm thêm chức năng của `asic-6/patches/best.patch` (ngoài riscv-tests và benchmark của gate), rồi ASIC
-   post-route (ORFS sky130) cho bản tốt nhất.
+11. Đang làm (05/11/2026): `asic-7`, thêm một đợt agent để đẩy Fmax lên (người dùng nhắm 150–200 MHz) từ
+   `asic-6/patches/best.patch`, `--period-ns 6` (slack đã dương ở 10 ns, ABC phải được ép), `--model opus --effort high
+   --llm-timeout 2700`. Ngân sách cycle còn khoảng 3 % (`asic-6` −0,006 %), nên không thêm được nhiều tầng pipeline:
+   150 MHz khó đạt trong 5 vòng. Lệnh trong câu trả lời của session (05/11/2026); chưa chạy.
+12. Sau `asic-7` (kế hoạch, chưa làm): (a) kiểm chức năng bản tốt nhất: rv64si/rv64mi (trap, ngắt, VM), chương trình
+   chạy trên `pk`, so trace commit (PC, rd, dữ liệu ghi) lệnh-theo-lệnh với baseline trên mọi benchmark, test ngẫu
+   nhiên nếu image có; (b) ASIC post-route bằng OpenROAD đã có trong image `eda` + platform sky130hd của ORFS (cùng
+   commit `cca3a717`), SRAM là macro giả (timing giả định, giống nhau cho mọi điểm), đo baseline / `asic-6` / `asic-7`
+   cùng chu kỳ, ghi WNS sau route (có RC), diện tích, mật độ.
 
 ## Quy ước làm việc
 
