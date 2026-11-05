@@ -134,7 +134,8 @@ và `README.md` (thư mục này).
      cập (Liberty sinh tự động), đường găng theo vùng. Chưa kiểm: OpenSTA đọc được Liberty giả không, `-format summary`
      có trong bản OpenSTA của image không (có `catch`), `DigitalTop` có module nào không định nghĩa không, thời gian
      Yosys cho cả SoC.
-   Thứ tự đề xuất: `func_check` (có thể chạy song song với `soc_synth`, khác worker trừ bước build) rồi post-route.
+   Thứ tự đề xuất: `func_check`, rồi `soc_synth`, rồi post-route. **Không chạy hai script cùng lúc**: cả hai áp patch
+   vào cùng cây rocket-chip trên worker chipyard (như loop và `soc_bitstream.py`).
 
 ## Quy ước làm việc
 
