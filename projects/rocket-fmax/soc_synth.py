@@ -164,6 +164,10 @@ def fake_liberty(blackboxes: dict, access_ns: float, setup_ns: float) -> str:
     return ("library (rocket_fmax_fakeram) {\n  technology (cmos);\n  delay_model : table_lookup;\n"
             '  time_unit : "1ns";\n  voltage_unit : "1V";\n  current_unit : "1mA";\n'
             '  pulling_resistance_unit : "1kohm";\n  leakage_power_unit : "1nW";\n  capacitive_load_unit (1, pf);\n'
+            "  input_threshold_pct_rise : 50;\n  input_threshold_pct_fall : 50;\n"
+            "  output_threshold_pct_rise : 50;\n  output_threshold_pct_fall : 50;\n"
+            "  slew_lower_threshold_pct_rise : 20;\n  slew_lower_threshold_pct_fall : 20;\n"
+            "  slew_upper_threshold_pct_rise : 80;\n  slew_upper_threshold_pct_fall : 80;\n"
             "  nom_process : 1;\n  nom_voltage : 1.8;\n  nom_temperature : 25;\n  default_max_transition : 1.5;\n"
             + types + "".join(cells) + "}\n")
 
