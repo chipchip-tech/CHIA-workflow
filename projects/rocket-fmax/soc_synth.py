@@ -210,6 +210,20 @@ def extract_soc_rtl(artifact, top: str) -> N.TileRTL:
     return N.tile_rtl_from_sources(artifact.generated_src_files, top)
 
 
+# Yosys 0.38's Verilog frontend accepts a size cast `8'(x)` but not `signed'(x)`, `unsigned'(x)` or a
+# cast to a named type `T'(x)` (unexpected OP_CAST). Uncore files (e.g. InclusiveCache's Atomics.sv)
+# use them; the tile alone never did. Rewrite them before Yosys reads the files.
+_CAST_SIGN_RE = re.compile(r"\b(signed|unsigned)\s*'\s*\(")
+_CAST_TYPE_RE = re.compile(r"\b(?!\d)([A-Za-z_]\w*)\s*'\s*\(")
+
+
+def sv_casts_for_yosys(text: str) -> tuple[str, int]:
+    """Return (text with signed'/unsigned'/T' casts rewritten, number rewritten). Size casts stay."""
+    text, n1 = _CAST_SIGN_RE.subn(lambda m: f"${m.group(1)}(", text)
+    text, n2 = _CAST_TYPE_RE.subn("(", text)
+    return text, n1 + n2
+
+
 @ChiaFunction(resources={"eda": 1}, num_cpus=2, max_retries=0)
 def soc_synth_sta(rtl: N.TileRTL, period_ns: float, access: list, setup_ns: float, yosys_timeout: int) -> dict:
     """Yosys v3 on rtl.top, then OpenSTA once per SRAM access time. Returns {"ok", "error", "area_um2",
@@ -223,9 +237,14 @@ def soc_synth_sta(rtl: N.TileRTL, period_ns: float, access: list, setup_ns: floa
         with open(os.path.join(work, lib), "w") as f:
             f.write(filtered)
         os.makedirs(os.path.join(work, "rtl"))
+        casts = {}
         for name, text in rtl.files.items():
+            text, n = sv_casts_for_yosys(text)
+            if n:
+                casts[name] = n
             with open(os.path.join(work, "rtl", name), "w") as f:
                 f.write(text)
+        res["casts_rewritten"] = casts
         bb = []
         for name, text in rtl.blackboxes.items():
             bb.append(f"bb_{name}.v")
@@ -256,6 +275,13 @@ def soc_synth_sta(rtl: N.TileRTL, period_ns: float, access: list, setup_ns: floa
         res["yosys_log_tail"] = (open(ylog, errors="replace").read()[-20000:] if os.path.exists(ylog) else "") + (yerr or "")[-5000:]
         if rc != 0 or not os.path.exists(os.path.join(work, "netlist.v")):
             res["error"] = f"yosys returncode {rc}" + (" (killed: OOM?)" if rc in (137, -9) else "")
+            # show the source lines the frontend choked on
+            for fn, ln in sorted(set(re.findall(r"(rtl/[\w.]+):(\d+): ERROR", res["yosys_log_tail"])))[:5]:
+                try:
+                    src = open(os.path.join(work, fn), errors="replace").read().splitlines()
+                    res["error"] += f"\n{fn}:{ln}: " + src[int(ln) - 1].strip()[:300]
+                except (OSError, IndexError):
+                    pass
             return res
         res["stat"] = open(os.path.join(work, "stat.txt")).read()
         res["area_um2"] = N.parse_area(res["stat"])
@@ -344,7 +370,7 @@ def run_point(a, p: dict, snap: dict, d: Path) -> dict:
     s = get(soc_synth_sta.chia_remote(rtl, a.period_ns, a.access, a.sram_setup_ns, int(a.yosys_timeout_hours * 3600)))
     R.write(d / "yosys_log_tail.txt", s.get("yosys_log_tail", ""))
     res = {"ok": s["ok"], "error": s.get("error", ""), "rtl_sha12": rtl_hash, "tile": tiles[0] if tiles else "",
-           "srams": sorted(rtl.blackboxes), "area_um2": s.get("area_um2"), "yosys_minutes": s.get("yosys_minutes"), "sta": {}}
+           "srams": sorted(rtl.blackboxes), "area_um2": s.get("area_um2"), "yosys_minutes": s.get("yosys_minutes"), "casts_rewritten": s.get("casts_rewritten", {}), "sta": {}}
     if s["ok"]:
         R.write(d / "stat.txt", s["stat"])
         for acc, out in s["sta"].items():
