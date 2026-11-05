@@ -11,6 +11,8 @@ patch `~/rocket-fmax-v2/asic-4/patches/best.patch`, sha256 `b16798766e65…`), t
 |---|---|---|---|
 | Simulate | `--phase sim` | gate (riscv-tests + 8 benchmark), chi phí cycle; agent thêm tầng pipeline, mỗi vòng qua gate thành một ứng viên (kèm synth sơ bộ cả tile, khối đã đổi) | `sim-1` xong (code cũ): 5 ứng viên, cả 5 trên FMA; `sim-2` xong (03/11/2026, code mới, chạy thật): 6 ứng viên ở 5 khối khác nhau, synth sơ bộ chạy đúng |
 | ASIC, synth | `--phase asic` (mặc định), `--try-from <đợt sim>` | Yosys + OpenSTA sky130hd tt_025C_1v80, SRAM là hộp đen; gate như trên | r1–r4, y1–y4 đã chạy (flow `v2`); `asic-1` (`v3`, `--try-from sim-1`) chạy thật 03/11/2026: 85,01 → 87,84 MHz; `asic-2` (`--try-from sim-2 --iters 0`): 87,84 → 91,81 MHz; `asic-3` (5 vòng agent): 91,81 → 93,17 MHz; `asic-4`: → 93,88 MHz; `asic-5`: 0 vòng nhận; `asic-6` (agent Opus): → **109,17 MHz**, cycle −0,006 %; `asic-7` (`--period-ns 6`, effort high): 113,53 → **140,01 MHz**, cycle +0,325 % |
+| Kiểm chức năng | `func_check.py` (không agent) | ISA mở rộng (`rv64uc/si/mi`, Zb*, bản `-v-`), `functest/` so với Spike và baseline, trace commit so với baseline | Code xong 05/11/2026, mới kiểm cục bộ (QEMU, dữ liệu giả), chưa chạy trên cluster |
+| ASIC, synth cả SoC | `soc_synth.py` (không agent) | Yosys `v3` + OpenSTA cả `DigitalTop`, SRAM là macro giả có thời gian truy cập, đường găng theo vùng (tile / uncore / biên / I/O) | Code xong 05/11/2026, mới kiểm cục bộ (dữ liệu giả), chưa chạy |
 | ASIC, post-route | (chưa có) | ORFS sky130 | Chưa bắt đầu |
 | FPGA | `soc_bitstream.py` (bitstream cả SoC qua `fpga/` của Chipyard, không agent, không board) | Vivado post-route cả SoC, Arty A7-100T, clock cố định (50 MHz) | Loop **tạm bỏ** ở 63,61 MHz (`fmax-r4`/`r5`, code ở `d2a1ac0`). `viv-asic6` (04/11/2026, out-of-context như `fmax-r4`, chạy thật): `asic-6` **63,27 MHz**, gần như không đổi so với 63,61. Sau đó bỏ worker `vivado` (`vivado_check.py`, commit `2dd99af`), chuyển sang bitstream SoC. `soc-asic6` (chạy thật, 50 MHz): cả hai điểm ra bitstream và đạt timing, WNS baseline 0,129 / `asic-6` 0,372 ns (Fmax ước tính 50,32 / 50,95 MHz, chỉ là cận dưới). `soc-asic6-f70` (70 MHz, chạy thật): Fmax SoC baseline **55,50**, `asic-6` **59,91 MHz** (+7,9 %), tile LUT +22,6 %, DSP 25 → 0 |
 
@@ -138,6 +140,42 @@ dương. Muốn ép Vivado hơn thì chạy lại với `--freq-mhz` cao hơn (v
 chia job submit --no-wait --submission-id soc-asic6 --working-dir . -- \
   python soc_bitstream.py --run-name soc-asic6 --baseline \
     --patch asic-6=~/rocket-fmax-v2/asic-6/patches/best.patch
+```
+
+Kiểm chức năng (`func_check.py`, từ 05/11/2026, chưa chạy thật): baseline và mỗi `--patch`, mỗi điểm một build
+RocketConfig rồi chạy trên worker `verilator_run`:
+- mọi test ISA của `rv64ui/um/ua/uf/ud/uc/si/mi/uzba/uzbb/uzbs`, bản `-p-` và `-v-` (gate chỉ có 5 bộ `-p-`). Một test
+  chỉ tính lỗi khi baseline pass;
+- `functest/` (build một lần bằng gcc của image, chạy một lần trên Spike làm tham chiếu), so dòng `FT:` và mã thoát
+  với baseline và với Spike:
+  - `rand_diff`: ngẫu nhiên có hướng cho FP (mọi phép, mọi chế độ làm tròn, giá trị đặc biệt, `fflags`, NaN-boxing,
+    load FP, chuỗi phụ thuộc), mul/div ở biên, load dùng ngay, store rồi load, AMO;
+  - `rand_zbb`: Zba/Zbb/Zbs, kết quả CPOP/CLZ dùng ngay. Chỉ so khi baseline pass `rv64uzbb`;
+  - `cebreak_umode`: `c.ebreak` ở U/S-mode, theo sau là nửa lệnh có bit 13..12 khác nhau, phải ra breakpoint
+    (`mcause` 3). Nhắm chỗ nghi lỗi của `asic-7`;
+  - `mmio_load`: load byte/half/word từ `mtimecmp` (uncached) dùng ngay, so với cùng load từ bộ nhớ thường;
+- trace commit (`+verbose`) của 6 benchmark: chuỗi (pc, lệnh) và dãy giá trị ghi của từng thanh ghi phải giống baseline,
+  tính tới lần đọc counter cycle/time thứ hai (giá trị counter bị che vì timing khác nhau giữa các bản).
+
+```bash
+chia job submit --no-wait --submission-id func-asic7 --working-dir . -- \
+  python func_check.py --run-name func-asic7 \
+    --patch asic-6=~/rocket-fmax-v2/asic-6/patches/best.patch \
+    --patch asic-7=~/rocket-fmax-v2/asic-7/patches/best.patch
+```
+
+Synth cả SoC (`soc_synth.py`, từ 05/11/2026, chưa chạy thật): mỗi điểm build RocketConfig, lấy `DigitalTop` (SoC trừ IO
+cell và khối tạo clock của `ChipTop`), synth Yosys `v3` ở `--period-ns` (mặc định 6), rồi OpenSTA một lần cho mỗi giá
+trị `--sram-access-ns` (mặc định `0,1.5,3`). SRAM thành macro giả trong một Liberty sinh tự động (clock → dữ liệu đọc
+bằng thời gian truy cập, setup `--sram-setup-ns`), giống nhau cho mọi điểm. Mọi cổng clock của `DigitalTop` chung một
+clock lý tưởng. 5000 đường xấu nhất được chia vùng: trong tile, uncore, tile↔uncore, I/O; ghi thêm slack xấu nhất của
+đường có một đầu là SRAM.
+
+```bash
+chia job submit --no-wait --submission-id soc-synth-1 --working-dir . -- \
+  python soc_synth.py --run-name soc-synth-1 \
+    --patch asic-6=~/rocket-fmax-v2/asic-6/patches/best.patch \
+    --patch asic-7=~/rocket-fmax-v2/asic-7/patches/best.patch
 ```
 
 Mặc định: `--phase asic --period-ns 10 --synth-flow v3 --extra-bench mm spmv --exclude-isa rv64ui-p-ma_data

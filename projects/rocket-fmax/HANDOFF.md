@@ -121,6 +121,21 @@ và `README.md` (thư mục này).
    ngay kết quả; load byte/half dùng ngay; RVC), in hash, so với Spike và baseline; (3) test tay C.EBREAK ở U-mode,
    load MMIO byte dùng ngay; (4) so trace commit với baseline trên 8 benchmark nếu `+verbose` có.
 
+13. Code xong 05/11/2026, chưa chạy thật (người dùng duyệt "như đề xuất"):
+   - `func_check.py` + `functest/` (`ft.h`, `crt.S`, `link.ld`, `rand_diff.c`, `rand_zbb.c`, `cebreak_umode.S`,
+     `mmio_load.S`): kiểm chức năng mục 12a. Image `chia-chisel-build` có `riscv64-unknown-elf-gcc`, `spike` (trong
+     `$RISCV/bin`), `pk`, riscv-tests `rv64uc/si/mi/uzba/uzbb/uzbs`. `useZbb` mặc định `false` trong
+     `RocketCoreParams`; chưa biết `RocketConfig` có bật không: script tự xét theo `rv64uzbb` trên baseline. Đã kiểm cục
+     bộ: 4 chương trình build bằng clang, chạy trên QEMU (máy `spike`, bản in ra console): `cebreak_umode`, `rand_diff`,
+     `rand_zbb` pass; `mmio_load` trap trên QEMU vì QEMU không cho đọc từng byte CLINT (Spike và Rocket cho). Phân tích
+     trace, so lệch và summary kiểm bằng dữ liệu giả. Chưa kiểm: gcc của image build được không (nhất là `-march` có
+     Zb*), sim có in trace với `+verbose` không, kích thước trace.
+   - `soc_synth.py`: trả lời "tile nhanh hơn có làm SoC nhanh hơn không". Synth `DigitalTop`, SRAM giả có thời gian truy
+     cập (Liberty sinh tự động), đường găng theo vùng. Chưa kiểm: OpenSTA đọc được Liberty giả không, `-format summary`
+     có trong bản OpenSTA của image không (có `catch`), `DigitalTop` có module nào không định nghĩa không, thời gian
+     Yosys cho cả SoC.
+   Thứ tự đề xuất: `func_check` (có thể chạy song song với `soc_synth`, khác worker trừ bước build) rồi post-route.
+
 ## Quy ước làm việc
 
 Xem đầy đủ trong `CLAUDE.md`.
