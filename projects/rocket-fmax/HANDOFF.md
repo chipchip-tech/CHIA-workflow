@@ -88,7 +88,9 @@ và `README.md` (thư mục này).
 11. Đang làm (05/11/2026): `asic-7`, thêm một đợt agent để đẩy Fmax lên (người dùng nhắm 150–200 MHz) từ
    `asic-6/patches/best.patch`, `--period-ns 6` (slack đã dương ở 10 ns, ABC phải được ép), `--model opus --effort high
    --llm-timeout 2700`. Ngân sách cycle còn khoảng 3 % (`asic-6` −0,006 %), nên không thêm được nhiều tầng pipeline:
-   150 MHz khó đạt trong 5 vòng. Lệnh trong câu trả lời của session (05/11/2026); chưa chạy.
+   150 MHz khó đạt trong 5 vòng. Chưa chạy. Lệnh: `python rocket_fmax.py --run-name asic-7 --start-patch
+   ~/rocket-fmax-v2/asic-6/patches/best.patch --history-from ~/rocket-fmax-v2/asic-4 ~/rocket-fmax-v2/asic-5
+   ~/rocket-fmax-v2/asic-6 --period-ns 6 --iters 5 --min-family-gain 0.1 --model opus --effort high --llm-timeout 2700`.
 12. Sau `asic-7` (kế hoạch, chưa làm): (a) kiểm chức năng bản tốt nhất: rv64si/rv64mi (trap, ngắt, VM), chương trình
    chạy trên `pk`, so trace commit (PC, rd, dữ liệu ghi) lệnh-theo-lệnh với baseline trên mọi benchmark, test ngẫu
    nhiên nếu image có; (b) ASIC post-route bằng OpenROAD đã có trong image `eda` + platform sky130hd của ORFS (cùng
