@@ -125,7 +125,7 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   push luôn lên nhánh đích.
 - Project hiện có: `project/ascon-secureboot` (RoCC Ascon-Hash256, secure boot; xong M1–M4),
   `project/rocket-fmax` (mục dưới).
-- `project/rocket-fmax` (`projects/rocket-fmax/`): **session mới đọc `projects/rocket-fmax/HANDOFF.md` trước.**
+- `project/rocket-fmax` (`projects/rocket-fmax/`): **ĐÃ KẾT THÚC 05/11/2026**, kết quả cuối và lý do dừng ở `REPORT.md` mục 7 (`asic-7` 140,01 MHz synth; không tiếp Vivado và cả SoC). **Session mới đọc `projects/rocket-fmax/HANDOFF.md` trước.**
   Loop CHIA (theo `examples/timing_opt`) tối ưu Fmax của `RocketTile` (`RocketConfig`), mục tiêu > 100 MHz ở 10 ns,
   đo bằng Yosys + OpenSTA sky130hd; cycle tối đa +3 % so với baseline. Theo khung pha: `--phase sim` (agent thêm tầng
   pipeline, chỉ đo cycle bằng gate, ra danh sách ứng viên) và `--phase asic` (agent tối ưu timing, `--try-patches` thử

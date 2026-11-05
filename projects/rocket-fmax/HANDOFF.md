@@ -3,8 +3,13 @@
 File này dành cho session Claude Code tiếp quản project. Đọc cùng `CLAUDE.md` (gốc repo), `docs/workflow-phases.md`
 và `README.md` (thư mục này).
 
-## Trạng thái (05/11/2026)
+## Trạng thái (05/11/2026): **project đã kết thúc**
 
+- Người dùng dừng project ngày 05/11/2026. Kết quả cuối và lý do dừng: `REPORT.md` mục 7. Tóm tắt: `asic-7` đạt
+  **140,01 MHz** ở synth (`v3`, 6 ns), gấp ~2,97 lần baseline 47,13 MHz; `asic-7` chưa kiểm chức năng ngoài gate.
+  Không làm tiếp Vivado (sửa nhắm ASIC không chuyển sang FPGA: `asic-6` out-of-context 63,27 ≈ 63,61 MHz, trong SoC
+  +7,9 %) và không làm tiếp cả SoC (`soc-synth-5`: SoC 54,81 → 63,80 MHz, nhưng sau `asic-7` L2 chặn, số chưa tin được vì
+  không chèn buffer). Nếu mở lại, đọc mục "Việc còn bỏ ngỏ" trong `REPORT.md`.
 - Mới nhất: **140,01 MHz** Yosys `v3` ở `--period-ns 6` (`asic-7`, `~/rocket-fmax-v2/asic-7/patches/best.patch`),
   cycle +0,325 %. Chưa kiểm chức năng ngoài gate, chưa place-and-route (mục 11, 12). Các dòng dưới là lịch sử.
 - Tốt nhất ở flow `v3`: **93,88 MHz** (`asic-4`, patch `~/rocket-fmax-v2/asic-4/patches/best.patch` = `sim-1` vòng 5 +

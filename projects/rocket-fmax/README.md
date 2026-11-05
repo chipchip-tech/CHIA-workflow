@@ -1,5 +1,7 @@
 # rocket-fmax: agent tối ưu Fmax của Rocket theo example `timing_opt` của CHIA
 
+> **Đã kết thúc (05/11/2026).** Kết quả cuối: `asic-7` 140,01 MHz ở synth. Báo cáo và lý do dừng: `REPORT.md` mục 7.
+
 Mục tiêu: **Fmax của `RocketTile` (Chipyard `RocketConfig`) > 100 MHz** ở chu kỳ 10 ns, đo bằng Yosys + OpenSTA trên
 `sky130_fd_sc_hd` (phần synth của nhánh ASIC), chi phí cycle tối đa +3 % so với RocketConfig gốc. Tốt nhất hiện có:
 **92,36 MHz** (flow `v2`, patch của `fmax-r4`, cycle +0,405 %). Ở flow `v3`: **93,88 MHz**, cycle +2,685 % (`asic-4`,
@@ -12,7 +14,7 @@ patch `~/rocket-fmax-v2/asic-4/patches/best.patch`, sha256 `b16798766e65…`), t
 | Simulate | `--phase sim` | gate (riscv-tests + 8 benchmark), chi phí cycle; agent thêm tầng pipeline, mỗi vòng qua gate thành một ứng viên (kèm synth sơ bộ cả tile, khối đã đổi) | `sim-1` xong (code cũ): 5 ứng viên, cả 5 trên FMA; `sim-2` xong (03/11/2026, code mới, chạy thật): 6 ứng viên ở 5 khối khác nhau, synth sơ bộ chạy đúng |
 | ASIC, synth | `--phase asic` (mặc định), `--try-from <đợt sim>` | Yosys + OpenSTA sky130hd tt_025C_1v80, SRAM là hộp đen; gate như trên | r1–r4, y1–y4 đã chạy (flow `v2`); `asic-1` (`v3`, `--try-from sim-1`) chạy thật 03/11/2026: 85,01 → 87,84 MHz; `asic-2` (`--try-from sim-2 --iters 0`): 87,84 → 91,81 MHz; `asic-3` (5 vòng agent): 91,81 → 93,17 MHz; `asic-4`: → 93,88 MHz; `asic-5`: 0 vòng nhận; `asic-6` (agent Opus): → **109,17 MHz**, cycle −0,006 %; `asic-7` (`--period-ns 6`, effort high): 113,53 → **140,01 MHz**, cycle +0,325 % |
 | Kiểm chức năng | `func_check.py` (không agent) | ISA mở rộng (`rv64uc/si/mi`, Zb*, bản `-v-`), `functest/` so với Spike và baseline, trace commit so với baseline | Code xong 05/11/2026, mới kiểm cục bộ (QEMU, dữ liệu giả), chưa chạy trên cluster |
-| ASIC, synth cả SoC | `soc_synth.py` (không agent) | Yosys `v3` + OpenSTA cả `DigitalTop`, SRAM là macro giả có thời gian truy cập, đường găng theo vùng (tile / uncore / biên / I/O) | Code xong 05/11/2026, mới kiểm cục bộ (dữ liệu giả), chưa chạy |
+| ASIC, synth cả SoC | `soc_synth.py` (không agent) | Yosys `v3` + OpenSTA cả `DigitalTop`, SRAM là macro giả có thời gian truy cập, đường găng theo vùng (tile / uncore / biên / I/O) | Chạy thật 05/11/2026 (`soc-synth-5`): SoC baseline 54,81 → `asic-7` 63,80 MHz, L2 chặn; số chưa tin được (không chèn buffer, báo cáo vùng lỗi). Dừng, xem `REPORT.md` mục 7 |
 | ASIC, post-route | (chưa có) | ORFS sky130 | Chưa bắt đầu |
 | FPGA | `soc_bitstream.py` (bitstream cả SoC qua `fpga/` của Chipyard, không agent, không board) | Vivado post-route cả SoC, Arty A7-100T, clock cố định (50 MHz) | Loop **tạm bỏ** ở 63,61 MHz (`fmax-r4`/`r5`, code ở `d2a1ac0`). `viv-asic6` (04/11/2026, out-of-context như `fmax-r4`, chạy thật): `asic-6` **63,27 MHz**, gần như không đổi so với 63,61. Sau đó bỏ worker `vivado` (`vivado_check.py`, commit `2dd99af`), chuyển sang bitstream SoC. `soc-asic6` (chạy thật, 50 MHz): cả hai điểm ra bitstream và đạt timing, WNS baseline 0,129 / `asic-6` 0,372 ns (Fmax ước tính 50,32 / 50,95 MHz, chỉ là cận dưới). `soc-asic6-f70` (70 MHz, chạy thật): Fmax SoC baseline **55,50**, `asic-6` **59,91 MHz** (+7,9 %), tile LUT +22,6 %, DSP 25 → 0 |
 

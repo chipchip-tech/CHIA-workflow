@@ -155,3 +155,65 @@ Các hướng đã thử nhưng bị loại:
 **Hướng tiếp (người dùng duyệt 02/11/2026):** tách pha theo `docs/workflow-phases.md`. Pha sim cho agent thêm tầng
 pipeline và chỉ đo chi phí cycle, ra danh sách ứng viên; pha asic dùng synth phân cấp (`v3`) để A/B không bị nhiễu,
 nhận thêm theo tổng slack các họ xấu nhất (điểm họ), và `synth_ab` không đo lại Verilog đã đo. Xem README.
+
+## 7. Kết thúc project (05/11/2026)
+
+Project dừng ở đây theo quyết định của người dùng. Bản cuối là `asic-7` (`~/rocket-fmax-v2/asic-7/patches/best.patch`,
+sha `b93d772b45d8`, 2345 dòng, 12 file).
+
+### Fmax đạt được khi synth (Yosys + OpenSTA sky130hd, chỉ `RocketTile`)
+
+| Điểm | Flow | Chu kỳ đặt | Fmax (MHz) | Chi phí cycle | Ghi chú |
+|---|---|---|---|---|---|
+| baseline | `v2` | 10 ns | 47,13 | 1,000 | |
+| `fmax-r4` | `v2` | 10 ns | 92,36 | +0,405 % | tốt nhất của flow phẳng |
+| `v3-start` (= `fmax-r4`) | `v3` | 10 ns | 85,01 | +0,405 % | flow phân cấp, điểm xuất phát các đợt `asic-*` |
+| `asic-4` | `v3` | 10 ns | 93,88 | +2,685 % | |
+| `asic-6` | `v3` | 10 ns | **109,17** | −0,006 % | đạt mục tiêu > 100 MHz; qua `func_check` |
+| `asic-7` | `v3` | 6 ns | **140,01** | +0,325 % | worst slack −1,143 ns, diện tích 1 248 905 µm² |
+
+So với baseline 47,13 MHz, `asic-7` nhanh gấp khoảng **2,97 lần** ở mức synth. Hai con số này đo ở chu kỳ đặt khác nhau
+(10 ns và 6 ns), và ABC chạy nhanh hơn khi bị ép chặt hơn: cùng RTL `asic-6` cho 109,17 MHz ở 10 ns và 113,53 MHz ở
+6 ns. Phần tăng do agent làm trong `asic-7` là 113,53 → 140,01 MHz (+23,3 %).
+
+Giới hạn của các số này:
+- Chỉ là synth: không place-and-route, không RC dây, không chèn buffer cho net fanout lớn, SRAM là hộp đen.
+- `asic-7` **chưa kiểm chức năng ngoài gate** (riscv-tests `rv64ui/um/ua/uf/ud` và 8 benchmark). Các rủi ro đã liệt kê
+  trong HANDOFF mục 12 (C.EBREAK ở U-mode, RVC, Zbb, load MMIO, FPU) chưa được test.
+
+### Vì sao không tiếp tục trên Vivado (FPGA)
+
+- **Thay đổi của agent nhắm ASIC, không chuyển sang FPGA.** Out-of-context, `asic-6` cho 63,27 MHz, gần như bằng
+  `fmax-r4` (63,61 MHz), dù ở synth ASIC tăng từ 92,36 lên 109,17 MHz. Các sửa kiểu carry-save, cây Dadda, mux one-hot
+  thay cho phép cộng/nhân có sẵn làm mất carry chain và DSP của FPGA: tile `asic-6` dùng LUT +22–24 %, DSP 25 → 0.
+- **Trong cả SoC trên Arty A7, lợi ích nhỏ.** `soc-asic6-f70` (Vivado post-route, 70 MHz): baseline 55,50 →
+  `asic-6` 59,91 MHz (+7,9 %), trong khi synth ASIC của tile
+  tăng từ 85,01 (`v3-start`) lên 109,17 MHz (+28 %). Đường găng chuyển sang `frontend/icache` → `frontend/fq`,
+  tức là FPGA có đường găng riêng; muốn tăng tiếp phải tối ưu riêng cho FPGA, ngoài mục tiêu project.
+- **Mỗi lần đo rất đắt.** Một điểm bitstream cả SoC mất khoảng 12–24 phút Vivado sau 1–2 giờ build, và kết quả P&R dao
+  động cỡ 1 % (`fmax-r5`), lớn bằng ngưỡng nhận một vòng. Không hợp để chạy loop agent.
+
+### Vì sao không tiếp tục với cả SoC (`soc_synth.py`)
+
+`soc-synth-5` (05/11/2026, chạy thật, sau khi sửa clock cho mọi chân register/SRAM và bỏ qua cổng reset):
+
+| Điểm | Fmax SoC (MHz) | Worst slack (6 ns) | Đường chặn | Diện tích (µm², không SRAM) |
+|---|---|---|---|---|
+| baseline | 54,81 | −12,244 | FPU `dfma` `mulAddResult_pipe_b` (trong tile) | 2 351 502 |
+| `asic-7` | 63,80 (+16,4 %) | −9,675 | L2 `InclusiveCache` `sinkA.putbuffer`, `mshrs_6` | 2 433 389 (+3,5 %) |
+
+- **Sau `asic-7`, tile không còn chặn SoC.** Mọi họ đường xấu nhất của `asic-7` nằm trong L2 (uncore), ngoài
+  `RocketTile`. Tăng Fmax SoC tiếp phải tối ưu `InclusiveCache` và bus, tức là một project khác.
+- **Số SoC chưa đủ tin để báo cáo như Fmax thật.** Yosys không chèn buffer cho net fanout lớn, và các đường L2 xấu
+  nhất đều đi tới hàng nghìn bit (`putbuffer.data_ext.Memory`, 2863 bit), nên trễ bị tính quá. Thời gian truy cập
+  SRAM giả (0 / 1,5 / 3 ns) không làm đổi kết quả. Script còn lỗi báo cáo: các cột slack theo vùng trống, "đường xấu
+  nhất" ghi nhầm một đường reset vào `RESET_B`, OpenSTA vẫn kiểm recovery ở chân reset bất đồng bộ. Muốn có số tin
+  được cần `repair_design` hoặc place-and-route bằng OpenROAD cho cả SoC, tốn công hơn nhiều so với giá trị thêm.
+- Kết luận đủ cho câu hỏi ban đầu: tile nhanh hơn có làm SoC nhanh hơn (+16,4 % ở synth, +7,9 % trên FPGA với
+  `asic-6`), nhưng giới hạn kế tiếp nằm ngoài tile.
+
+### Việc còn bỏ ngỏ (nếu mở lại)
+
+1. Chạy `func_check.py` cho `asic-7` trước khi dùng patch này ở bất cứ đâu.
+2. Place-and-route `RocketTile` bằng OpenROAD (ORFS sky130hd) cho baseline / `asic-6` / `asic-7`.
+3. Nếu quan tâm SoC: sửa báo cáo vùng trong `soc_synth.py`, thêm `repair_design`, rồi tối ưu L2.
