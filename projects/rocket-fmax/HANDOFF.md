@@ -100,6 +100,27 @@ và `README.md` (thư mục này).
    commit `cca3a717`), SRAM là macro giả (timing giả định, giống nhau cho mọi điểm), đo baseline / `asic-6` / `asic-7`
    cùng chu kỳ, ghi WNS sau route (có RC), diện tích, mật độ.
 
+   Đọc `asic-7/patches/best.patch` (05/11/2026, sha `b93d772b45d8`, 2345 dòng, 12 file; Claude chỉ đọc, không sửa).
+   Điểm rủi ro mà gate hiện tại gần như không phủ, theo thứ tự ưu tiên kiểm:
+   - **Nghi lỗi thật:** `csr.io.decode(0).inst := id_raw_inst(0)`. C.EBREAK (lệnh RVC duy nhất có `id_system_insn`)
+     đi qua `system_illegal` của CSRFile với bit thô: bit 31..20 là nửa lệnh kế tiếp, nên ở U/S-mode có thể trap
+     "illegal instruction" thay vì breakpoint (gdb dưới Linux dùng `c.ebreak`). Cần test nhắm đúng chỗ này.
+   - Giải mã stall song song cho RVC (`sd_*`, bảng tay; mình đối chiếu từng opcode, chưa thấy sai) và `ShiftQueue`
+     vòng pop trễ trong `frontend.fq`: gate không có `rv64uc`.
+   - Zbb: CPOP/CPOPW tách hai tầng (đếm theo byte ở EX, cộng ở MEM, `ex_reg_cpop` chặn bypass EX), bộ đếm số 0 mới,
+     mux cuối ALU theo byte: gate không có test Zbb.
+   - Load: mọi load (cả LB/LH) bypass qua `data_load_bypass` = `RegNext(LoadGen(s1_req, dữ liệu s1))`, chỉ còn SC
+     đi đường chậm; load uncached (MMIO) đổi `s2_req` nên giá trị bypass sai, phải dựa vào replay để không bị dùng.
+   - FPU: `sfmaLatency` 3 → 6, `dfmaLatency` 4 → 6, `ifpuLatency` 2 → 3; FMA nhân tách hai tầng (Dadda), `postMul`
+     tách tầng, `FastDivSqrt` (bản sửa của `DivSqrtRecFN_small`) + thanh ghi đầu ra, `recodeFast` cho load FP,
+     `RecFNToINPre`, `rawFloatFromIN` viết lại: rv64uf/ud chỉ có vài vector mỗi phép.
+   - Bộ nhân (`daddaReduce`), early-out bộ chia tính trước một chu kỳ (`eoPos`), `PMP.computeMask` bằng smear,
+     `ex_*` nạp mỗi chu kỳ không chờ `ctrl_killd`, tval của lệnh illegal lấy từ `wb_reg_raw_inst`, đích nhánh tính ở EX.
+   Kế hoạch kiểm cụ thể (chưa code): (1) thêm `rv64uc`, `rv64si`, `rv64mi`, bản `-v-`, `rv64uzb*` nếu image có;
+   (2) chương trình C ngẫu nhiên có hướng (FP mọi phép, mọi rm, subnormal/NaN/inf, fflags; mul/div biên; Zbb kèm dùng
+   ngay kết quả; load byte/half dùng ngay; RVC), in hash, so với Spike và baseline; (3) test tay C.EBREAK ở U-mode,
+   load MMIO byte dùng ngay; (4) so trace commit với baseline trên 8 benchmark nếu `+verbose` có.
+
 ## Quy ước làm việc
 
 Xem đầy đủ trong `CLAUDE.md`.
