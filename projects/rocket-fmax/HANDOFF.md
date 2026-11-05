@@ -3,8 +3,10 @@
 File này dành cho session Claude Code tiếp quản project. Đọc cùng `CLAUDE.md` (gốc repo), `docs/workflow-phases.md`
 và `README.md` (thư mục này).
 
-## Trạng thái (04/11/2026)
+## Trạng thái (05/11/2026)
 
+- Mới nhất: **140,01 MHz** Yosys `v3` ở `--period-ns 6` (`asic-7`, `~/rocket-fmax-v2/asic-7/patches/best.patch`),
+  cycle +0,325 %. Chưa kiểm chức năng ngoài gate, chưa place-and-route (mục 11, 12). Các dòng dưới là lịch sử.
 - Tốt nhất ở flow `v3`: **93,88 MHz** (`asic-4`, patch `~/rocket-fmax-v2/asic-4/patches/best.patch` = `sim-1` vòng 5 +
   `sim-2` vòng 4 (`LW` đi đường bypass chậm) + `asic-3` vòng 1 (mux bypass one-hot, thêm thanh ghi trước đầu vào
   `divSqrt`) + vòng 2 (`negated_remainder` cây OR) + `asic-4` vòng 1 (cộng cuối FMA carry-save + Kogge-Stone,
@@ -85,13 +87,14 @@ và `README.md` (thư mục này).
    `asic-6` là `frontend/icache/s2_dout` → CE của `frontend/fq`. fpga-shells vẫn ghi bitstream khi không đạt timing
    (summary nay ghi rõ). Chi tiết ở README, mục kiểm chứng. Nhánh FPGA dừng ở đây trừ khi người dùng muốn tối ưu
    riêng cho FPGA (`frontend/fq` CE, lấy lại DSP cho bộ nhân).
-11. Đang làm (05/11/2026): `asic-7`, thêm một đợt agent để đẩy Fmax lên (người dùng nhắm 150–200 MHz) từ
-   `asic-6/patches/best.patch`, `--period-ns 6` (slack đã dương ở 10 ns, ABC phải được ép), `--model opus --effort high
-   --llm-timeout 2700`. Ngân sách cycle còn khoảng 3 % (`asic-6` −0,006 %), nên không thêm được nhiều tầng pipeline:
-   150 MHz khó đạt trong 5 vòng. Chưa chạy. Lệnh: `python rocket_fmax.py --run-name asic-7 --start-patch
-   ~/rocket-fmax-v2/asic-6/patches/best.patch --history-from ~/rocket-fmax-v2/asic-4 ~/rocket-fmax-v2/asic-5
-   ~/rocket-fmax-v2/asic-6 --period-ns 6 --iters 5 --min-family-gain 0.1 --model opus --effort high --llm-timeout 2700`.
-12. Sau `asic-7` (kế hoạch, chưa làm): (a) kiểm chức năng bản tốt nhất: rv64si/rv64mi (trap, ngắt, VM), chương trình
+11. Xong (05/11/2026): `asic-7` (từ `asic-6/patches/best.patch`, `--period-ns 6 --model opus --effort high
+   --llm-timeout 2700`) nhận vòng 1–4: 113,53 (điểm xuất phát synth lại ở 6 ns) → **140,01 MHz**, worst slack −1,143 ns
+   ở 6 ns, cycle +0,325 %, diện tích +3,9 %. Vòng 5 LOẠI (agent hết giờ). Đường găng cuối
+   `dcache.s1_tlb_req_passthrough → s2_tlb_xcpt_ae_st`. Patch: `~/rocket-fmax-v2/asic-7/patches/best.patch`. Chi tiết
+   từng vòng ở README, mục kiểm chứng. Chưa tới 150 MHz; các sửa đụng frontend queue (`ShiftQueue` vòng pop trễ),
+   `IBuf`/`RVCExpander`, `BTB`, ALU (đếm số 0, mux cuối), recode FP: phải kiểm chức năng (mục 12a) trước khi chạy đợt
+   agent tiếp.
+12. Tiếp theo (kế hoạch, chưa làm, chờ người dùng duyệt file): (a) kiểm chức năng bản tốt nhất: rv64si/rv64mi (trap, ngắt, VM), chương trình
    chạy trên `pk`, so trace commit (PC, rd, dữ liệu ghi) lệnh-theo-lệnh với baseline trên mọi benchmark, test ngẫu
    nhiên nếu image có; (b) ASIC post-route bằng OpenROAD đã có trong image `eda` + platform sky130hd của ORFS (cùng
    commit `cca3a717`), SRAM là macro giả (timing giả định, giống nhau cho mọi điểm), đo baseline / `asic-6` / `asic-7`
