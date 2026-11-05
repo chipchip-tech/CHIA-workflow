@@ -215,13 +215,17 @@ def extract_soc_rtl(artifact, top: str) -> N.TileRTL:
 # use them; the tile alone never did. Rewrite them before Yosys reads the files.
 _CAST_SIGN_RE = re.compile(r"\b(signed|unsigned)\s*'\s*\(")
 _CAST_TYPE_RE = re.compile(r"\b(?!\d)([A-Za-z_]\w*)\s*'\s*\(")
+_PACKED_PATTERN_RE = re.compile(
+    r"(^[ \t]*(?:wire|logic|reg)\s+(?:\[[^\]]+\]\s*){2,}[A-Za-z_]\w*\s*=\s*)'\{", re.M)
 
 
 def sv_casts_for_yosys(text: str) -> tuple[str, int]:
     """Return (text with signed'/unsigned'/T' casts rewritten, number rewritten). Size casts stay."""
     text, n1 = _CAST_SIGN_RE.subn(lambda m: f"${m.group(1)}(", text)
     text, n2 = _CAST_TYPE_RE.subn("(", text)
-    return text, n1 + n2
+    # '{a, b, ...} on a packed multi-dim declaration (no unpacked dims) == concatenation {a, b, ...}
+    text, n3 = _PACKED_PATTERN_RE.subn(lambda m: m.group(1) + "{", text)
+    return text, n1 + n2 + n3
 
 
 @ChiaFunction(resources={"eda": 1}, num_cpus=2, max_retries=0)
