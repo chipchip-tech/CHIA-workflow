@@ -80,9 +80,12 @@ và `README.md` (thư mục này).
    (`soc_bitstream.py`, node `vivado_nodes.soc_bitstream` trên worker chipyard; Vivado và board files Digilent mount
    từ `~/tools/Xilinx`). Lệnh trong README, mục Chạy. Lần chạy đầu (`soc-asic6`) dừng ở compile Scala: harness `fpga/` của
    `chia_artifact` thiếu `wf_active`; node nay tự vá lúc chạy. Chạy lại thành công ở 50 MHz: cả hai điểm có bitstream,
-   WNS baseline 0,129 / `asic-6` 0,372 ns (Fmax chỉ là cận dưới), `asic-6` tile LUT +23,8 %, DSP 25 → 0. Bước kế:
-   `--freq-mhz 70` (`soc-asic6-f70`) để WNS âm, đo Fmax thật của SoC.
-11. Sau đó: kiểm thêm chức năng của `asic-6/patches/best.patch` (ngoài riscv-tests và benchmark của gate), rồi ASIC
+   WNS baseline 0,129 / `asic-6` 0,372 ns (Fmax chỉ là cận dưới), `asic-6` tile LUT +23,8 %, DSP 25 → 0. Xong
+   (05/11/2026): `soc-asic6-f70` (70 MHz, WNS âm, Fmax thật): baseline 55,50, `asic-6` 59,91 MHz (+7,9 %); đường găng
+   `asic-6` là `frontend/icache/s2_dout` → CE của `frontend/fq`. fpga-shells vẫn ghi bitstream khi không đạt timing
+   (summary nay ghi rõ). Chi tiết ở README, mục kiểm chứng. Nhánh FPGA dừng ở đây trừ khi người dùng muốn tối ưu
+   riêng cho FPGA (`frontend/fq` CE, lấy lại DSP cho bộ nhân).
+11. Ưu tiên tiếp (gợi ý 05/11/2026): kiểm thêm chức năng của `asic-6/patches/best.patch` (ngoài riscv-tests và benchmark của gate), rồi ASIC
    post-route (ORFS sky130) cho bản tốt nhất.
 
 ## Quy ước làm việc

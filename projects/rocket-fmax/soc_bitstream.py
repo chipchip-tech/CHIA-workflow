@@ -134,7 +134,7 @@ def summary(a, pts: list[dict]) -> str:
             lines.append(f"| `{r['point']}` | lỗi: {r['error'][:300]} |" + " |" * 13)
             continue
         lines.append("| " + " | ".join([
-            f"`{r['point']}`", f"có (`{r['bit_sha12']}`)" if r["ok"] else "không", f"`{r['core_clock']}`",
+            f"`{r['point']}`", (f"có (`{r['bit_sha12']}`)" + (", không đạt timing: không dùng được ở tần số này" if float(r["wns_ns"] or 0) < 0 else "")) if r["ok"] else "không", f"`{r['core_clock']}`",
             str(r["wns_ns"]), str(r["tns_ns"]), str(r["failing"]),
             f"{r['fmax_est_mhz']}{_d(r['fmax_est_mhz'], ref.get('fmax_est_mhz'), True)}",
             str(r["tile_slack_ns"]), f"{r['tile_fmax_est_mhz']}{_d(r['tile_fmax_est_mhz'], ref.get('tile_fmax_est_mhz'), True)}",
@@ -219,7 +219,7 @@ def run(a, out: Path):
         p["res"] = strip_tile(res)
         save(out, p, res)
         r = row(p["name"], res, a.freq_mhz)
-        print(f"{p['name']}: {r['minutes']} min, bitstream {'có' if res['ok'] else 'không'}, "
+        print(f"{p['name']}: {r['minutes']} min, bitstream {('có' + (' (không đạt timing)' if float(r['wns_ns'] or 0) < 0 else '')) if res['ok'] else 'không'}, "
               f"clock {r['core_clock']} WNS {r['wns_ns']} ns (Fmax ước tính {r['fmax_est_mhz']} MHz), "
               f"LUT {r['luts']}, FF {r['ffs']}, BRAM {r['brams']}, DSP {r['dsps']}"
               + (f"\n  lỗi: {res['error']}" if res.get("error") else ""), flush=True)

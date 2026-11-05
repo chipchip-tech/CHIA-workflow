@@ -406,7 +406,7 @@ def soc_bitstream(rocket_head: str, patch: str, config: str, config_scala: str =
                             + (" (killed: OOM?)" if rc in (137, -9) else "")
                             + ("; chưa tới route" if not os.path.exists(dcp) else "") + ": không có bitstream")
             if "Failed to meet timing" in res["make_log_tail"]:
-                res["error"] += "; route xong nhưng không đạt timing (fpga-shells không ghi bitstream; WNS vẫn đo)"
+                res["error"] += "; route xong nhưng không đạt timing (WNS vẫn đo trên post_route.dcp)"
             if "Compilation failed" in res["make_log_tail"]:
                 res["error"] += "; Scala không compile (xem [error] trong make_log_tail.txt)"
             if "@@NO_BOARD" in res["make_log_tail"]:
