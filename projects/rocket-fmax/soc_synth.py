@@ -190,8 +190,20 @@ foreach p [all_inputs] {{
 }}
 puts "@@CLOCKS"
 foreach p $clks {{ puts [get_full_name $p] }}
-create_clock -name clk -period {period_ns} $clks
+# Clock ports of DigitalTop reach the flops through PRCI clock nodes/gates; a port clock alone left
+# ~42k register pins unclocked (soc-synth-3b). Put the ideal clock on every leaf register clock pin
+# and every SRAM macro clock pin as well (one synchronous domain).
+set ckpins [all_registers -edge_triggered -clock_pins]
+foreach q [get_pins -hierarchical *_clk] {{
+  if {{[catch {{get_property $q is_hierarchical}} h] == 0 && !$h}} {{ lappend ckpins $q }}
+}}
+puts "@@NCKPINS"
+puts [llength $ckpins]
+create_clock -name clk -period {period_ns} [concat $clks $ckpins]
 if {{[llength $others]}} {{ set_input_delay 0 -clock clk $others }}
+# Resets are asynchronous / pass through synchronizers: not timed.
+set rst [get_ports -quiet *reset*]
+if {{[llength $rst]}} {{ set_false_path -from $rst }}
 set_output_delay 0 -clock clk [all_outputs]
 puts "@@WORST"
 report_worst_slack -max -digits 4
