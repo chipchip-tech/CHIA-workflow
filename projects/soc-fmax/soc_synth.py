@@ -28,6 +28,9 @@ rerun (--force).
       --patch asic-7=~/rocket-fmax-v2/asic-7/patches/best.patch
   Tile + L2 (l2/ loop result), adding a point to the same run (points with a result.json are skipped):
     ... --patch asic-7=... --patch asic-7-l2=<tile patch> --l2-patch asic-7-l2=<l2 best.patch>
+  Target 100 MHz: --period-ns 10 (STA clock, slack < 0 = misses 100 MHz), --abc-ns 6 (abc -D),
+  --repair-timing (OpenROAD repair_timing -setup), --no-baseline; summary.md then groups the failing
+  paths by startpoint register.
 """
 from __future__ import annotations
 
@@ -72,7 +75,11 @@ def parse_args():
                    help="a rocket-chip patch (repeatable); the baseline is always the first point")
     p.add_argument("--l2-patch", action="append", default=[], metavar="NAME=PATH",
                    help="rocket-chip-inclusive-cache patch (from the l2/ loop) for point NAME, which must be a --patch")
-    p.add_argument("--period-ns", type=float, default=6.0, help="clock of abc -D and of STA (asic-7 used 6)")
+    p.add_argument("--period-ns", type=float, default=6.0, help="clock of STA and repair_timing (asic-7 used 6)")
+    p.add_argument("--abc-ns", type=float, default=None, help="abc -D target (default: --period-ns)")
+    p.add_argument("--repair-timing", action="store_true",
+                   help="after repair_design: OpenROAD repair_timing -setup against --period-ns (no RTL change)")
+    p.add_argument("--no-baseline", action="store_true", help="skip the baseline point")
     p.add_argument("--sram-access-ns", default="0,2",
                    help="comma-separated SRAM clock-to-read-data times, one timing run each (0 = ideal SRAM)")
     p.add_argument("--sram-setup-ns", type=float, default=0.2)
@@ -87,6 +94,7 @@ def parse_args():
     p.add_argument("--force", action="store_true")
     a = p.parse_args()
     a.out_dir = os.path.expanduser(a.out_dir)
+    a.abc_ns = a.abc_ns or a.period_ns
     a.access = [float(x) for x in a.sram_access_ns.split(",") if x.strip()]
     if not a.access:
         p.error("--sram-access-ns: at least one value")
@@ -94,7 +102,7 @@ def parse_args():
 
 
 def points(a) -> list[dict]:
-    out = [{"name": "baseline", "patch": "", "l2_patch": ""}]
+    out = [] if a.no_baseline else [{"name": "baseline", "patch": "", "l2_patch": ""}]
     for spec in a.patch:
         name, sep, path = spec.partition("=")
         if not sep or not name or not path or name == "baseline":
@@ -355,6 +363,15 @@ REPAIR = """\
 puts "@@REPAIR"
 set_max_fanout {max_fanout} [current_design]
 if {{[catch {{repair_design}} err]}} {{ puts "ERROR repair_design: $err" }}
+{repair_timing}"""
+
+REPAIR_TIMING = """\
+puts "@@WORST_DESIGN"
+report_worst_slack -max -digits 4
+if {[catch {repair_timing -setup -setup_margin 0 -repair_tns 100} err]} {
+  puts "ERROR repair_timing: $err"
+  if {[catch {repair_timing -setup} err]} { puts "ERROR repair_timing (no options): $err" }
+}
 """
 
 FLOORPLAN = """\
@@ -400,7 +417,8 @@ def _run_timing(work: str, tool: str, script: str, timeout: int) -> tuple[int, s
 
 @ChiaFunction(resources={"eda": 1}, num_cpus=2, max_retries=0)
 def soc_synth_sta(rtl: N.TileRTL, period_ns: float, access: list, setup_ns: float, yosys_timeout: int,
-                  buffer: str = "repair", max_fanout: int = 16) -> dict:
+                  buffer: str = "repair", max_fanout: int = 16, abc_ns: float | None = None,
+                  repair_timing: bool = False) -> dict:
     """Yosys v3 on rtl.top, then timing once per SRAM access time. Returns {"ok", "error", "area_um2",
     "stat", "yosys_log_tail", "yosys_minutes", "sta": {access: stdout}, "buffer": {access: what ran}}."""
     res = {"ok": False, "error": "", "sta": {}, "buffer": {}}
@@ -426,7 +444,7 @@ def soc_synth_sta(rtl: N.TileRTL, period_ns: float, access: list, setup_ns: floa
             with open(os.path.join(work, bb[-1]), "w") as f:
                 f.write(text + "\n")
         ys = N.YOSYS_SCRIPT.format(
-            lib=lib, top=rtl.top, period_ps=int(round(period_ns * 1000)), synth=N.SYNTH_FLOWS["v3"].format(top=rtl.top),
+            lib=lib, top=rtl.top, period_ps=int(round((abc_ns or period_ns) * 1000)), synth=N.SYNTH_FLOWS["v3"].format(top=rtl.top),
             read_blackboxes="\n".join(f"read_verilog -lib -sv {p}" for p in bb),
             files=" ".join(f"rtl/{n}" for n in sorted(rtl.files)), stat="stat.txt", netlist="netlist.v")
         with open(os.path.join(work, "synth.ys"), "w") as f:
@@ -478,8 +496,9 @@ def soc_synth_sta(rtl: N.TileRTL, period_ns: float, access: list, setup_ns: floa
             if buffer == "repair" and not lef_error:
                 read_lefs = "".join(f"read_lef {p}\n" for p in lefs) + "read_lef fakeram.lef\n"
                 rc, out = _run_timing(work, "openroad", STA_SOC.format(
-                    read_lefs=read_lefs, floorplan=FLOORPLAN, repair=REPAIR.format(max_fanout=max_fanout), **common), 6 * 3600)
-                used = "repair"
+                    read_lefs=read_lefs, floorplan=FLOORPLAN, repair=REPAIR.format(max_fanout=max_fanout, repair_timing=REPAIR_TIMING if repair_timing else ""),
+                    **common), 12 * 3600)
+                used = "repair+timing" if repair_timing else "repair"
                 if rc != 0 or "@@END" not in out:
                     res.setdefault("repair_errors", {})[str(acc)] = f"openroad rc {rc}: " + out[-3000:]
                     out, used = "", "none (openroad failed)"
@@ -524,14 +543,23 @@ def _int(text: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def start_family(start: str) -> str:
+    """Startpoint register with bit indices and the pin removed: a.b.x[3]_reg.Q -> a.b.x[*]_reg."""
+    n = norm(start)
+    n = re.sub(r"\.(Q|Q_N|CLK|[A-Z]\w*)$", "", n) if "." in n else n
+    return re.sub(r"\[\d+\]", "[*]", n)
+
+
 def analyze(sta_out: str, period_ns: float, tile: str, srams: set) -> dict:
     text = sta_out.replace("\\", "")
     pat = r"worst slack(?:\s+max)?\s+(-?[\d.]+(?:e-?\d+)?)"
     worst = N._num(pat, N._section(text, "WORST"))
     pre = N._num(pat, N._section(text, "WORST_PRE"))
+    wdes = N._num(pat, N._section(text, "WORST_DESIGN"))
     tns = N._num(r"tns(?:\s+max)?\s+(-?[\d.]+(?:e-?\d+)?)", N._section(text, "TNS"))
     srams_n = {norm(s) for s in srams}
     reg: dict = {}
+    starts: dict = {}
     sram_worst = None
     n = 0
     for line in N._section(text, "REGIONS").splitlines():
@@ -541,6 +569,13 @@ def analyze(sta_out: str, period_ns: float, tile: str, srams: set) -> dict:
         st, en, sl = m.group(1), m.group(2), float(m.group(3))
         n += 1
         r = region(st, en, tile)
+        if sl < 0:
+            k = start_family(st)
+            g = starts.setdefault(k, {"count": 0, "slack": sl, "end": en, "regions": set()})
+            g["count"] += 1
+            g["regions"].add(r)
+            if sl < g["slack"]:
+                g["slack"], g["end"] = sl, en
         cur = reg.get(r)
         if cur is None or sl < cur["slack"]:
             reg[r] = {"slack": sl, "start": st, "end": en, "count": (cur or {}).get("count", 0)}
@@ -555,6 +590,10 @@ def analyze(sta_out: str, period_ns: float, tile: str, srams: set) -> dict:
         return (1000.0 / (period_ns - w)) if w is not None and period_ns - w > 0 else None
     repair = N._section(text, "REPAIR")
     return {"worst_slack_ns": worst, "tns_ns": tns, "fmax_mhz": fmax(worst), "worst_pre_ns": pre, "fmax_pre_mhz": fmax(pre),
+            "worst_design_ns": wdes, "fmax_design_mhz": fmax(wdes),
+            "start_families": sorted(({"start": k, "count": g["count"], "slack": g["slack"], "end": g["end"],
+                                       "regions": sorted(g["regions"])} for k, g in starts.items()),
+                                     key=lambda g: (-g["count"], g["slack"]))[:30],
             "crit_start": st.group(1) if st else "", "crit_end": en.group(1) if en else "",
             "worst_region": region(st.group(1), en.group(1), tile) if st and en else "",
             "regions": reg, "sram_slack_ns": sram_worst, "region_paths": n,
@@ -583,7 +622,7 @@ def run_point(a, p: dict, snap: dict, d: Path) -> dict:
     print(f"{p['name']}: build ok ({(time.time() - t0) / 60:.1f} min), {a.top}: {len(rtl.modules)} modules, "
           f"{len(rtl.blackboxes)} SRAM, tile {tiles}; synth ...", flush=True)
     s = get(soc_synth_sta.chia_remote(rtl, a.period_ns, a.access, a.sram_setup_ns, int(a.yosys_timeout_hours * 3600),
-                                      a.buffer, a.max_fanout))
+                                      a.buffer, a.max_fanout, a.abc_ns, a.repair_timing))
     write(d / "yosys_log_tail.txt", s.get("yosys_log_tail", ""))
     res = {"ok": s["ok"], "error": s.get("error", ""), "rtl_sha12": rtl_hash, "tile": tiles[0] if tiles else "",
            "srams": sorted(rtl.blackboxes), "area_um2": s.get("area_um2"), "yosys_minutes": s.get("yosys_minutes"),
@@ -614,12 +653,13 @@ def csv_rows(name: str, r: dict, period: float) -> list[dict]:
 
 def summary(a, pts: list[dict]) -> str:
     lines = [f"# Synth cả SoC: {a.run_name}", "",
-             f"`{a.top}` của RocketConfig, Yosys `v3` (phân cấp) sky130hd, `abc -D` {a.period_ns:g} ns, một clock lý tưởng "
+             f"`{a.top}` của RocketConfig, Yosys `v3` (phân cấp) sky130hd, `abc -D` {a.abc_ns:g} ns, một clock lý tưởng "
              f"{a.period_ns:g} ns. SRAM là macro giả (clock → dữ liệu đọc = cột `SRAM`, setup {a.sram_setup_ns:g} ns). "
              "Không tính: chân reset/set bất đồng bộ của flop (recovery/removal tắt), tầng đầu `*sync_0_reg*` của các bộ "
              f"đồng bộ, cổng reset. Buffer: `{a.buffer}`" + (f" (OpenROAD `repair_design`, max fanout {a.max_fanout}, "
              "không placement, không RC dây)" if a.buffer == "repair" else "") + ". `trước buffer` là Fmax trước "
-             "`repair_design`. Slack theo vùng lấy từ 5000 đường xấu nhất (mỗi endpoint một đường).", "",
+             "`repair_design`" + (f"; `repair_timing -setup` nhắm {a.period_ns:g} ns (không placement, không RC dây: lạc quan), "
+             "`sau repair_design` là Fmax trước bước này" if a.repair_timing else "") + ". Slack theo vùng lấy từ 5000 đường xấu nhất (mỗi endpoint một đường).", "",
              "| điểm | SRAM (ns) | buffer | Fmax SoC (MHz) | trước buffer | vùng xấu nhất | tile | uncore | tile<->uncore | I/O | "
              "đường có SRAM | TNS | diện tích (µm², không SRAM) |", "|" + "---|" * 13]
     ref = {}
@@ -657,6 +697,15 @@ def summary(a, pts: list[dict]) -> str:
                 g = x["regions"].get(k)
                 if g:
                     lines.append(f"- {k}: {g['slack']:.3f} ns ({g['count']} endpoint trong {x['region_paths']}), `{g['start']}` → `{g['end']}`")
+            if x.get("worst_design_ns") is not None:
+                lines.append(f"- sau repair_design, trước repair_timing: {x['worst_design_ns']:.3f} ns "
+                             f"({fmt(x['fmax_design_mhz'], 2)} MHz)")
+            sf = x.get("start_families") or []
+            if sf:
+                lines += ["", f"Đường fail (slack < 0 ở clock {a.period_ns:g} ns) gom theo startpoint, nhiều endpoint nhất trước:", "",
+                          "| startpoint | endpoint fail | slack xấu nhất | vùng | endpoint xấu nhất |", "|---|---|---|---|---|"]
+                lines += [f"| `{g['start']}` | {g['count']} | {g['slack']:.3f} | {', '.join(g['regions'])} | `{g['end']}` |" for g in sf]
+                lines.append("")
             if x["noclock"].strip():
                 lines.append(f"- check_setup -no_clock: {x['noclock'].strip()[:300]}")
             lines += ["", "```", x["families"], "```"]
