@@ -249,7 +249,7 @@ def ptag(a) -> str:
 
 
 def synth_tag(a, prefix: str) -> str:
-    return f"{prefix}_synth_{a.synth_flow}_p{ptag(a)}"
+    return f"{prefix}_synth_{a.synth_flow}c_p{ptag(a)}"   # c: SV casts rewritten for Yosys
 
 
 def bench_tag(a) -> str:

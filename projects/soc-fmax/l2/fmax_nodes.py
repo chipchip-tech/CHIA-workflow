@@ -1009,6 +1009,24 @@ def parse_area(stat: str) -> float | None:
     return float(vals[-1]) if vals else None
 
 
+# Yosys 0.38's Verilog frontend accepts a size cast `8'(x)` but not `signed'(x)`, `unsigned'(x)` or a
+# cast to a named type `T'(x)` (unexpected OP_CAST). Uncore files (e.g. InclusiveCache's Atomics.sv)
+# use them; the tile alone never did. Rewrite them before Yosys reads the files.
+_CAST_SIGN_RE = re.compile(r"\b(signed|unsigned)\s*'\s*\(")
+_CAST_TYPE_RE = re.compile(r"\b(?!\d)([A-Za-z_]\w*)\s*'\s*\(")
+_PACKED_PATTERN_RE = re.compile(
+    r"(^[ \t]*(?:wire|logic|reg)\s+(?:\[[^\]]+\]\s*){2,}[A-Za-z_]\w*\s*=\s*)'\{", re.M)
+
+
+def sv_casts_for_yosys(text: str) -> tuple[str, int]:
+    """Return (text with signed'/unsigned'/T' casts rewritten, number rewritten). Size casts stay."""
+    text, n1 = _CAST_SIGN_RE.subn(lambda m: f"${m.group(1)}(", text)
+    text, n2 = _CAST_TYPE_RE.subn("(", text)
+    # '{a, b, ...} on a packed multi-dim declaration (no unpacked dims) == concatenation {a, b, ...}
+    text, n3 = _PACKED_PATTERN_RE.subn(lambda m: m.group(1) + "{", text)
+    return text, n1 + n2 + n3
+
+
 @ChiaFunction(resources={"eda": 1}, num_cpus=2, max_retries=0)
 def synth_sta(rtl: TileRTL, period_ns: float, flow: str = "v2",
               yosys_timeout: int = 4 * 3600) -> SynthResult:
@@ -1030,6 +1048,7 @@ def synth_sta(rtl: TileRTL, period_ns: float, flow: str = "v2",
             f.write(filtered)
         os.makedirs(os.path.join(work, "rtl"))
         for name, text in rtl.files.items():
+            text, _ = sv_casts_for_yosys(text)
             with open(os.path.join(work, "rtl", name), "w") as f:
                 f.write(text)
         bb_paths = []
