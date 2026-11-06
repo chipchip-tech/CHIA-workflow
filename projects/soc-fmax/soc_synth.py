@@ -374,7 +374,7 @@ puts "@@END"
 # Kogge-Stone carry for every adder/comparator: `synth` stops before `fine`, the $lcu cells are mapped with
 # kogge_stone.v (written into the work dir; Yosys < 0.40 has no +/choices/kogge-stone.v, this is the same
 # module), techmap.v covers the rest of $alu, then `synth` finishes as usual.
-SYNTH_KS = "synth -top {top} -run :fine\ntechmap -map +/techmap.v -map kogge_stone.v\nsynth -top {top} -run fine:"
+SYNTH_KS = "synth -top {top} -run :fine\ntechmap -autoproc -map +/techmap.v -map kogge_stone.v\nsynth -top {top} -run fine:"
 KOGGE_STONE_V = """\
 (* techmap_celltype = "$lcu" *)
 module _80_lcu_kogge_stone (P, G, CI, CO);
