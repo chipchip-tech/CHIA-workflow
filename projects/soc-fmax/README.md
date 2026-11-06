@@ -13,7 +13,7 @@ Mục tiêu:
 
 | Bước | Nội dung | Trạng thái |
 |---|---|---|
-| 1 | Sửa phép đo (`soc_synth.py`): không tính reset bất đồng bộ và tầng đầu bộ đồng bộ, chèn buffer bằng `repair_design`, lấy slack theo vùng | Đã viết, **chưa chạy** |
+| 1 | Sửa phép đo (`soc_synth.py`): không tính reset bất đồng bộ và tầng đầu bộ đồng bộ, chèn buffer bằng `repair_design`, lấy slack theo vùng | Xong (`soc-fmax-1`): baseline 54,81 MHz (FMA chặn), `asic-7` 63,80 MHz (L2 chặn) |
 | 2 | SRAM OpenRAM sky130 (MacroCompiler + `.lib`), so với SRAM giả, có thể thu nhỏ L2 | Chưa làm |
 | 3 | Loop agent trên vùng chặn (L2/uncore), có gate chức năng cho bộ nhớ | Chưa làm |
 
