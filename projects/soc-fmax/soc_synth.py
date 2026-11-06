@@ -26,6 +26,8 @@ rerun (--force).
   chia job submit --no-wait --submission-id soc-fmax-1 --working-dir . -- \\
     python soc_synth.py --run-name soc-fmax-1 \\
       --patch asic-7=~/rocket-fmax-v2/asic-7/patches/best.patch
+  Tile + L2 (l2/ loop result), adding a point to the same run (points with a result.json are skipped):
+    ... --patch asic-7=... --patch asic-7-l2=<tile patch> --l2-patch asic-7-l2=<l2 best.patch>
 """
 from __future__ import annotations
 
@@ -68,6 +70,8 @@ def parse_args():
     p.add_argument("--run-name", required=True)
     p.add_argument("--patch", action="append", default=[], metavar="NAME=PATH",
                    help="a rocket-chip patch (repeatable); the baseline is always the first point")
+    p.add_argument("--l2-patch", action="append", default=[], metavar="NAME=PATH",
+                   help="rocket-chip-inclusive-cache patch (from the l2/ loop) for point NAME, which must be a --patch")
     p.add_argument("--period-ns", type=float, default=6.0, help="clock of abc -D and of STA (asic-7 used 6)")
     p.add_argument("--sram-access-ns", default="0,2",
                    help="comma-separated SRAM clock-to-read-data times, one timing run each (0 = ideal SRAM)")
@@ -90,7 +94,7 @@ def parse_args():
 
 
 def points(a) -> list[dict]:
-    out = [{"name": "baseline", "patch": ""}]
+    out = [{"name": "baseline", "patch": "", "l2_patch": ""}]
     for spec in a.patch:
         name, sep, path = spec.partition("=")
         if not sep or not name or not path or name == "baseline":
@@ -98,7 +102,15 @@ def points(a) -> list[dict]:
         text = Path(path).expanduser().read_text()
         if not text.strip():
             raise SystemExit(f"--patch {spec!r}: empty patch")
-        out.append({"name": name, "patch": text})
+        out.append({"name": name, "patch": text, "l2_patch": ""})
+    for spec in a.l2_patch:
+        name, sep, path = spec.partition("=")
+        pt = next((q for q in out if q["name"] == name and name != "baseline"), None)
+        if not sep or not path or pt is None:
+            raise SystemExit(f"--l2-patch {spec!r}: expected NAME=PATH with NAME given by a --patch")
+        pt["l2_patch"] = Path(path).expanduser().read_text()
+        if not pt["l2_patch"].strip():
+            raise SystemExit(f"--l2-patch {spec!r}: empty patch")
     return out
 
 
@@ -558,6 +570,7 @@ def analyze(sta_out: str, period_ns: float, tile: str, srams: set) -> dict:
 def run_point(a, p: dict, snap: dict, d: Path) -> dict:
     t0 = time.time()
     print(get(N.reset_rocket.chia_remote(snap["rocket_head"], p["patch"])) or "rocket-chip clean", flush=True)
+    print(get(N.reset_l2.chia_remote(p.get("l2_patch", ""))) or "L2 clean", flush=True)
     art = build(a, f"soc-fmax-{p['name']}")
     if not art.success:
         save_build(d, art)
@@ -662,6 +675,8 @@ def main():
     for p in pts:
         d = out / "runs" / p["name"]
         write(d / "point.patch", p["patch"])
+        if p["l2_patch"]:
+            write(d / "l2.patch", p["l2_patch"])
         old = d / "result.json"
         if old.exists() and not a.force:
             prev = json.loads(old.read_text())
@@ -685,6 +700,7 @@ def main():
         write(out / "summary.md", summary(a, [q for q in pts if "res" in q]))
     if snap:
         get(N.reset_rocket.chia_remote(snap["rocket_head"], ""))
+        get(N.reset_l2.chia_remote(""))
     write(out / "summary.md", summary(a, pts))
     print("\n" + (out / "summary.md").read_text())
     print(f"done: {out}")

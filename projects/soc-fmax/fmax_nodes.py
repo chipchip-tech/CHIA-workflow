@@ -32,6 +32,7 @@ from chia.models.claude import ClaudeCodeLLM, ClaudeCodeQueryResult, parse_rate_
 CHIPYARD = "/home/ray/chipyard"
 ROCKET = f"{CHIPYARD}/generators/rocket-chip"
 ROCKET_REL = "generators/rocket-chip"
+L2_REPO = f"{CHIPYARD}/generators/rocket-chip-inclusive-cache"
 CONFIG = "RocketConfig"
 TOP = "RocketTile"
 STAGE_DIR = "/home/ray/rocket_fmax"          # on chipyard: what the agent may read
@@ -140,6 +141,21 @@ def reset_rocket_local(rocket_head: str, patch: str) -> str:
         finally:
             os.unlink(f.name)
     return _sh(f"git -C {ROCKET} status --short")
+
+
+@ChiaFunction(resources={"chipyard": 1}, max_retries=0)
+def reset_l2(patch: str) -> str:
+    """Put rocket-chip-inclusive-cache (the L2) back at its HEAD, then apply `patch` ("" = original L2)."""
+    _sh(f"git -C {L2_REPO} reset -q --hard HEAD")
+    _sh(f"git -C {L2_REPO} clean -fdq")
+    if patch.strip():
+        with tempfile.NamedTemporaryFile("w", suffix=".patch", delete=False) as f:
+            f.write(patch)
+        try:
+            _sh(f"git -C {L2_REPO} apply --whitespace=nowarn {f.name}")
+        finally:
+            os.unlink(f.name)
+    return _sh(f"git -C {L2_REPO} status --short")
 
 
 @ChiaFunction(resources={"chipyard": 1}, max_retries=0)
