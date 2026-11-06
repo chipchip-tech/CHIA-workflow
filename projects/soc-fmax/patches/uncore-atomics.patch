@@ -1,0 +1,95 @@
+diff --git a/src/main/scala/tilelink/AtomicAutomata.scala b/src/main/scala/tilelink/AtomicAutomata.scala
+index 3bedf0f..1e35438 100644
+--- a/src/main/scala/tilelink/AtomicAutomata.scala
++++ b/src/main/scala/tilelink/AtomicAutomata.scala
+@@ -71,8 +71,9 @@ class TLAtomicAutomata(logical: Boolean = true, arithmetic: Boolean = true, conc
+       // CAM entry state machine
+       val FREE = 0.U // unused                   waiting on Atomic from A
+       val GET  = 3.U // Get sent down A          waiting on AccessDataAck from D
+-      val AMO  = 2.U // AccessDataAck sent up D  waiting for A availability
++      val AMO  = 2.U // AMO result registered    waiting for A availability
+       val ACK  = 1.U // Put sent down A          waiting for PutAck from D
++      val CALC = 4.U // AccessDataAck sent up D  computing the AMO result (one cycle, cut path ALU -> A)
+ 
+       val params = TLAtomicAutomata.CAMParams(out.a.bits.params, domainsNeedingHelp.size)
+       // Do we need to do anything at all?
+@@ -82,10 +83,12 @@ class TLAtomicAutomata(logical: Boolean = true, arithmetic: Boolean = true, conc
+         val cam_s = RegInit(VecInit.fill(camSize)(initval))
+         val cam_a = Reg(Vec(camSize, new TLAtomicAutomata.CAM_A(params)))
+         val cam_d = Reg(Vec(camSize, new TLAtomicAutomata.CAM_D(params)))
++        val cam_r = Reg(Vec(camSize, UInt(params.a.dataBits.W)))   // registered AMO result
+ 
+         val cam_free   = cam_s.map(_.state === FREE)
+         val cam_amo    = cam_s.map(_.state === AMO)
+-        val cam_abusy  = cam_s.map(e => e.state === GET || e.state === AMO) // A is blocked
++        val cam_calc   = cam_s.map(_.state === CALC)
++        val cam_abusy  = cam_s.map(e => e.state === GET || e.state === AMO || e.state === CALC) // A is blocked
+         val cam_dmatch = cam_s.map(e => e.state =/= FREE) // D should inspect these entries
+ 
+         // Can the manager already handle this message?
+@@ -101,8 +104,14 @@ class TLAtomicAutomata(logical: Boolean = true, arithmetic: Boolean = true, conc
+         val a_cam_any_put = cam_amo.reduce(_ || _)
+         val a_cam_por_put = cam_amo.scanLeft(false.B)(_||_).init
+         val a_cam_sel_put = (cam_amo zip a_cam_por_put) map { case (a, b) => a && !b }
+-        val a_cam_a = PriorityMux(cam_amo, cam_a)
+-        val a_cam_d = PriorityMux(cam_amo, cam_d)
++        // the Put leaves from an entry in AMO; the ALU works on an entry in CALC, one cycle earlier
++        val p_cam_a = PriorityMux(cam_amo, cam_a)
++        val p_cam_d = PriorityMux(cam_amo, cam_d)
++        val p_cam_r = PriorityMux(cam_amo, cam_r)
++        val a_cam_por_calc = cam_calc.scanLeft(false.B)(_||_).init
++        val a_cam_sel_calc = (cam_calc zip a_cam_por_calc) map { case (a, b) => a && !b }
++        val a_cam_a = PriorityMux(cam_calc, cam_a)
++        val a_cam_d = PriorityMux(cam_calc, cam_d)
+         val a_a = a_cam_a.bits.data
+         val a_d = a_cam_d.data
+ 
+@@ -165,13 +174,21 @@ class TLAtomicAutomata(logical: Boolean = true, arithmetic: Boolean = true, conc
+         val source_c = Wire(chiselTypeOf(in.a))
+         source_c.valid := a_cam_any_put
+         source_c.bits := edgeOut.Put(
+-          fromSource = a_cam_a.bits.source,
+-          toAddress  = edgeIn.address(a_cam_a.bits),
+-          lgSize     = a_cam_a.bits.size,
+-          data       = amo_data,
+-          corrupt    = a_cam_a.bits.corrupt || a_cam_d.corrupt)._2
+-        source_c.bits.user :<= a_cam_a.bits.user
+-        source_c.bits.echo :<= a_cam_a.bits.echo
++          fromSource = p_cam_a.bits.source,
++          toAddress  = edgeIn.address(p_cam_a.bits),
++          lgSize     = p_cam_a.bits.size,
++          data       = p_cam_r,
++          corrupt    = p_cam_a.bits.corrupt || p_cam_d.corrupt)._2
++        source_c.bits.user :<= p_cam_a.bits.user
++        source_c.bits.echo :<= p_cam_a.bits.echo
++
++        // Register the AMO result of the entry in CALC, then offer its Put
++        (a_cam_sel_calc zip (cam_r zip cam_s)) foreach { case (en, (r, st)) =>
++          when (en) {
++            r := amo_data
++            st.state := AMO
++          }
++        }
+ 
+         // Finishing an AMO from the CAM has highest priority
+         TLArbiter(TLArbiter.lowestIndexFirst)(out.a, (0.U, source_c), (edgeOut.numBeats1(in.a.bits), source_i))
+@@ -229,8 +246,8 @@ class TLAtomicAutomata(logical: Boolean = true, arithmetic: Boolean = true, conc
+           }
+           (d_cam_sel zip cam_s) foreach { case (en, r) =>
+             when (en) {
+-              // Note: it is important that this comes AFTER the := GET, so we can go FREE=>GET=>AMO in one cycle
+-              r.state := Mux(d_ackd, AMO, FREE)
++              // Note: it is important that this comes AFTER the := GET, so we can go FREE=>GET=>CALC in one cycle
++              r.state := Mux(d_ackd, CALC, FREE)
+             }
+           }
+         }
+@@ -295,7 +312,7 @@ object TLAtomicAutomata
+   case class CAMParams(a: TLBundleParameters, domainsNeedingHelp: Int)
+ 
+   class CAM_S(val params: CAMParams) extends Bundle {
+-    val state = UInt(2.W)
++    val state = UInt(3.W)
+   }
+   class CAM_A(val params: CAMParams) extends Bundle {
+     val bits    = new TLBundleA(params.a)
