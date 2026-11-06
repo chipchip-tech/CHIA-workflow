@@ -91,6 +91,9 @@ def parse_args():
     p.add_argument("--sram-setup-ns", type=float, default=0.2)
     p.add_argument("--buffer", choices=("repair", "none"), default="repair",
                    help="repair: OpenROAD repair_design before timing; none: OpenSTA alone (as rocket-fmax)")
+    p.add_argument("--place", choices=("gpl", "none"), default="gpl",
+                   help="gpl: make_tracks/place_pins/global_placement + estimate_parasitics before repair_design")
+    p.add_argument("--place-density", type=float, default=0.4)
     p.add_argument("--max-fanout", type=int, default=16, help="set_max_fanout for repair_design")
     p.add_argument("--top", default=SOC_TOP, help="module synthesized (DigitalTop; ChipTop adds IO cells and clocking)")
     p.add_argument("--make-jobs", type=int, default=16)
@@ -371,13 +374,27 @@ set_max_fanout {max_fanout} [current_design]
 puts "@@RSZ_PRE"
 catch {{report_check_types -max_slew -max_capacitance -max_fanout -violators}} e; puts "check: $e"
 catch {{puts "placed: [llength [get_cells -hierarchical *]] cells"}}
-if {{[catch {{repair_design -verbose}} err]}} {{
-  puts "ERROR repair_design -verbose: $err"
-  if {{[catch {{repair_design}} err]}} {{ puts "ERROR repair_design: $err" }}
-}}
+{place}set t0 [clock seconds]
+if {{[catch {{repair_design}} err]}} {{ puts "ERROR repair_design: $err" }}
+puts "repair_design: [expr {{[clock seconds] - $t0}}] s"
 puts "@@RSZ_POST"
 catch {{report_check_types -max_slew -max_capacitance -max_fanout -violators}} e; puts "check: $e"
 {repair_timing}"""
+
+# repair_design only rebuffers placed cells: an unplaced netlist leaves the 2455-pin reset net untouched
+# (soc-t10-atom4). Quick global placement (tracks, pins, gpl), then RC from placement.
+PLACE = """\
+set t0 [clock seconds]
+if {{[catch {{
+  make_tracks
+  place_pins -hor_layers met3 -ver_layers met2
+  global_placement -skip_io -density {density}
+  set_wire_rc -signal -layer met2
+  set_wire_rc -clock -layer met5
+  estimate_parasitics -placement
+}} err]}} {{ puts "ERROR place: $err" }}
+puts "place: [expr {{[clock seconds] - $t0}}] s"
+"""
 
 REPAIR_TIMING = """\
 puts "@@WORST_DESIGN"
@@ -454,7 +471,7 @@ def report_from_tcl(patterns) -> str:
 def soc_synth_sta(rtl: N.TileRTL, period_ns: float, access: list, setup_ns: float, yosys_timeout: int,
                   buffer: str = "repair", max_fanout: int = 16, abc_ns: float | None = None,
                   repair_timing: bool = False, false_from: tuple = (),
-                  report_from: tuple = ()) -> dict:
+                  report_from: tuple = (), place: str = "gpl", place_density: float = 0.4) -> dict:
     """Yosys v3 on rtl.top, then timing once per SRAM access time. Returns {"ok", "error", "area_um2",
     "stat", "yosys_log_tail", "yosys_minutes", "sta": {access: stdout}, "buffer": {access: what ran}}."""
     res = {"ok": False, "error": "", "sta": {}, "buffer": {}}
@@ -532,7 +549,8 @@ def soc_synth_sta(rtl: N.TileRTL, period_ns: float, access: list, setup_ns: floa
             if buffer == "repair" and not lef_error:
                 read_lefs = "".join(f"read_lef {p}\n" for p in lefs) + "read_lef fakeram.lef\n"
                 rc, out = _run_timing(work, "openroad", STA_SOC.format(
-                    read_lefs=read_lefs, floorplan=FLOORPLAN, repair=REPAIR.format(max_fanout=max_fanout, repair_timing=REPAIR_TIMING if repair_timing else ""),
+                    read_lefs=read_lefs, floorplan=FLOORPLAN, repair=REPAIR.format(max_fanout=max_fanout,
+                    place=PLACE.format(density=place_density) if place == "gpl" else "", repair_timing=REPAIR_TIMING if repair_timing else ""),
                     what_if=what_if_tcl(false_from), report_from=report_from_tcl(report_from), **common), 12 * 3600)
                 used = "repair+timing" if repair_timing else "repair"
                 if rc != 0 or "@@END" not in out:
@@ -659,7 +677,8 @@ def run_point(a, p: dict, snap: dict, d: Path) -> dict:
           f"{len(rtl.blackboxes)} SRAM, tile {tiles}; synth ...", flush=True)
     s = get(soc_synth_sta.chia_remote(rtl, a.period_ns, a.access, a.sram_setup_ns, int(a.yosys_timeout_hours * 3600),
                                       a.buffer, a.max_fanout, a.abc_ns, a.repair_timing,
-                                      tuple(a.what_if_false_from), tuple(a.report_from)))
+                                      tuple(a.what_if_false_from), tuple(a.report_from),
+                                      a.place, a.place_density))
     write(d / "yosys_log_tail.txt", s.get("yosys_log_tail", ""))
     res = {"ok": s["ok"], "error": s.get("error", ""), "rtl_sha12": rtl_hash, "tile": tiles[0] if tiles else "",
            "srams": sorted(rtl.blackboxes), "area_um2": s.get("area_um2"), "yosys_minutes": s.get("yosys_minutes"),
