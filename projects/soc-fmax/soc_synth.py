@@ -94,6 +94,9 @@ def parse_args():
     p.add_argument("--place", choices=("gpl", "none"), default="gpl",
                    help="gpl: make_tracks/place_pins/global_placement + estimate_parasitics before repair_design")
     p.add_argument("--place-density", type=float, default=0.4)
+    p.add_argument("--adder", choices=("ks", "default"), default="ks",
+                   help="ks: map every $alu/$lcu with Yosys +/choices/kogge-stone.v (log-depth carry) instead of "
+                        "the default techmap; default: plain `synth`")
     p.add_argument("--max-fanout", type=int, default=16, help="set_max_fanout for repair_design")
     p.add_argument("--top", default=SOC_TOP, help="module synthesized (DigitalTop; ChipTop adds IO cells and clocking)")
     p.add_argument("--make-jobs", type=int, default=16)
@@ -368,6 +371,10 @@ if {{[catch {{check_setup -no_clock}} err]}} {{ puts "ERROR $err" }}
 puts "@@END"
 """
 
+# Kogge-Stone carry for every adder/comparator: `synth` stops before `fine`, the $alu/$lcu cells are mapped
+# with +/choices/kogge-stone.v (techmap.v covers the rest of $alu), then `synth` finishes as usual.
+SYNTH_KS = "synth -top {top} -run :fine\ntechmap -map +/techmap.v -map +/choices/kogge-stone.v\nsynth -top {top} -run fine:"
+
 REPAIR = """\
 puts "@@REPAIR"
 set_max_fanout {max_fanout} [current_design]
@@ -471,7 +478,8 @@ def report_from_tcl(patterns) -> str:
 def soc_synth_sta(rtl: N.TileRTL, period_ns: float, access: list, setup_ns: float, yosys_timeout: int,
                   buffer: str = "repair", max_fanout: int = 16, abc_ns: float | None = None,
                   repair_timing: bool = False, false_from: tuple = (),
-                  report_from: tuple = (), place: str = "gpl", place_density: float = 0.4) -> dict:
+                  report_from: tuple = (), place: str = "gpl", place_density: float = 0.4,
+                  adder: str = "ks") -> dict:
     """Yosys v3 on rtl.top, then timing once per SRAM access time. Returns {"ok", "error", "area_um2",
     "stat", "yosys_log_tail", "yosys_minutes", "sta": {access: stdout}, "buffer": {access: what ran}}."""
     res = {"ok": False, "error": "", "sta": {}, "buffer": {}}
@@ -497,7 +505,7 @@ def soc_synth_sta(rtl: N.TileRTL, period_ns: float, access: list, setup_ns: floa
             with open(os.path.join(work, bb[-1]), "w") as f:
                 f.write(text + "\n")
         ys = N.YOSYS_SCRIPT.format(
-            lib=lib, top=rtl.top, period_ps=int(round((abc_ns or period_ns) * 1000)), synth=N.SYNTH_FLOWS["v3"].format(top=rtl.top),
+            lib=lib, top=rtl.top, period_ps=int(round((abc_ns or period_ns) * 1000)), synth=SYNTH_KS.format(top=rtl.top) if adder == "ks" else N.SYNTH_FLOWS["v3"].format(top=rtl.top),
             read_blackboxes="\n".join(f"read_verilog -lib -sv {p}" for p in bb),
             files=" ".join(f"rtl/{n}" for n in sorted(rtl.files)), stat="stat.txt", netlist="netlist.v")
         with open(os.path.join(work, "synth.ys"), "w") as f:
@@ -678,7 +686,7 @@ def run_point(a, p: dict, snap: dict, d: Path) -> dict:
     s = get(soc_synth_sta.chia_remote(rtl, a.period_ns, a.access, a.sram_setup_ns, int(a.yosys_timeout_hours * 3600),
                                       a.buffer, a.max_fanout, a.abc_ns, a.repair_timing,
                                       tuple(a.what_if_false_from), tuple(a.report_from),
-                                      a.place, a.place_density))
+                                      a.place, a.place_density, a.adder))
     write(d / "yosys_log_tail.txt", s.get("yosys_log_tail", ""))
     res = {"ok": s["ok"], "error": s.get("error", ""), "rtl_sha12": rtl_hash, "tile": tiles[0] if tiles else "",
            "srams": sorted(rtl.blackboxes), "area_um2": s.get("area_um2"), "yosys_minutes": s.get("yosys_minutes"),
@@ -713,8 +721,11 @@ def summary(a, pts: list[dict]) -> str:
              f"{a.period_ns:g} ns. SRAM là macro giả (clock → dữ liệu đọc = cột `SRAM`, setup {a.sram_setup_ns:g} ns). "
              "Không tính: chân reset/set bất đồng bộ của flop (recovery/removal tắt), tầng đầu `*sync_0_reg*` của các bộ "
              f"đồng bộ, cổng reset. Buffer: `{a.buffer}`" + (f" (OpenROAD `repair_design`, max fanout {a.max_fanout}, "
-             "không placement, không RC dây)" if a.buffer == "repair" else "") + ". `trước buffer` là Fmax trước "
-             "`repair_design`" + (f"; `repair_timing -setup` nhắm {a.period_ns:g} ns (không placement, không RC dây: lạc quan), "
+             + (f"sau global placement mật độ {a.place_density:g}, RC dây met2/met5 ước lượng)" if a.place == "gpl"
+                else "không placement, không RC dây)") if a.buffer == "repair" else "") + ". Adder: "
+             + ("Kogge-Stone (`+/choices/kogge-stone.v`)" if a.adder == "ks" else "techmap mặc định của Yosys")
+             + ". `trước buffer` là Fmax trước "
+             "`repair_design`" + (f"; `repair_timing -setup` nhắm {a.period_ns:g} ns, "
              "`sau repair_design` là Fmax trước bước này" if a.repair_timing else "") + ((". **What-if:** bỏ qua đường xuất phát từ " + ", ".join(f"`{x}`" for x in a.what_if_false_from)
               + " (giả sử đã sửa; không phải Fmax thật)") if a.what_if_false_from else "") + ". Slack theo vùng lấy từ 5000 đường xấu nhất (mỗi endpoint một đường).", "",
              "| điểm | SRAM (ns) | buffer | Fmax SoC (MHz) | trước buffer | vùng xấu nhất | tile | uncore | tile<->uncore | I/O | "
