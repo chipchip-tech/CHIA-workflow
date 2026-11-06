@@ -1,0 +1,16 @@
+# Cache + bypass config for rocket_fmax.py (read by start_cache and Bypass).
+# The cache is keyed by _chia_tag only, so every cached call gets its own tag:
+#   extract_tile_rtl -> baseline_rtl2, baseline_start_<hash>_rtl2
+#   run_gate         -> baseline_gate_b2_mm_spmv, baseline_start_<hash>_gate_b2_mm_spmv
+#   synth_sta        -> baseline_synth_<flow>_p<period>, baseline_start_<hash>_synth_<flow>_p<period>
+# Results are written on the first run and replayed on later runs (bypass gated on a
+# real cache hit, see cache_hit_cond in fmax_nodes.py). Rounds are never cached.
+cache:
+  extract_tile_rtl: {cache: true, tags: ["baseline_.*"]}
+  run_gate:         {cache: true, tags: ["baseline_.*"]}
+  synth_sta:        {cache: true, tags: ["baseline_.*"]}
+
+bypass:
+  extract_tile_rtl: {bypass: true, tags: ["baseline_.*"]}
+  run_gate:         {bypass: true, tags: ["baseline_.*"]}
+  synth_sta:        {bypass: true, tags: ["baseline_.*"]}
