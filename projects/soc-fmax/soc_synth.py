@@ -371,9 +371,32 @@ if {{[catch {{check_setup -no_clock}} err]}} {{ puts "ERROR $err" }}
 puts "@@END"
 """
 
-# Kogge-Stone carry for every adder/comparator: `synth` stops before `fine`, the $alu/$lcu cells are mapped
-# with +/choices/kogge-stone.v (techmap.v covers the rest of $alu), then `synth` finishes as usual.
-SYNTH_KS = "synth -top {top} -run :fine\ntechmap -map +/techmap.v -map +/choices/kogge-stone.v\nsynth -top {top} -run fine:"
+# Kogge-Stone carry for every adder/comparator: `synth` stops before `fine`, the $lcu cells are mapped with
+# kogge_stone.v (written into the work dir; Yosys < 0.40 has no +/choices/kogge-stone.v, this is the same
+# module), techmap.v covers the rest of $alu, then `synth` finishes as usual.
+SYNTH_KS = "synth -top {top} -run :fine\ntechmap -map +/techmap.v -map kogge_stone.v\nsynth -top {top} -run fine:"
+KOGGE_STONE_V = """\
+(* techmap_celltype = "$lcu" *)
+module _80_lcu_kogge_stone (P, G, CI, CO);
+  parameter WIDTH = 2;
+  (* force_downto *) input [WIDTH-1:0] P, G;
+  input CI;
+  (* force_downto *) output [WIDTH-1:0] CO;
+  integer i, j;
+  (* force_downto *) reg [WIDTH-1:0] p, g;
+  always @* begin
+    p = P;
+    g = G;
+    g[0] = g[0] | (p[0] & CI);
+    for (i = 0; i < $clog2(WIDTH); i = i + 1)
+      for (j = WIDTH - 1; j >= 2**i; j = j - 1) begin
+        g[j] = g[j] | p[j] & g[j - 2**i];
+        p[j] = p[j] & p[j - 2**i];
+      end
+  end
+  assign CO = g;
+endmodule
+"""
 
 REPAIR = """\
 puts "@@REPAIR"
@@ -510,6 +533,8 @@ def soc_synth_sta(rtl: N.TileRTL, period_ns: float, access: list, setup_ns: floa
             files=" ".join(f"rtl/{n}" for n in sorted(rtl.files)), stat="stat.txt", netlist="netlist.v")
         with open(os.path.join(work, "synth.ys"), "w") as f:
             f.write(ys)
+        with open(os.path.join(work, "kogge_stone.v"), "w") as f:
+            f.write(KOGGE_STONE_V)
         with open(os.path.join(work, "abc.constr"), "w") as f:
             f.write(N.ABC_CONSTR)
         t0 = time.time()
@@ -723,7 +748,7 @@ def summary(a, pts: list[dict]) -> str:
              f"đồng bộ, cổng reset. Buffer: `{a.buffer}`" + (f" (OpenROAD `repair_design`, max fanout {a.max_fanout}, "
              + (f"sau global placement mật độ {a.place_density:g}, RC dây met2/met5 ước lượng)" if a.place == "gpl"
                 else "không placement, không RC dây)") if a.buffer == "repair" else "") + ". Adder: "
-             + ("Kogge-Stone (`+/choices/kogge-stone.v`)" if a.adder == "ks" else "techmap mặc định của Yosys")
+             + ("Kogge-Stone (techmap `$lcu`, `kogge_stone.v`)" if a.adder == "ks" else "techmap mặc định của Yosys")
              + ". `trước buffer` là Fmax trước "
              "`repair_design`" + (f"; `repair_timing -setup` nhắm {a.period_ns:g} ns, "
              "`sau repair_design` là Fmax trước bước này" if a.repair_timing else "") + ((". **What-if:** bỏ qua đường xuất phát từ " + ", ".join(f"`{x}`" for x in a.what_if_false_from)
