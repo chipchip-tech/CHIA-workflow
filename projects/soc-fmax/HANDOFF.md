@@ -34,6 +34,9 @@
 
 ## Việc tiếp theo
 
+0. **Đang làm bước 3 trước bước 2** (người dùng chọn, 06/11/2026). `l2/l2_fmax.py` đã viết, **chưa chạy**. Lần chạy đầu: `l2-1`
+   (lệnh trong `README.md`). Chỗ dễ lỗi nhất: đường dẫn `rocket-chip-inclusive-cache/design/craft/inclusivecache/src/` trong
+   image, tên module `InclusiveCache` trong Verilog, và thời gian Yosys của `InclusiveCache`.
 1. (Tuỳ chọn) Sửa script để lấy worst slack riêng cho từng vùng (ví dụ `find_timing_paths -to` các register của tile).
 2. Bước 2: SRAM OpenRAM. Trước khi làm, liệt kê các macro sky130 có sẵn cùng timing của chúng, và cách map các
    memory của `RocketConfig` (L1 I/D, tag, L2 data/directory) sang các macro đó.

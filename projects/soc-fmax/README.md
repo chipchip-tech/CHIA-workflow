@@ -14,8 +14,8 @@ Mục tiêu:
 | Bước | Nội dung | Trạng thái |
 |---|---|---|
 | 1 | Sửa phép đo (`soc_synth.py`): không tính reset bất đồng bộ và tầng đầu bộ đồng bộ, chèn buffer bằng `repair_design`, lấy slack theo vùng | Xong (`soc-fmax-1`): baseline 54,81 MHz (FMA chặn), `asic-7` 63,80 MHz (L2 chặn) |
-| 2 | SRAM OpenRAM sky130 (MacroCompiler + `.lib`), so với SRAM giả, có thể thu nhỏ L2 | Chưa làm |
-| 3 | Loop agent trên vùng chặn (L2/uncore), có gate chức năng cho bộ nhớ | Chưa làm |
+| 2 | SRAM OpenRAM sky130 (MacroCompiler + `.lib`), so với SRAM giả, có thể thu nhỏ L2 | Chưa làm (làm sau bước 3) |
+| 3 | Loop agent trên L2 (`l2/l2_fmax.py`), tile cố định ở `asic-7` | Đã viết, **chưa chạy** |
 
 Theo khung `docs/workflow-phases.md`, project này nằm ở nhánh **ASIC**. Pha **Simulate** dùng lại gate của `rocket-fmax`
 cho đến bước 3.
@@ -27,7 +27,35 @@ cho đến bước 3.
 - `fmax_nodes.py`: chép nguyên từ `projects/rocket-fmax/fmax_nodes.py` (commit 2b796c9) vì `soc_synth.py` dùng các hàm build,
   Yosys và đọc kết quả STA trong đó. Không sửa ở đây.
 
-## Chạy
+## Bước 3: loop L2 (`l2/`)
+
+`l2/` là bản port của loop `rocket-fmax` (`rocket_fmax.py`, `fmax_nodes.py`, `ab_tool.py`, prompt; commit 2b796c9). Phần loop
+giữ nguyên: agent sửa Chisel, tự đo bằng `synth_ab`, rồi loop build, synth, chạy gate và quyết định nhận hay bỏ.
+Những chỗ khác:
+- Agent chỉ được sửa `generators/rocket-chip-inclusive-cache/design/craft/inclusivecache/src/` (sifive `InclusiveCache`).
+- Top synth là `InclusiveCache`, period mặc định 6 ns (như `soc-fmax-1`).
+- `--tile-patch` (patch `asic-7`) được áp vào `rocket-chip` một lần trước snapshot, nên agent không được đụng `rocket-chip`.
+  Baseline (gate, số cycle) là SoC có tile `asic-7` và L2 chưa sửa.
+- Gate giống `rocket-fmax`: riscv-tests ISA và benchmark trên Verilator, chạy cả SoC, nên mọi miss L1 đều đi qua L2. Một cycle
+  L2 thêm vào sẽ hiện ra ở `mcycle` (ngân sách +3 %).
+- Agent mặc định là `--model opus --effort medium`. Cache riêng `~/chia_cache_l2`, namespace Ray `l2_fmax`, kết quả ở
+  `~/soc-fmax-l2/<run>/`.
+- Chưa port pha `sim` (`--phase sim`).
+
+Kiểm trước (đường dẫn L2 trong image chipyard):
+```bash
+docker exec chia-chipyard-dingus-0 bash -lc 'ls /home/ray/chipyard/generators/rocket-chip-inclusive-cache/design/craft/inclusivecache/src/ && git -C /home/ray/chipyard/generators/rocket-chip-inclusive-cache status --short | head'
+```
+
+Chạy (không chạy song song với `soc_synth.py`: cả hai cùng sửa `rocket-chip` trong container chipyard):
+```bash
+cd ~/CHIA-workflow/projects/soc-fmax/l2
+chia job submit --no-wait --submission-id l2-1 --working-dir . -- \
+  python l2_fmax.py --run-name l2-1 --iters 5 --tile-patch $HOME/rocket-fmax-v2/asic-7/patches/best.patch
+chia job logs -f l2-1
+```
+
+## Chạy bước 1
 
 Dùng lại cluster của `rocket-fmax`, không cần `chia up` lại nếu cluster đang chạy:
 - `projects/rocket-fmax/cluster.yaml`, gồm các worker `chipyard`, `eda`, ...
@@ -52,6 +80,8 @@ Tuỳ chọn:
 - `--max-fanout 16`: fanout tối đa khi chạy `repair_design`.
 
 ## Kiểm chứng
+
+- `l2/`: mới qua `py_compile`. Chưa chạy.
 
 - Đã kiểm: `py_compile`; dựng LEF giả, template Tcl và phần đọc kết quả (vùng, SRAM, Fmax trước và sau buffer, bảng tóm
   tắt) trên dữ liệu giả.
