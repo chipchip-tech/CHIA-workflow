@@ -7,6 +7,9 @@
 - `atom8` đạt **107,70 MHz** (TNS 0), sim tương đương upstream (ISA 107/108 ở cả hai, chỉ `ma_data` hỏng sẵn từ upstream;
   8 benchmark pass), nhanh hơn upstream ≈1,96× (trung bình nhân). Chi tiết: `README.md` mục **Kết quả**.
 - Giới hạn: SRAM giả 0 ns, chưa CTS/route.
+- File trên máy người dùng đã dọn: bản cuối ở `~/archive/soc-fmax-final/`, run cũ nén ở
+  `~/archive/fmax-runs-2026-11-06.tar.gz`. Các đường dẫn `~/soc-fmax*`, `~/rocket-fmax-v2` trong docs là chỗ script ghi
+  output mặc định; muốn xem run cũ thì giải nén về `~`.
 
 ## Lịch sử: bước 1
 
@@ -29,7 +32,7 @@
 
 ## Bối cảnh từ rocket-fmax
 
-- Tile `asic-7` đạt 140,01 MHz khi synth riêng tile (6 ns). Patch nằm ở `~/rocket-fmax-v2/asic-7/patches/best.patch`
+- Tile `asic-7` đạt 140,01 MHz khi synth riêng tile (6 ns). Patch nằm ở `~/archive/soc-fmax-final/asic7-best.patch`
   trên máy người dùng. Patch này **chưa được kiểm chức năng ngoài gate**.
 - `soc-synth-5` (code cũ):
   - Fmax SoC: baseline 54,81 MHz, `asic-7` 63,80 MHz.

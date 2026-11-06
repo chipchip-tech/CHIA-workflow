@@ -32,7 +32,10 @@ Fmax đo bằng `soc_synth.py` (Yosys `v3` + OpenROAD/OpenSTA sky130hd, clock 10
 
 Thay đổi: tile `asic-7` (từ `rocket-fmax`), tầng CALC trong `cbus/atomics`, L2 `l2-2` (`ListBuffer`, `Scheduler`,
 `SinkA`, `SinkC`, `SourceC`, `SourceD`), techmap Kogge-Stone cho `$lcu` trong `soc_synth.py` (Yosys 0.38 không có
-`choices/kogge-stone.v`, phải `techmap -autoproc`). Patch nằm ở `~/soc-fmax-l2/` trên máy người dùng.
+`choices/kogge-stone.v`, phải `techmap -autoproc`). Trên máy người dùng (dọn ngày 06/11/2026): patch cuối, `summary.md` synth atom8 và `gate.json` hai lần sim nằm ở
+`~/archive/soc-fmax-final/` (`asic7-atom.patch`, `l2-2-best.patch`, `asic7-best.patch`); toàn bộ run cũ
+(`rocket-fmax-v2`, `soc-fmax`, `soc-fmax-l2`, `soc-fmax-uncore`) nén ở `~/archive/fmax-runs-2026-11-06.tar.gz`
+(giải nén: `tar xzf ~/archive/fmax-runs-2026-11-06.tar.gz -C ~`).
 
 Chức năng (`uncore_fmax.py --baseline-only`, job `sim-atom8` và `sim-upstream`, cùng gate):
 - ISA 107/108 pass ở **cả hai** bản, kể cả `rv64ua-p-mmio-amo`. Test hỏng duy nhất là `rv64ui-p-ma_data`, hỏng giống
@@ -87,7 +90,7 @@ Chạy (không chạy song song với `soc_synth.py`: cả hai cùng sửa `rock
 ```bash
 cd ~/CHIA-workflow/projects/soc-fmax/l2
 chia job submit --no-wait --submission-id l2-1 --working-dir . -- \
-  python l2_fmax.py --run-name l2-1 --iters 5 --tile-patch $HOME/rocket-fmax-v2/asic-7/patches/best.patch
+  python l2_fmax.py --run-name l2-1 --iters 5 --tile-patch $HOME/archive/soc-fmax-final/asic7-best.patch
 chia job logs -f l2-1
 ```
 
@@ -104,7 +107,7 @@ sha256. Container cần truy cập được `raw.githubusercontent.com`.
 cd ~/CHIA-workflow/projects/soc-fmax
 chia job submit --no-wait --submission-id soc-fmax-1 --working-dir . -- \
   python soc_synth.py --run-name soc-fmax-1 \
-    --patch asic-7=~/rocket-fmax-v2/asic-7/patches/best.patch
+    --patch asic-7=~/archive/soc-fmax-final/asic7-best.patch
 chia job logs -f soc-fmax-1
 ```
 
