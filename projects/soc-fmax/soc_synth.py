@@ -368,7 +368,15 @@ puts "@@END"
 REPAIR = """\
 puts "@@REPAIR"
 set_max_fanout {max_fanout} [current_design]
-if {{[catch {{repair_design}} err]}} {{ puts "ERROR repair_design: $err" }}
+puts "@@RSZ_PRE"
+catch {{report_check_types -max_slew -max_capacitance -max_fanout -violators}} e; puts "check: $e"
+catch {{puts "placed: [llength [get_cells -hierarchical *]] cells"}}
+if {{[catch {{repair_design -verbose}} err]}} {{
+  puts "ERROR repair_design -verbose: $err"
+  if {{[catch {{repair_design}} err]}} {{ puts "ERROR repair_design: $err" }}
+}}
+puts "@@RSZ_POST"
+catch {{report_check_types -max_slew -max_capacitance -max_fanout -violators}} e; puts "check: $e"
 {repair_timing}"""
 
 REPAIR_TIMING = """\
@@ -628,7 +636,7 @@ def analyze(sta_out: str, period_ns: float, tile: str, srams: set) -> dict:
             "region_error": next((l for l in N._section(text, "REGIONS").splitlines() if l.startswith("ERROR")), ""),
             "n_async_pins": _int(N._section(text, "NASYNC")), "n_sync_cells": _int(N._section(text, "NSYNC")),
             "n_ckpins": _int(N._section(text, "NCKPINS")),
-            "repair_log": "\n".join(l for l in repair.splitlines() if re.search(r"Inserted|Resized|ERROR|repair", l))[:2000],
+            "repair_log": "\n".join(l for l in repair.splitlines() if re.search(r"Inserted|Resized|ERROR|repair|RSZ|violat|check:", l))[:2000],
             "clocks": [l for l in N._section(text, "CLOCKS").splitlines() if not l.startswith("@@")],
             "noclock": "\n".join(l for l in N._section(text, "NOCLOCK").splitlines() if not l.startswith("@@"))[:2000],
             "families": N.endpoint_families(N._section(text, "ENDPOINTS"), 20)}
