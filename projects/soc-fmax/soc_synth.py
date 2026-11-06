@@ -79,6 +79,9 @@ def parse_args():
     p.add_argument("--abc-ns", type=float, default=None, help="abc -D target (default: --period-ns)")
     p.add_argument("--repair-timing", action="store_true",
                    help="after repair_design: OpenROAD repair_timing -setup against --period-ns (no RTL change)")
+    p.add_argument("--what-if-false-from", action="append", default=[], metavar="CELL_PATTERN",
+                   help="what-if only: set_false_path -from these cells (full path, e.g. cbus/atomics/cam_a_0_*), "
+                        "to see the next paths once a known one is fixed")
     p.add_argument("--no-baseline", action="store_true", help="skip the baseline point")
     p.add_argument("--sram-access-ns", default="0,2",
                    help="comma-separated SRAM clock-to-read-data times, one timing run each (0 = ideal SRAM)")
@@ -332,7 +335,7 @@ set sync [get_cells -hierarchical -quiet *sync_0_reg*]
 puts "@@NSYNC"
 puts [llength $sync]
 if {{[llength $sync]}} {{ set_false_path -to $sync }}
-puts "@@WORST_PRE"
+{what_if}puts "@@WORST_PRE"
 report_worst_slack -max -digits 4
 {repair}puts "@@WORST"
 report_worst_slack -max -digits 4
@@ -415,10 +418,20 @@ def _run_timing(work: str, tool: str, script: str, timeout: int) -> tuple[int, s
         return -1, f"timeout after {timeout} s\n" + tail[-20000:]
 
 
+def what_if_tcl(patterns) -> str:
+    """set_false_path -from the given cells (what-if: pretend these paths are fixed)."""
+    t = ""
+    for pat in patterns:
+        t += (f"set wi [concat [get_cells -quiet {{{pat}}}] [get_cells -hierarchical -quiet {{{pat}}}]]\n"
+              f"puts \"@@WHATIF {pat} [llength $wi]\"\n"
+              "if {[llength $wi]} { set_false_path -from $wi }\n")
+    return t
+
+
 @ChiaFunction(resources={"eda": 1}, num_cpus=2, max_retries=0)
 def soc_synth_sta(rtl: N.TileRTL, period_ns: float, access: list, setup_ns: float, yosys_timeout: int,
                   buffer: str = "repair", max_fanout: int = 16, abc_ns: float | None = None,
-                  repair_timing: bool = False) -> dict:
+                  repair_timing: bool = False, false_from: tuple = ()) -> dict:
     """Yosys v3 on rtl.top, then timing once per SRAM access time. Returns {"ok", "error", "area_um2",
     "stat", "yosys_log_tail", "yosys_minutes", "sta": {access: stdout}, "buffer": {access: what ran}}."""
     res = {"ok": False, "error": "", "sta": {}, "buffer": {}}
@@ -497,7 +510,7 @@ def soc_synth_sta(rtl: N.TileRTL, period_ns: float, access: list, setup_ns: floa
                 read_lefs = "".join(f"read_lef {p}\n" for p in lefs) + "read_lef fakeram.lef\n"
                 rc, out = _run_timing(work, "openroad", STA_SOC.format(
                     read_lefs=read_lefs, floorplan=FLOORPLAN, repair=REPAIR.format(max_fanout=max_fanout, repair_timing=REPAIR_TIMING if repair_timing else ""),
-                    **common), 12 * 3600)
+                    what_if=what_if_tcl(false_from), **common), 12 * 3600)
                 used = "repair+timing" if repair_timing else "repair"
                 if rc != 0 or "@@END" not in out:
                     res.setdefault("repair_errors", {})[str(acc)] = f"openroad rc {rc}: " + out[-3000:]
@@ -505,7 +518,7 @@ def soc_synth_sta(rtl: N.TileRTL, period_ns: float, access: list, setup_ns: floa
             elif buffer == "repair":
                 used = f"none ({lef_error})"
             if not out:
-                _, out = _run_timing(work, "sta", STA_SOC.format(read_lefs="", floorplan="", repair="", **common), 4 * 3600)
+                _, out = _run_timing(work, "sta", STA_SOC.format(read_lefs="", floorplan="", repair="", what_if=what_if_tcl(false_from), **common), 4 * 3600)
             res["sta"][str(acc)] = out
             res["buffer"][str(acc)] = used
         res["ok"] = True
@@ -622,7 +635,8 @@ def run_point(a, p: dict, snap: dict, d: Path) -> dict:
     print(f"{p['name']}: build ok ({(time.time() - t0) / 60:.1f} min), {a.top}: {len(rtl.modules)} modules, "
           f"{len(rtl.blackboxes)} SRAM, tile {tiles}; synth ...", flush=True)
     s = get(soc_synth_sta.chia_remote(rtl, a.period_ns, a.access, a.sram_setup_ns, int(a.yosys_timeout_hours * 3600),
-                                      a.buffer, a.max_fanout, a.abc_ns, a.repair_timing))
+                                      a.buffer, a.max_fanout, a.abc_ns, a.repair_timing,
+                                      tuple(a.what_if_false_from)))
     write(d / "yosys_log_tail.txt", s.get("yosys_log_tail", ""))
     res = {"ok": s["ok"], "error": s.get("error", ""), "rtl_sha12": rtl_hash, "tile": tiles[0] if tiles else "",
            "srams": sorted(rtl.blackboxes), "area_um2": s.get("area_um2"), "yosys_minutes": s.get("yosys_minutes"),
@@ -659,7 +673,8 @@ def summary(a, pts: list[dict]) -> str:
              f"đồng bộ, cổng reset. Buffer: `{a.buffer}`" + (f" (OpenROAD `repair_design`, max fanout {a.max_fanout}, "
              "không placement, không RC dây)" if a.buffer == "repair" else "") + ". `trước buffer` là Fmax trước "
              "`repair_design`" + (f"; `repair_timing -setup` nhắm {a.period_ns:g} ns (không placement, không RC dây: lạc quan), "
-             "`sau repair_design` là Fmax trước bước này" if a.repair_timing else "") + ". Slack theo vùng lấy từ 5000 đường xấu nhất (mỗi endpoint một đường).", "",
+             "`sau repair_design` là Fmax trước bước này" if a.repair_timing else "") + (("**What-if:** bỏ qua đường xuất phát từ " + ", ".join(f"`{x}`" for x in a.what_if_false_from)
+              + " (giả sử đã sửa; không phải Fmax thật)") if a.what_if_false_from else "") + ". Slack theo vùng lấy từ 5000 đường xấu nhất (mỗi endpoint một đường).", "",
              "| điểm | SRAM (ns) | buffer | Fmax SoC (MHz) | trước buffer | vùng xấu nhất | tile | uncore | tile<->uncore | I/O | "
              "đường có SRAM | TNS | diện tích (µm², không SRAM) |", "|" + "---|" * 13]
     ref = {}
