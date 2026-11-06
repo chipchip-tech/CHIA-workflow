@@ -2,7 +2,13 @@
 
 Đọc file này trước khi làm tiếp.
 
-## Trạng thái (06/11/2026)
+## Trạng thái (06/11/2026): **HOÀN THÀNH**
+
+- `atom8` đạt **107,70 MHz** (TNS 0), sim tương đương upstream (ISA 107/108 ở cả hai, chỉ `ma_data` hỏng sẵn từ upstream;
+  8 benchmark pass), nhanh hơn upstream ≈1,96× (trung bình nhân). Chi tiết: `README.md` mục **Kết quả**.
+- Giới hạn: SRAM giả 0 ns, chưa CTS/route.
+
+## Lịch sử: bước 1
 
 - Nhánh `project/soc-fmax`, tách từ `setup`.
 - Bước 1 đã chạy (`soc-fmax-1`: baseline và `asic-7`, `repair_design`, SRAM giả 0 và 2 ns). Kết quả:
@@ -32,7 +38,13 @@
   - Số SRAM 0, 1,5 và 3 ns giống hệt nhau.
 - Quy ước: Claude không viết Chisel. Mọi sửa RTL do agent trong loop làm (bước 3).
 
-## Việc tiếp theo
+## Việc tiếp theo (nếu làm tiếp)
+
+1. Lấy timing SRAM OpenRAM sky130 thật, chạy `soc_synth.py --sram-access-ns <số>`.
+2. Full flow (floorplan, CTS, route) với fakeram có LEF/lib, rồi OpenRAM thật nếu cần sign-off.
+3. Nếu biên sau route không đủ: vùng xấu tiếp theo là `cbus/atomics` và L2 `mshrs_*/s_writeback`.
+
+## Việc tiếp theo cũ (đã xong hoặc thay thế)
 
 0. **Đang làm bước 3 trước bước 2** (người dùng chọn, 06/11/2026). `l2/l2_fmax.py` đã viết, **chưa chạy**. Lần chạy đầu: `l2-1`
    (lệnh trong `README.md`). Chỗ dễ lỗi nhất: đường dẫn `rocket-chip-inclusive-cache/design/craft/inclusivecache/src/` trong

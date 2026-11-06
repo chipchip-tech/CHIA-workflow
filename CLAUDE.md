@@ -127,7 +127,7 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   `project/rocket-fmax` (tối ưu Fmax RocketTile; chi tiết trong `CLAUDE.md` của nhánh đó).
 - `project/soc-fmax` (`projects/soc-fmax/`, mở 06/11/2026): Fmax của cả SoC (`DigitalTop` của `RocketConfig`) sau
   `rocket-fmax`, đo bằng Yosys `v3` + OpenROAD/OpenSTA sky130hd. Bước 1 (`soc_synth.py`: bỏ tính reset bất đồng bộ và tầng
-  đầu bộ đồng bộ, `repair_design` chèn buffer, slack theo vùng qua `find_timing_paths`) đã chạy (`soc-fmax-1`): `asic-7` 63,80 MHz, L2 chặn (`busy` → `putbuffer`), SRAM không nằm trên đường găng. Bước 3 (làm trước bước 2): loop agent trên L2, `projects/soc-fmax/l2/` (port từ `rocket-fmax`, tile cố định `asic-7`), đã viết, **chưa chạy**. Bước 2: SRAM
+  đầu bộ đồng bộ, `repair_design` chèn buffer, slack theo vùng qua `find_timing_paths`) đã chạy (`soc-fmax-1`): `asic-7` 63,80 MHz, L2 chặn (`busy` → `putbuffer`), SRAM không nằm trên đường găng. Bước 3 (làm trước bước 2): loop agent trên L2/uncore. **Xong (06/11/2026):** `atom8` (tile `asic-7` + atomics CALC + L2 `l2-2` + Kogge-Stone) đạt 107,70 MHz, sim tương đương upstream (ISA 107/108 ở cả hai, `ma_data` hỏng sẵn), nhanh hơn ≈1,96×; chưa CTS/route, SRAM giả. Bước 2: SRAM
   OpenRAM; bước 3: loop agent trên L2/uncore. Dùng chung cluster và image `chia-eda-sky130` của `rocket-fmax`.
   **Session mới đọc `projects/soc-fmax/HANDOFF.md` trước.**
 

@@ -15,10 +15,46 @@ Mục tiêu:
 |---|---|---|
 | 1 | Sửa phép đo (`soc_synth.py`): không tính reset bất đồng bộ và tầng đầu bộ đồng bộ, chèn buffer bằng `repair_design`, lấy slack theo vùng | Xong (`soc-fmax-1`): baseline 54,81 MHz (FMA chặn), `asic-7` 63,80 MHz (L2 chặn) |
 | 2 | SRAM OpenRAM sky130 (MacroCompiler + `.lib`), so với SRAM giả, có thể thu nhỏ L2 | Chưa làm (làm sau bước 3) |
-| 3 | Loop agent trên L2 (`l2/l2_fmax.py`), tile cố định ở `asic-7` | Đã viết, **chưa chạy** |
+| 3 | Loop agent trên L2 (`l2/l2_fmax.py`) và uncore (`uncore/`), tile `asic-7` + tầng CALC trong atomics, Kogge-Stone khi synth | **Xong** (`soc-t10-atom8`): 107,70 MHz, sim tương đương upstream |
 
 Theo khung `docs/workflow-phases.md`, project này nằm ở nhánh **ASIC**. Pha **Simulate** dùng lại gate của `rocket-fmax`
 cho đến bước 3.
+
+## Kết quả (06/11/2026): project hoàn thành
+
+Fmax đo bằng `soc_synth.py` (Yosys `v3` + OpenROAD/OpenSTA sky130hd, clock 10 ns, sau global placement + `repair_design`).
+
+| điểm | Fmax SoC | vùng chặn |
+|---|---|---|
+| upstream | 54,81 MHz | tile (FMA) |
+| `asic-7` | 63,80 MHz | L2 (`busy` → `putbuffer`) |
+| `atom8` = `asic7-atom.patch` + `l2-2-best.patch` + Kogge-Stone | **107,70 MHz** (TNS 0, diện tích 2601011 µm² không SRAM) | uncore +0,715 ns (`cbus/atomics`), L2 `mshrs_*` +0,73 ns, tile +1,752 ns |
+
+Thay đổi: tile `asic-7` (từ `rocket-fmax`), tầng CALC trong `cbus/atomics`, L2 `l2-2` (`ListBuffer`, `Scheduler`,
+`SinkA`, `SinkC`, `SourceC`, `SourceD`), techmap Kogge-Stone cho `$lcu` trong `soc_synth.py` (Yosys 0.38 không có
+`choices/kogge-stone.v`, phải `techmap -autoproc`). Patch nằm ở `~/soc-fmax-l2/` trên máy người dùng.
+
+Chức năng (`uncore_fmax.py --baseline-only`, job `sim-atom8` và `sim-upstream`, cùng gate):
+- ISA 107/108 pass ở **cả hai** bản, kể cả `rv64ua-p-mmio-amo`. Test hỏng duy nhất là `rv64ui-p-ma_data`, hỏng giống
+  hệt ở upstream (cùng cycle 631085000, exit code 6): known failure, không do patch.
+- 8 benchmark pass, chạy lại seed 7 cho cùng `mcycle`.
+
+| benchmark | cycle upstream | cycle atom8 | Δcycle | nhanh hơn (Fmax × cycle) |
+|---|---|---|---|---|
+| dhrystone | 225027 | 216539 | −3,8% | 2,04× |
+| median | 6117 | 6178 | +1,0% | 1,95× |
+| multiply | 27281 | 27159 | −0,4% | 1,97× |
+| qsort | 173402 | 173413 | ≈0 | 1,96× |
+| towers | 4075 | 4070 | ≈0 | 1,97× |
+| vvadd | 2476 | 2476 | 0 | 1,96× |
+| mm | 25255 | 25262 | ≈0 | 1,96× |
+| spmv | 50448 | 53558 | +6,2% | 1,85× |
+| trung bình nhân | | | −0,3% | ≈1,96× |
+
+`spmv` tốn thêm 6,2% cycle (độ trễ bộ nhớ tăng do tầng thêm ở L2/atomics): đánh đổi đã biết.
+
+**Giới hạn:** SRAM là macro giả 0 ns, clock lý tưởng, chưa CTS, chưa route. Biên +0,7 ns có thể mất sau route.
+Fmax sign-off cần SRAM OpenRAM thật và full flow (xem `HANDOFF.md`).
 
 ## File
 
