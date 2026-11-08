@@ -54,15 +54,16 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 - Fork RISCVTutorial gắn vào CHIA (08/11/2026): dựng bằng tay trong container, build Verilator
   `RocketConfig` + chạy `rv64ui-p-simple` (`EXIT=0`), rồi `ChiselBuildNode` qua CHIA ra
   `SUCCESS: True` (với `clean=False`). Đây là khối `chipyard` của `docs/cluster-blocks.md`.
+- Cài lại từ đầu (08/11/2026): `setup-chipyard-fork.sh --clone ... --verify` vào `~/tools/RISCVTutorial`,
+  `chia-up-blocks.py` (chipyard + verilator + claude), `blocks_smoke.py --clean` ra
+  `SUCCESS=True`, `KẾT QUẢ: OK` (sau 2 lỗi: `${VAR}` trong `worker_setup_commands`, `/home` → `/var/home`).
 
 **Chưa chạy thử** (viết từ docs và mã nguồn CHIA):
 - `configs/cluster-lan.yaml`, `prepare-remote-worker.sh`, `check-remote-worker.sh`.
 - `examples/rtl_agent_loop.py`: mới qua `py_compile`, API đã đối chiếu với mã nguồn CHIA 2.0.1.
 - Phần linger trong `check-bazzite-env.sh` (thêm sau lần chạy script).
 - Tailscale/`tailnet:`, phương án Podman rootless.
-- Bản gộp `scripts/setup-chipyard-fork.sh`, `scripts/chia-up-blocks.py` (mới qua `--dry-run`),
-  `examples/blocks_smoke.py`, `scripts/setup-orfs.sh`, khối `vivado`, khối `asic` và
-  `docker/orfs-ray.Dockerfile`.
+- `scripts/setup-orfs.sh`, khối `vivado`, khối `asic` và `docker/orfs-ray.Dockerfile`.
 
 ## Các lỗi đã gặp trên Bazzite và cách sửa
 
