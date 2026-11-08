@@ -1,5 +1,5 @@
 # Image cho khối `asic`: OpenROAD-flow-scripts + Ray, để làm worker CHIA.
-# Mọi worker phải cùng phiên bản Ray và cùng Python (3.10) với head (chia_env).
+# Mọi worker phải cùng phiên bản Ray và cùng Python với head (chia_env), ĐÚNG tới bản vá: 3.10.19.
 #
 # Build (từ thư mục gốc repo):
 #   docker build -t chia-orfs:latest -f docker/orfs-ray.Dockerfile docker
@@ -21,11 +21,11 @@ RUN apt-get update \
 # Không hạ Python của base Miniforge (xung đột pip/conda): tạo env riêng /opt/raypy.
 RUN curl -fsSL -o /tmp/mf.sh https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh \
  && bash /tmp/mf.sh -b -p /opt/miniforge && rm /tmp/mf.sh \
- && /opt/miniforge/bin/conda create -y -q -p /opt/raypy python=3.10 pip \
+ && /opt/miniforge/bin/conda create -y -q -p /opt/raypy python=3.10.19 pip \
  && /opt/miniforge/bin/conda clean -afy \
  && /opt/raypy/bin/python -m pip install --no-cache-dir "ray[default]==2.54.0" "chialoops==2.0.1" \
  && ln -s /opt/raypy/bin/ray /usr/local/bin/ray
 
 # Kiểm nhanh: Python của Ray là 3.10, công cụ ORFS có sẵn.
-RUN /opt/raypy/bin/python -c "import sys; assert sys.version_info[:2]==(3,10), sys.version" \
+RUN /opt/raypy/bin/python -c "import sys; assert sys.version_info[:3]==(3,10,19), sys.version" \
  && bash -c "source /OpenROAD-flow-scripts/env.sh && openroad -version && yosys -V && ray --version"

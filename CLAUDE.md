@@ -121,6 +121,7 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
 - Actor cache là detached và lưu đối tượng Python bằng pickle. Vì vậy module định nghĩa
   dataclass trả về phải import được lúc đọc lại: luôn `chia job submit --working-dir .` từ
   đúng thư mục project.
+- Ray kiểm phiên bản Python của worker khớp head tới **bản vá** (3.10.19 ≠ 3.10.22 là lỗi).
 - `DockerConfig.pull_before_run: false` để dùng image tự build tại máy.
 - `chia job logs -f` có thể ngắt kết nối mà job vẫn chạy; dừng job bằng `chia job stop <id>`.
 
