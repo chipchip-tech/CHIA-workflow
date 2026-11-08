@@ -130,4 +130,5 @@ của host (image ORFS mặc định là root), nên kết quả trong `flow/res
 | `Not a conda environment: /var/home/.../.conda-env` | Bazzite: `/home` là symlink tới `/var/home`; fork dựng theo đường dẫn thật nhưng mount theo `/home/...` | `chia-up-blocks.py` dùng `realpath` (đã sửa). Mount tay thì dùng `$(realpath ~/tools/RISCVTutorial)` |
 | Build `chia-orfs` lỗi `AssertionError: Python (3, 14)` | `openroad/orfs` mới dùng Python 3.14, head dùng 3.10 | Dockerfile cài Python 3.10 riêng ở `/opt/raypy` cho Ray (đã sửa) |
 | `chia up --asic`: `Version mismatch ... Python: 3.10.22` | Ray so cả bản vá Python với head (3.10.19) | Dockerfile ghim `python=3.10.19` (đã sửa) |
+| Khối vivado in `Vivado v2024.2` dù host là 2025.1 | Image `chia-chisel-build` có sẵn `/usr/local/bin/vivado` | Đặt `/tools/Xilinx/<bản>/Vivado/bin` lên đầu PATH (đã sửa) |
 | `docker: command not found` | Gõ `docker` khi đang ở trong container | `exit` ra host |

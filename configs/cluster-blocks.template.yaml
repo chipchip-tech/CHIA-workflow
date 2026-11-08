@@ -77,13 +77,15 @@ available_node_types:
                 - python3 -c "import json,os; p=os.path.expanduser('~/.claude/settings.json'); d=json.load(open(p)) if os.path.exists(p) else {}; d['skipDangerousModePermissionPrompt']=True; json.dump(d,open(p,'w'))"
 
     # --- Khối vivado (FPGA, tuỳ chọn): flow fpga/ của fork + Vivado trên host (chỉ đọc). ---
+    # Image chia-chisel-build có sẵn /usr/local/bin/vivado (v2024.2, kiểm chứng 08/11/2026): đặt bin của
+    # Vivado trên host lên ĐẦU PATH, kể cả khi settings64.sh lỗi.
     # Cùng image và cùng fork với khối chipyard. label=disable thay cho relabel (:z) cả cây Xilinx.
     vivado:
         resources: {"vivado": 1}
         num_workers: 0
         compatible_ips: ["${THIS_MACHINE}"]
         worker_setup_commands:
-            - "source /home/ray/anaconda3/etc/profile.d/conda.sh && source ${CHIPYARD_FORK}/env.sh && source /tools/Xilinx/${VIVADO_VERSION}/Vivado/settings64.sh && export PATH=$PATH:/home/ray/anaconda3/bin"
+            - "source /home/ray/anaconda3/etc/profile.d/conda.sh && source ${CHIPYARD_FORK}/env.sh && source /tools/Xilinx/${VIVADO_VERSION}/Vivado/settings64.sh; export PATH=/tools/Xilinx/${VIVADO_VERSION}/Vivado/bin:$PATH:/home/ray/anaconda3/bin"
         docker:
             image: "ghcr.io/ucb-bar/chia-chisel-build:latest"
             container_name: "chia-vivado-${USER}"

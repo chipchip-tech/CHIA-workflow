@@ -34,8 +34,8 @@ def probe_chipyard() -> dict:
 
 
 @ChiaFunction(resources={"vivado": 1})
-def probe_vivado() -> str:
-    return _run(["vivado", "-version"])
+def probe_vivado() -> dict:
+    return {"which": os.popen("which vivado").read().strip(), "version": _run(["vivado", "-version"])}
 
 
 @ChiaFunction(resources={"asic": 1})

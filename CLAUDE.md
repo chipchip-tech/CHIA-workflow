@@ -36,8 +36,7 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   mật khẩu. Muốn đưa file từ máy họ lên repo thì dùng GitHub web (Upload files), `gh auth
   login`, hoặc họ dán nội dung để session dựng lại và so `sha256sum`.
 - Chưa có máy remote nào.
-- Vivado cài ở `~/tools/Xilinx/2025.1` (bố cục `2025.1/Vivado/settings64.sh`), nhưng `vivado -version`
-  in **v2024.2** (08/11/2026); chưa rõ vì sao.
+- Vivado 2025.1 cài ở `~/tools/Xilinx/2025.1` (bố cục `2025.1/Vivado/settings64.sh`; host in `v2025.1`).
 - **08/11/2026: đã gỡ sạch CHIA** (`chia_env`, `~/work/chia`, `~/chia_cache`, image `chia-*`, fork cũ;
   `~/CHIA-workflow` cũ chuyển vào `~/archive/`) để cài lại từ đầu và kiểm chứng tài liệu. Giữ
   `~/tools/Xilinx`, `~/.claude`, Miniforge và thiết lập hệ thống (docker, sshd, linger, `.bashrc`).
@@ -63,7 +62,7 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 - `chia-up-blocks.py --asic` + `blocks_smoke.py --no-build`: khối asic thấy Yosys 0.68, `flow_writable: True`
   (`openroad -version` in `unknown` vì image build không có git sha, không phải lỗi).
 - `--fpga --asic`: cả 5 khối lên cùng lúc, `blocks_smoke.py` ra `KẾT QUẢ: OK`. Khối vivado in
-  `Vivado v2024.2` dù thư mục tên `2025.1`: **chưa rõ** bản cài thật là bản nào.
+  `Vivado v2024.2` vì image `chia-chisel-build` có sẵn `/usr/local/bin/vivado`; đã sửa PATH, **chưa chạy lại**.
 
 **Chưa chạy thử** (viết từ docs và mã nguồn CHIA):
 - `configs/cluster-lan.yaml`, `prepare-remote-worker.sh`, `check-remote-worker.sh`.
