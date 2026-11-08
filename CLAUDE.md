@@ -62,7 +62,8 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 - `chia-up-blocks.py --asic` + `blocks_smoke.py --no-build`: khối asic thấy Yosys 0.68, `flow_writable: True`
   (`openroad -version` in `unknown` vì image build không có git sha, không phải lỗi).
 - `--fpga --asic`: cả 5 khối lên cùng lúc, `blocks_smoke.py` ra `KẾT QUẢ: OK`. Khối vivado in
-  `Vivado v2024.2` vì image `chia-chisel-build` có sẵn `/usr/local/bin/vivado`; đã sửa PATH, **chưa chạy lại**.
+  `Vivado v2024.2` vì image `chia-chisel-build` có sẵn `/usr/local/bin/vivado`; đã sửa PATH. Sau đó lộ lỗi thật: `settings64.sh` ghi cứng `/var/home/...`, nên Xilinx
+  phải mount đúng đường dẫn thật (`XILINX_DIR`), **chưa chạy lại**.
 
 **Chưa chạy thử** (viết từ docs và mã nguồn CHIA):
 - `configs/cluster-lan.yaml`, `prepare-remote-worker.sh`, `check-remote-worker.sh`.
@@ -125,6 +126,8 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
 - Actor cache là detached và lưu đối tượng Python bằng pickle. Vì vậy module định nghĩa
   dataclass trả về phải import được lúc đọc lại: luôn `chia job submit --working-dir .` từ
   đúng thư mục project.
+- Script worker chạy với `set -e`, nhưng lệnh hỏng ở giữa chuỗi `a && b && c` KHÔNG làm dừng script:
+  `ray start` vẫn chạy với môi trường thiếu, lỗi bị che. Dùng `;` hoặc kiểm tra kết quả bằng probe.
 - Ray kiểm phiên bản Python của worker khớp head tới **bản vá** (3.10.19 ≠ 3.10.22 là lỗi).
 - `DockerConfig.pull_before_run: false` để dùng image tự build tại máy.
 - `chia job logs -f` có thể ngắt kết nối mà job vẫn chạy; dừng job bằng `chia job stop <id>`.

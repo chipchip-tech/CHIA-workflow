@@ -25,6 +25,7 @@ TEMPLATE = REPO / "configs" / "cluster-blocks.template.yaml"
 DEFAULTS = {
     "CHIPYARD_FORK": str(Path.home() / "tools" / "RISCVTutorial"),
     "ORFS_DIR": str(Path.home() / "tools" / "OpenROAD-flow-scripts"),
+    "XILINX_DIR": str(Path.home() / "tools" / "Xilinx"),
     "VIVADO_VERSION": "2025.1",
 }
 
@@ -56,7 +57,7 @@ def main() -> None:
         os.environ.setdefault(k, v)
     # Bazzite: /home là symlink tới /var/home. setup-chipyard-fork.sh dựng fork theo đường dẫn
     # thật (/var/home/...), và env.sh/conda env ghi cứng đường dẫn đó, nên mount cũng phải dùng nó.
-    for k in ("CHIPYARD_FORK", "ORFS_DIR"):
+    for k in ("CHIPYARD_FORK", "ORFS_DIR", "XILINX_DIR"):
         os.environ[k] = os.path.realpath(os.environ[k])
     if not os.environ.get("THIS_MACHINE"):
         os.environ["THIS_MACHINE"] = detect_ip() or fail("không dò được IP, hãy export THIS_MACHINE")
@@ -71,7 +72,7 @@ def main() -> None:
                "vivado": args.fpga, "asic": args.asic}
 
     if args.fpga:
-        settings = Path.home() / "tools/Xilinx" / os.environ["VIVADO_VERSION"] / "Vivado/settings64.sh"
+        settings = Path(os.environ["XILINX_DIR"]) / os.environ["VIVADO_VERSION"] / "Vivado/settings64.sh"
         if not settings.is_file():
             fail(f"không thấy {settings}: kiểm VIVADO_VERSION")
     if args.asic:
@@ -92,7 +93,7 @@ def main() -> None:
     body = yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True, width=1000)
     # CHIA không thay ${VAR} trong worker_setup_commands (chỉ trong run_options), nên tự thay
     # các biến của template ở đây. ${THIS_MACHINE}, ${USER} để CHIA thay như các config khác.
-    for k in ("CHIPYARD_FORK", "ORFS_DIR", "VIVADO_VERSION"):
+    for k in ("CHIPYARD_FORK", "ORFS_DIR", "XILINX_DIR", "VIVADO_VERSION"):
         body = body.replace("${" + k + "}", os.environ[k])
     out = Path(args.out)
     out.write_text(header + body)

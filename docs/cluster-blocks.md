@@ -92,7 +92,7 @@ Cần thấy `[chipyard] env` có `RISCV=<fork>/.conda-env/riscv-tools`, `SUCCES
 ## 4. Khối vivado (FPGA)
 
 Vivado cài trên host ở `~/tools/Xilinx/<phiên bản>/Vivado` (bố cục từ 2025.1), mount chỉ đọc
-vào `/tools/Xilinx`. Phiên bản lấy từ `VIVADO_VERSION` (mặc định `2025.1`). Khối dùng chung fork
+đúng cùng đường dẫn thật (`settings64.sh` ghi cứng đường dẫn lúc cài). Thư mục khác thì đặt `XILINX_DIR`. Phiên bản lấy từ `VIVADO_VERSION` (mặc định `2025.1`). Khối dùng chung fork
 với khối chipyard để chạy flow `fpga/` của Chipyard.
 
 ## 5. Khối asic (OpenROAD-flow-scripts)
@@ -130,5 +130,6 @@ của host (image ORFS mặc định là root), nên kết quả trong `flow/res
 | `Not a conda environment: /var/home/.../.conda-env` | Bazzite: `/home` là symlink tới `/var/home`; fork dựng theo đường dẫn thật nhưng mount theo `/home/...` | `chia-up-blocks.py` dùng `realpath` (đã sửa). Mount tay thì dùng `$(realpath ~/tools/RISCVTutorial)` |
 | Build `chia-orfs` lỗi `AssertionError: Python (3, 14)` | `openroad/orfs` mới dùng Python 3.14, head dùng 3.10 | Dockerfile cài Python 3.10 riêng ở `/opt/raypy` cho Ray (đã sửa) |
 | `chia up --asic`: `Version mismatch ... Python: 3.10.22` | Ray so cả bản vá Python với head (3.10.19) | Dockerfile ghim `python=3.10.19` (đã sửa) |
-| Khối vivado in `Vivado v2024.2` dù host là 2025.1 | Image `chia-chisel-build` có sẵn `/usr/local/bin/vivado` | Đặt `/tools/Xilinx/<bản>/Vivado/bin` lên đầu PATH (đã sửa) |
+| Khối vivado in `Vivado v2024.2` dù host là 2025.1 | Image `chia-chisel-build` có sẵn `/usr/local/bin/vivado` | Đặt `Vivado/bin` của host lên đầu PATH (đã sửa) |
+| `settings64.sh: ... /var/home/dingus/tools/Xilinx/.../.settings64-Vitis_for_HLS.sh: No such file` | `settings64.sh` ghi cứng đường dẫn thật lúc cài; Xilinx bị mount ở `/tools/Xilinx` | Mount Xilinx đúng đường dẫn thật (`XILINX_DIR`, qua `realpath`) (đã sửa) |
 | `docker: command not found` | Gõ `docker` khi đang ở trong container | `exit` ra host |
