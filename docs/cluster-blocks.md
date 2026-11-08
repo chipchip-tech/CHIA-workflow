@@ -132,5 +132,5 @@ của host (image ORFS mặc định là root), nên kết quả trong `flow/res
 | `chia up --asic`: `Version mismatch ... Python: 3.10.22` | Ray so cả bản vá Python với head (3.10.19) | Dockerfile ghim `python=3.10.19` (đã sửa) |
 | Khối vivado in `Vivado v2024.2` dù host là 2025.1 | Image `chia-chisel-build` có sẵn `/usr/local/bin/vivado` | Đặt `Vivado/bin` của host lên đầu PATH (đã sửa) |
 | `settings64.sh: ... /var/home/dingus/tools/Xilinx/.../.settings64-Vitis_for_HLS.sh: No such file` | `settings64.sh` ghi cứng đường dẫn thật lúc cài; Xilinx bị mount ở `/tools/Xilinx` | Mount Xilinx đúng đường dẫn thật (`XILINX_DIR`, qua `realpath`) (đã sửa) |
-| `chia down`: `scoped ray stop in 'chia-asic-...' could not run (is psutil available ...)`, container asic không bị xoá | CHIA dừng Ray bằng `python3` của image (`/opt/orfs-python`, 3.14), không có `psutil` | Dockerfile cài `psutil` vào cả hai Python (đã sửa, cần build lại image) |
+| `chia down`: `scoped ray stop in 'chia-asic-...' could not run (is psutil available ...)`, container asic không bị xoá | CHIA dừng Ray bằng `python3` của image (`/opt/orfs-python`, 3.14), không có `psutil` | Dockerfile cài `psutil` vào cả hai Python (đã sửa, kiểm chứng 09/11/2026) |
 | `docker: command not found` | Gõ `docker` khi đang ở trong container | `exit` ra host |

@@ -66,7 +66,8 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   phải mount đúng đường dẫn thật (`XILINX_DIR`). Chạy lại (09/11/2026): `which` ra
   `/var/home/dingus/tools/Xilinx/2025.1/Vivado/bin/vivado`, `vivado v2025.1`, `KẾT QUẢ: OK`.
 - `chia down` không xoá được container asic (`scoped ray stop ... psutil`): `python3` trên PATH của image là
-  `/opt/orfs-python` (3.14), không có `psutil`. Dockerfile đã cài `psutil`, **chưa build lại**.
+  `/opt/orfs-python` (3.14), không có `psutil`. Dockerfile đã cài `psutil`; kiểm chứng 09/11/2026:
+  `ok=True`, container bị xoá sạch.
 
 **Chưa chạy thử** (viết từ docs và mã nguồn CHIA):
 - `configs/cluster-lan.yaml`, `prepare-remote-worker.sh`, `check-remote-worker.sh`.
