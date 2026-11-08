@@ -54,6 +54,10 @@ def main() -> None:
 
     for k, v in DEFAULTS.items():
         os.environ.setdefault(k, v)
+    # Bazzite: /home là symlink tới /var/home. setup-chipyard-fork.sh dựng fork theo đường dẫn
+    # thật (/var/home/...), và env.sh/conda env ghi cứng đường dẫn đó, nên mount cũng phải dùng nó.
+    for k in ("CHIPYARD_FORK", "ORFS_DIR"):
+        os.environ[k] = os.path.realpath(os.environ[k])
     if not os.environ.get("THIS_MACHINE"):
         os.environ["THIS_MACHINE"] = detect_ip() or fail("không dò được IP, hãy export THIS_MACHINE")
 

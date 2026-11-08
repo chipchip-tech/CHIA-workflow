@@ -48,7 +48,7 @@ cần `--user`.
 Sửa mã trên host. Build/chạy trong một container dùng lâu dài:
 
 ```bash
-docker run -dit --name chipyard-dev --shm-size=10.24gb -v ~/tools/RISCVTutorial:$HOME/tools/RISCVTutorial:z -w $HOME/tools/RISCVTutorial ghcr.io/ucb-bar/chia-chisel-build:latest bash
+docker run -dit --name chipyard-dev --shm-size=10.24gb -v $(realpath ~/tools/RISCVTutorial):$(realpath ~/tools/RISCVTutorial):z -w $(realpath ~/tools/RISCVTutorial) ghcr.io/ucb-bar/chia-chisel-build:latest bash
 ```
 
 ```bash
@@ -126,4 +126,5 @@ của host (image ORFS mặc định là root), nên kết quả trong `flow/res
 | `CondaError: Run 'conda init'` | `env.sh` gọi `conda activate` khi conda chưa nạp | `source /home/ray/anaconda3/etc/profile.d/conda.sh` trước |
 | Worker có `RISCV=None`, `Did not find Verilator in PATH` | Ghi `env.sh` vào `~/.profile` vô ích: shell chạy `ray start` đã đọc `.profile` trước đó | `source env.sh` ngay trong `worker_setup_commands` (chạy cùng shell với `ray start`) |
 | Worker có `RISCV=None` dù `cluster.gen.yaml` đúng | CHIA không thay `${CHIPYARD_FORK}` trong `worker_setup_commands` | `chia-up-blocks.py` tự thay biến trước khi ghi file (đã sửa) |
+| `Not a conda environment: /var/home/.../.conda-env` | Bazzite: `/home` là symlink tới `/var/home`; fork dựng theo đường dẫn thật nhưng mount theo `/home/...` | `chia-up-blocks.py` dùng `realpath` (đã sửa). Mount tay thì dùng `$(realpath ~/tools/RISCVTutorial)` |
 | `docker: command not found` | Gõ `docker` khi đang ở trong container | `exit` ra host |

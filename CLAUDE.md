@@ -83,7 +83,8 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 6. **Fork Chipyard 1.10 trong image CHIA**: thiếu `conda-lock` (cài `conda-lock==1.4.0`);
    `build-setup.sh` hỏi `y/n` mãi khi không có bàn phím vì fork không đứng trên tag release (dùng
    `-f`); `env.sh` của fork gọi `conda activate` nên phải `source .../anaconda3/etc/profile.d/conda.sh`
-   trước. `TutorialStarterConfig` cố ý không có core, build lỗi; thử bằng `RocketConfig`.
+   trước. `/home` là symlink tới `/var/home`: fork ghi cứng đường dẫn thật, mount phải dùng `realpath`.
+   `TutorialStarterConfig` cố ý không có core, build lỗi; thử bằng `RocketConfig`.
 
 ## Ghi chú kỹ thuật về CHIA (đã đối chiếu mã nguồn)
 
