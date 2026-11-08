@@ -85,8 +85,13 @@ def main() -> None:
     header = (f"# SINH TỰ ĐỘNG bởi scripts/chia-up-blocks.py từ {TEMPLATE.name}. Đừng sửa tay.\n"
               f"# Khối bật: {', '.join(n for n, on in enabled.items() if on)}\n"
               f"# CHIPYARD_FORK={fork}  ORFS_DIR={os.environ['ORFS_DIR']}  VIVADO_VERSION={os.environ['VIVADO_VERSION']}\n")
+    body = yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True, width=1000)
+    # CHIA không thay ${VAR} trong worker_setup_commands (chỉ trong run_options), nên tự thay
+    # các biến của template ở đây. ${THIS_MACHINE}, ${USER} để CHIA thay như các config khác.
+    for k in ("CHIPYARD_FORK", "ORFS_DIR", "VIVADO_VERSION"):
+        body = body.replace("${" + k + "}", os.environ[k])
     out = Path(args.out)
-    out.write_text(header + yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True, width=1000))
+    out.write_text(header + body)
     print(f"Đã ghi {out}. Khối bật: {', '.join(n for n, on in enabled.items() if on)}")
 
     if args.dry_run:

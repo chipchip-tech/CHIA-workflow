@@ -125,4 +125,5 @@ của host (image ORFS mặc định là root), nên kết quả trong `flow/res
 | `TutorialStarterConfig` lỗi khi sinh `.fir` | Config tutorial cố ý không có core | Dùng `RocketConfig`, hoặc bỏ comment `WithNBigCores(1)` |
 | `CondaError: Run 'conda init'` | `env.sh` gọi `conda activate` khi conda chưa nạp | `source /home/ray/anaconda3/etc/profile.d/conda.sh` trước |
 | Worker có `RISCV=None`, `Did not find Verilator in PATH` | Ghi `env.sh` vào `~/.profile` vô ích: shell chạy `ray start` đã đọc `.profile` trước đó | `source env.sh` ngay trong `worker_setup_commands` (chạy cùng shell với `ray start`) |
+| Worker có `RISCV=None` dù `cluster.gen.yaml` đúng | CHIA không thay `${CHIPYARD_FORK}` trong `worker_setup_commands` | `chia-up-blocks.py` tự thay biến trước khi ghi file (đã sửa) |
 | `docker: command not found` | Gõ `docker` khi đang ở trong container | `exit` ra host |

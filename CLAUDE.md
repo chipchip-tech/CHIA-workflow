@@ -101,7 +101,7 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   (`chia/cluster/node_setup.py`). Biến môi trường đặt ở `worker_setup_commands` đi vào Ray worker;
   ghi vào `~/.profile` thì không (shell đã đọc `.profile` trước).
 - Tên container thực tế là `container_name` + hậu tố `-<chỉ số>` (ví dụ `chia-riscvtut-dingus-0`).
-- `num_workers: 0` thì node bị bỏ qua: dùng để tắt khối. `${VAR}` được thay trong mọi chuỗi, nhưng
+- `num_workers: 0` thì node bị bỏ qua: dùng để tắt khối. `${VAR}` KHÔNG được thay trong `worker_setup_commands` (kiểm chứng 08/11/2026: Ray worker có `RISCV=None`), chỉ thay trong `run_options`; `chia-up-blocks.py` tự thay biến của template. Kể cả khi được thay, nhưng
   kết quả vẫn là chuỗi, nên không dùng được cho `num_workers` (so sánh với số sẽ lỗi).
 - `ChiselBuildNode(chipyard_path, config, ...)` chỉ `cd <path>/sims/verilator && make -j N CONFIG=...`
   với môi trường của worker; mặc định `clean=True` chạy `make clean` (xoá cả `chipyard.jar`).
