@@ -23,7 +23,8 @@ import yaml
 REPO = Path(__file__).resolve().parent.parent
 TEMPLATE = REPO / "configs" / "cluster-blocks.template.yaml"
 DEFAULTS = {
-    "CHIPYARD_FORK": str(Path.home() / "work" / "RISCVTutorial"),
+    "CHIPYARD_FORK": str(Path.home() / "tools" / "RISCVTutorial"),
+    "ORFS_DIR": str(Path.home() / "tools" / "OpenROAD-flow-scripts"),
     "VIVADO_VERSION": "2025.1",
 }
 
@@ -69,8 +70,11 @@ def main() -> None:
         settings = Path.home() / "tools/Xilinx" / os.environ["VIVADO_VERSION"] / "Vivado/settings64.sh"
         if not settings.is_file():
             fail(f"không thấy {settings}: kiểm VIVADO_VERSION")
-    if args.asic and not image_exists("chia-orfs:latest"):
-        fail("chưa có image chia-orfs:latest: docker build -t chia-orfs:latest -f docker/orfs-ray.Dockerfile docker")
+    if args.asic:
+        if not image_exists("chia-orfs:latest"):
+            fail("chưa có image chia-orfs:latest: docker build -t chia-orfs:latest -f docker/orfs-ray.Dockerfile docker")
+        if not (Path(os.environ["ORFS_DIR"]) / "env.sh").is_file():
+            fail(f"{os.environ['ORFS_DIR']}/env.sh không có: chạy scripts/setup-orfs.sh")
     if enabled["claude"] and not (Path.home() / ".claude/.claude.json").is_file():
         fail("thiếu ~/.claude/.claude.json: chạy `claude` rồi `cp ~/.claude.json ~/.claude/.claude.json`, hoặc dùng --no-claude")
 
@@ -80,7 +84,7 @@ def main() -> None:
 
     header = (f"# SINH TỰ ĐỘNG bởi scripts/chia-up-blocks.py từ {TEMPLATE.name}. Đừng sửa tay.\n"
               f"# Khối bật: {', '.join(n for n, on in enabled.items() if on)}\n"
-              f"# CHIPYARD_FORK={fork}  VIVADO_VERSION={os.environ['VIVADO_VERSION']}\n")
+              f"# CHIPYARD_FORK={fork}  ORFS_DIR={os.environ['ORFS_DIR']}  VIVADO_VERSION={os.environ['VIVADO_VERSION']}\n")
     out = Path(args.out)
     out.write_text(header + yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True, width=1000))
     print(f"Đã ghi {out}. Khối bật: {', '.join(n for n, on in enabled.items() if on)}")

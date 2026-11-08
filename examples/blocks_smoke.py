@@ -40,7 +40,9 @@ def probe_vivado() -> str:
 
 @ChiaFunction(resources={"asic": 1})
 def probe_asic() -> dict:
-    return {"openroad": _run(["openroad", "-version"]), "yosys": _run(["yosys", "-V"])}
+    flow = "/OpenROAD-flow-scripts/flow"
+    return {"openroad": _run(["openroad", "-version"]), "yosys": _run(["yosys", "-V"]),
+            "flow_writable": os.access(flow, os.W_OK)}
 
 
 def main() -> None:

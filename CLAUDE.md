@@ -37,9 +37,13 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   login`, hoặc họ dán nội dung để session dựng lại và so `sha256sum`.
 - Chưa có máy remote nào.
 - Vivado 2025.1 cài ở `~/tools/Xilinx/2025.1` (bố cục mới: `2025.1/Vivado/bin/vivado`).
-- Fork Chipyard RISCVTutorial (Chipyard 1.10.0, nhánh `base`) ở `~/work/RISCVTutorial`, dựng
-  trong container `chia-chisel-build`. **Người dùng định dọn sạch `~` và dựng lại từ đầu** (08/11/2026)
-  để kiểm chứng `scripts/setup-chipyard-fork.sh`; giữ `~/tools` (Vivado).
+- **08/11/2026: đã gỡ sạch CHIA** (`chia_env`, `~/work/chia`, `~/chia_cache`, image `chia-*`, fork cũ;
+  `~/CHIA-workflow` cũ chuyển vào `~/archive/`) để cài lại từ đầu và kiểm chứng tài liệu. Giữ
+  `~/tools/Xilinx`, `~/.claude`, Miniforge và thiết lập hệ thống (docker, sshd, linger, `.bashrc`).
+  Cache của `rocket-fmax` đã mất.
+- Bố cục mới: mọi công cụ trong `~/tools`: `RISCVTutorial/` (fork Chipyard 1.10.0, nhánh `base`),
+  `OpenROAD-flow-scripts/` (chép từ image `chia-orfs`), `Xilinx/2025.1/`. Sửa tay trên host,
+  build trong container (`docs/cluster-blocks.md`).
 
 ## Đã kiểm chứng và chưa kiểm chứng
 
@@ -57,7 +61,8 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 - Phần linger trong `check-bazzite-env.sh` (thêm sau lần chạy script).
 - Tailscale/`tailnet:`, phương án Podman rootless.
 - Bản gộp `scripts/setup-chipyard-fork.sh`, `scripts/chia-up-blocks.py` (mới qua `--dry-run`),
-  `examples/blocks_smoke.py`, khối `vivado`, khối `asic` và `docker/orfs-ray.Dockerfile`.
+  `examples/blocks_smoke.py`, `scripts/setup-orfs.sh`, khối `vivado`, khối `asic` và
+  `docker/orfs-ray.Dockerfile`.
 
 ## Các lỗi đã gặp trên Bazzite và cách sửa
 
@@ -152,7 +157,7 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
 
 ## Việc tiếp theo (gợi ý)
 
-1. Dựng lại từ đầu theo `docs/cluster-blocks.md` (sau khi người dùng dọn `~`): kiểm chứng
+1. Cài lại từ đầu (`docs/setup-bazzite.md` mục 3–4) rồi theo `docs/cluster-blocks.md`: kiểm chứng
    `setup-chipyard-fork.sh --verify`, `chia-up-blocks.py`, `blocks_smoke.py --clean`; sau đó thử
    `--fpga` và `--asic`.
 2. Chạy thử `examples/rtl_agent_loop.py` trên cluster 1 máy và sửa theo log.

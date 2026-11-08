@@ -35,6 +35,7 @@ Chi tiết xem mục "Quy ước nhánh" trong [CLAUDE.md](CLAUDE.md).
 - [scripts/prepare-remote-worker.sh](scripts/prepare-remote-worker.sh): chạy trên máy remote để cài sshd, Docker, rsync và mở firewall cho head (hỏi trước mỗi bước).
 - [scripts/check-remote-worker.sh](scripts/check-remote-worker.sh): chạy trên head, kiểm tra máy remote qua SSH (chỉ đọc).
 - [scripts/setup-chipyard-fork.sh](scripts/setup-chipyard-fork.sh): clone (tuỳ chọn) và dựng một fork Chipyard trong container `chia-chisel-build`; `--verify` build và chạy thử RocketConfig.
+- [scripts/setup-orfs.sh](scripts/setup-orfs.sh): chép OpenROAD-flow-scripts từ image `chia-orfs` ra `~/tools` để sửa tay; `--verify` chạy flow mẫu nangate45/gcd.
 - [scripts/chia-up-blocks.py](scripts/chia-up-blocks.py): sinh `cluster.gen.yaml` từ template theo khối (`--fpga`, `--asic`, `--no-claude`) và `chia up`.
 
 ## Docker

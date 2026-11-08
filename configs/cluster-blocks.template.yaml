@@ -10,7 +10,10 @@
 #
 # Biến môi trường (chia-up-blocks.py đặt giá trị mặc định nếu thiếu):
 #   THIS_MACHINE    IP LAN của máy (tự dò)
-#   CHIPYARD_FORK   đường dẫn tuyệt đối tới fork Chipyard đã dựng xong (có env.sh)
+#   CHIPYARD_FORK   đường dẫn tuyệt đối tới fork Chipyard đã dựng xong (có env.sh),
+#                   mặc định ~/tools/RISCVTutorial
+#   ORFS_DIR        OpenROAD-flow-scripts chép ra host (scripts/setup-orfs.sh),
+#                   mặc định ~/tools/OpenROAD-flow-scripts
 #   VIVADO_VERSION  thư mục phiên bản trong ~/tools/Xilinx (ví dụ 2025.1)
 #
 # Xem docs/cluster-blocks.md.
@@ -92,6 +95,7 @@ available_node_types:
                 - "-v ~/tools/Xilinx:/tools/Xilinx:ro"
 
     # --- Khối asic (tuỳ chọn): OpenROAD-flow-scripts. Image tự build: docker/orfs-ray.Dockerfile. ---
+    # ORFS trên host (sửa tay được) mount đè lên /OpenROAD-flow-scripts của image.
     # Fork được mount để đọc Verilog sinh ra từ khối chipyard.
     asic:
         resources: {"asic": 1}
@@ -106,6 +110,10 @@ available_node_types:
             run_options:
                 - --shm-size=4gb
                 - --memory=12g       # flow chạy quá tay chỉ làm chết container này
+                # Image ORFS chạy bằng root: ép UID của host để file sinh ra vẫn sửa được trên host.
+                - "--user $(id -u):$(id -g)"
+                - "-e HOME=/tmp"
+                - "-v ${ORFS_DIR}:/OpenROAD-flow-scripts:z"
                 - "-v ${CHIPYARD_FORK}:${CHIPYARD_FORK}:z"
 
 head_env_commands: ["source ~/.bashrc && conda activate chia_env"]

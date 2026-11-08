@@ -3,6 +3,7 @@
 #
 # Build (từ thư mục gốc repo):
 #   docker build -t chia-orfs:latest -f docker/orfs-ray.Dockerfile docker
+# Sau đó chép ORFS ra host để sửa tay: scripts/setup-orfs.sh
 #
 # CHƯA build thử. Nếu bản openroad/orfs mới đổi Python, ghim tag cũ hơn ở ORFS_TAG.
 ARG ORFS_TAG=latest

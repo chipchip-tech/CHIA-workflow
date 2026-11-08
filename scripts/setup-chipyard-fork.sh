@@ -5,7 +5,7 @@
 #
 # Cách dùng (nên chạy trong tmux, mất 30–90 phút):
 #   scripts/setup-chipyard-fork.sh [--clone URL] [--verify] [FORK_DIR]
-#     FORK_DIR   mặc định $CHIPYARD_FORK, hoặc ~/work/RISCVTutorial
+#     FORK_DIR   mặc định $CHIPYARD_FORK, hoặc ~/tools/RISCVTutorial
 #     --clone    git clone URL vào FORK_DIR nếu thư mục chưa có
 #     --verify   sau khi dựng: build Verilator RocketConfig và chạy rv64ui-p-simple
 #
@@ -26,7 +26,7 @@ while [ $# -gt 0 ]; do
         *) FORK="$1"; shift ;;
     esac
 done
-FORK="${FORK:-${CHIPYARD_FORK:-$HOME/work/RISCVTutorial}}"
+FORK="${FORK:-${CHIPYARD_FORK:-$HOME/tools/RISCVTutorial}}"
 FORK="$(realpath -m "$FORK")"
 
 if [ ! -d "$FORK" ]; then

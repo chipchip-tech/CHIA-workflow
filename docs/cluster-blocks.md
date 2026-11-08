@@ -1,8 +1,14 @@
 # Cluster theo khối: fork Chipyard + Verilator + Vivado + ASIC
 
 Cluster CHIA một máy gồm các khối bật/tắt được. Dùng chung cho mọi project từ nay về sau.
-Fork Chipyard nằm trên host và được mount vào container, nên sửa tay bằng editor được,
-còn toolchain và bản build thì nằm cùng thư mục fork.
+Mọi công cụ nằm trong `~/tools` trên host và được mount vào container, nên sửa tay bằng editor được:
+
+```
+~/tools/
+├── RISCVTutorial/            fork Chipyard (khối chipyard, vivado); toolchain + build nằm trong đây
+├── OpenROAD-flow-scripts/    ORFS chép từ image chia-orfs (khối asic)
+└── Xilinx/2025.1/            Vivado (khối vivado, mount chỉ đọc)
+```
 
 | Khối | Resource | Image | Mặc định | Trạng thái |
 |---|---|---|---|---|
@@ -10,7 +16,7 @@ còn toolchain và bản build thì nằm cùng thư mục fork.
 | `verilator` | `verilator_run` | `chia-verilator-run` | bật | ✅ |
 | `claude` | `claude_creds` | `chia-claude-code` | bật (`--no-claude` để tắt) | ✅ (project rocket-fmax) |
 | `vivado` | `vivado` | `chia-chisel-build` + mount fork + `~/tools/Xilinx` | tắt (`--fpga`) | ❌ chưa chạy thử |
-| `asic` | `asic` | `chia-orfs` tự build | tắt (`--asic`) | ❌ chưa chạy thử |
+| `asic` | `asic` | `chia-orfs` tự build + mount `~/tools/OpenROAD-flow-scripts` | tắt (`--asic`) | ❌ chưa chạy thử |
 
 File liên quan:
 
@@ -18,6 +24,7 @@ File liên quan:
 - `scripts/setup-chipyard-fork.sh`: dựng fork trong container.
 - `scripts/chia-up-blocks.py`: sinh `cluster.gen.yaml` theo khối và `chia up`.
 - `docker/orfs-ray.Dockerfile`: image cho khối asic.
+- `scripts/setup-orfs.sh`: chép ORFS từ image ra `~/tools` để sửa tay.
 - `examples/blocks_smoke.py`: kiểm tra các khối đang bật.
 
 ## 1. Dựng fork Chipyard
@@ -25,7 +32,7 @@ File liên quan:
 Ví dụ với [RISCVTutorial](https://github.com/uec-riscv-team/RISCVTutorial) (Chipyard 1.10.0). Chạy trong `tmux`, mất 30–90 phút:
 
 ```bash
-cd ~/CHIA-workflow && scripts/setup-chipyard-fork.sh --clone https://github.com/uec-riscv-team/RISCVTutorial.git --verify ~/work/RISCVTutorial
+cd ~/CHIA-workflow && scripts/setup-chipyard-fork.sh --clone https://github.com/uec-riscv-team/RISCVTutorial.git --verify ~/tools/RISCVTutorial
 ```
 
 Script chạy `build-setup.sh` trong một container `chia-chisel-build` tạm (`--rm`), ghi
@@ -41,7 +48,7 @@ cần `--user`.
 Sửa mã trên host. Build/chạy trong một container dùng lâu dài:
 
 ```bash
-docker run -dit --name chipyard-dev --shm-size=10.24gb -v ~/work/RISCVTutorial:$HOME/work/RISCVTutorial:z -w $HOME/work/RISCVTutorial ghcr.io/ucb-bar/chia-chisel-build:latest bash
+docker run -dit --name chipyard-dev --shm-size=10.24gb -v ~/tools/RISCVTutorial:$HOME/tools/RISCVTutorial:z -w $HOME/tools/RISCVTutorial ghcr.io/ucb-bar/chia-chisel-build:latest bash
 ```
 
 ```bash
@@ -61,7 +68,7 @@ python scripts/chia-up-blocks.py
 ```
 
 Thêm `--fpga`, `--asic`, `--no-claude` tuỳ nhu cầu; `--dry-run` để chỉ xem config. Fork khác
-mặc định (`~/work/RISCVTutorial`) thì đặt `CHIPYARD_FORK=/đường/dẫn/tuyệt/đối`. Script kiểm
+mặc định (`~/tools/RISCVTutorial`) thì đặt `CHIPYARD_FORK=/đường/dẫn/tuyệt/đối`; ORFS khác chỗ thì `ORFS_DIR`. Script kiểm
 trước: fork có `env.sh`, Vivado có `settings64.sh`, image `chia-orfs` đã build, Claude đã đăng nhập.
 
 Tắt cluster:
@@ -96,6 +103,18 @@ cd ~/CHIA-workflow && docker build -t chia-orfs:latest -f docker/orfs-ray.Docker
 
 Image cài thêm Ray 2.54.0 và `chialoops` 2.0.1 lên `openroad/orfs`. Ray đòi mọi node cùng phiên
 bản Ray và Python với head (3.10), nên Dockerfile dừng nếu Python lệch.
+
+Rồi chép ORFS ra host để sửa tay (cùng cách với fork Chipyard):
+
+```bash
+cd ~/CHIA-workflow && scripts/setup-orfs.sh --verify
+```
+
+Script `docker cp` cả `/OpenROAD-flow-scripts` của image ra `~/tools/OpenROAD-flow-scripts`
+(chép từ image chứ không `git clone`, để script flow khớp đúng bản OpenROAD/Yosys đã build), rồi
+`git init` thư mục `flow/` để theo dõi thay đổi tay. `--verify` chạy flow mẫu `nangate45/gcd` và
+cần thấy `VERIFY_OK`. Khối asic mount thư mục này đè lên `/OpenROAD-flow-scripts` và chạy bằng UID
+của host (image ORFS mặc định là root), nên kết quả trong `flow/results` sửa/xoá được trên host.
 
 ## Lỗi đã gặp
 
