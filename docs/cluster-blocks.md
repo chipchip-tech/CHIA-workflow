@@ -15,7 +15,7 @@ Mọi công cụ nằm trong `~/tools` trên host và được mount vào contai
 | `chipyard` | `chipyard` | `chia-chisel-build` + mount fork | bật | ✅ cài lại từ đầu, `blocks_smoke.py --clean` OK (08/11/2026) |
 | `verilator` | `verilator_run` | `chia-verilator-run` | bật | ✅ |
 | `claude` | `claude_creds` | `chia-claude-code` | bật (`--no-claude` để tắt) | ✅ (project rocket-fmax) |
-| `vivado` | `vivado` | `chia-chisel-build` + mount fork + `~/tools/Xilinx` | tắt (`--fpga`) | ✅ `vivado -version` chạy trong worker (08/11/2026); flow `fpga/` chưa thử |
+| `vivado` | `vivado` | `chia-chisel-build` + mount fork + `~/tools/Xilinx` | tắt (`--fpga`) | ✅ `vivado v2025.1` của host chạy trong worker (09/11/2026); flow `fpga/` chưa thử |
 | `asic` | `asic` | `chia-orfs` tự build + mount `~/tools/OpenROAD-flow-scripts` | tắt (`--asic`) | ✅ `blocks_smoke.py` thấy openroad/yosys, `flow_writable` (08/11/2026) |
 
 File liên quan:
@@ -132,4 +132,5 @@ của host (image ORFS mặc định là root), nên kết quả trong `flow/res
 | `chia up --asic`: `Version mismatch ... Python: 3.10.22` | Ray so cả bản vá Python với head (3.10.19) | Dockerfile ghim `python=3.10.19` (đã sửa) |
 | Khối vivado in `Vivado v2024.2` dù host là 2025.1 | Image `chia-chisel-build` có sẵn `/usr/local/bin/vivado` | Đặt `Vivado/bin` của host lên đầu PATH (đã sửa) |
 | `settings64.sh: ... /var/home/dingus/tools/Xilinx/.../.settings64-Vitis_for_HLS.sh: No such file` | `settings64.sh` ghi cứng đường dẫn thật lúc cài; Xilinx bị mount ở `/tools/Xilinx` | Mount Xilinx đúng đường dẫn thật (`XILINX_DIR`, qua `realpath`) (đã sửa) |
+| `chia down`: `scoped ray stop in 'chia-asic-...' could not run (is psutil available ...)`, container asic không bị xoá | CHIA dừng Ray bằng `python3` của image (3.14), không có `psutil` | Tạm thời: `docker rm -f chia-asic-$USER-0` sau `chia down` (chưa sửa image) |
 | `docker: command not found` | Gõ `docker` khi đang ở trong container | `exit` ra host |
