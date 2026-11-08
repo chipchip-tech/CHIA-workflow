@@ -102,7 +102,8 @@ cd ~/CHIA-workflow && docker build -t chia-orfs:latest -f docker/orfs-ray.Docker
 ```
 
 Image cài thêm Ray 2.54.0 và `chialoops` 2.0.1 lên `openroad/orfs`. Ray đòi mọi node cùng phiên
-bản Ray và Python với head (3.10), nên Dockerfile dừng nếu Python lệch.
+bản Ray và Python với head (3.10), mà `openroad/orfs` mới dùng Python 3.14, nên Ray chạy trong một
+Python 3.10 riêng ở `/opt/raypy`; `python3` của image giữ nguyên cho script ORFS.
 
 Rồi chép ORFS ra host để sửa tay (cùng cách với fork Chipyard):
 
@@ -127,4 +128,5 @@ của host (image ORFS mặc định là root), nên kết quả trong `flow/res
 | Worker có `RISCV=None`, `Did not find Verilator in PATH` | Ghi `env.sh` vào `~/.profile` vô ích: shell chạy `ray start` đã đọc `.profile` trước đó | `source env.sh` ngay trong `worker_setup_commands` (chạy cùng shell với `ray start`) |
 | Worker có `RISCV=None` dù `cluster.gen.yaml` đúng | CHIA không thay `${CHIPYARD_FORK}` trong `worker_setup_commands` | `chia-up-blocks.py` tự thay biến trước khi ghi file (đã sửa) |
 | `Not a conda environment: /var/home/.../.conda-env` | Bazzite: `/home` là symlink tới `/var/home`; fork dựng theo đường dẫn thật nhưng mount theo `/home/...` | `chia-up-blocks.py` dùng `realpath` (đã sửa). Mount tay thì dùng `$(realpath ~/tools/RISCVTutorial)` |
+| Build `chia-orfs` lỗi `AssertionError: Python (3, 14)` | `openroad/orfs` mới dùng Python 3.14, head dùng 3.10 | Dockerfile cài Python 3.10 riêng ở `/opt/raypy` cho Ray (đã sửa) |
 | `docker: command not found` | Gõ `docker` khi đang ở trong container | `exit` ra host |
