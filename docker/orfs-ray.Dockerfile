@@ -6,7 +6,7 @@
 # Sau đó chép ORFS ra host để sửa tay: scripts/setup-orfs.sh
 #
 # openroad/orfs mới dùng Python 3.14 (kiểm chứng 08/11/2026), nên Ray chạy trong một Python 3.10
-# riêng ở /opt/raypy (Miniforge). Chỉ symlink lệnh `ray` ra PATH; `python3` của image giữ nguyên
+# riêng ở /opt/raypy (env conda tạo bằng Miniforge ở /opt/miniforge). Chỉ symlink lệnh `ray` ra PATH; `python3` của image giữ nguyên
 # cho script của ORFS. Ray worker chạy bằng sys.executable của `ray` nên dùng 3.10.
 #
 # CHƯA build thử bản này.
@@ -18,10 +18,11 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates openssh-client rsync \
  && rm -rf /var/lib/apt/lists/*
 
+# Không hạ Python của base Miniforge (xung đột pip/conda): tạo env riêng /opt/raypy.
 RUN curl -fsSL -o /tmp/mf.sh https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh \
- && bash /tmp/mf.sh -b -p /opt/raypy && rm /tmp/mf.sh \
- && /opt/raypy/bin/conda install -y -q python=3.10 \
- && /opt/raypy/bin/conda clean -afy \
+ && bash /tmp/mf.sh -b -p /opt/miniforge && rm /tmp/mf.sh \
+ && /opt/miniforge/bin/conda create -y -q -p /opt/raypy python=3.10 pip \
+ && /opt/miniforge/bin/conda clean -afy \
  && /opt/raypy/bin/python -m pip install --no-cache-dir "ray[default]==2.54.0" "chialoops==2.0.1" \
  && ln -s /opt/raypy/bin/ray /usr/local/bin/ray
 
