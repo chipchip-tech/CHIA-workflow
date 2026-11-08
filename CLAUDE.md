@@ -36,6 +36,10 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   mật khẩu. Muốn đưa file từ máy họ lên repo thì dùng GitHub web (Upload files), `gh auth
   login`, hoặc họ dán nội dung để session dựng lại và so `sha256sum`.
 - Chưa có máy remote nào.
+- Vivado 2025.1 cài ở `~/tools/Xilinx/2025.1` (bố cục mới: `2025.1/Vivado/bin/vivado`).
+- Fork Chipyard RISCVTutorial (Chipyard 1.10.0, nhánh `base`) ở `~/work/RISCVTutorial`, dựng
+  trong container `chia-chisel-build`. **Người dùng định dọn sạch `~` và dựng lại từ đầu** (08/11/2026)
+  để kiểm chứng `scripts/setup-chipyard-fork.sh`; giữ `~/tools` (Vivado).
 
 ## Đã kiểm chứng và chưa kiểm chứng
 
@@ -43,12 +47,17 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 - `check-bazzite-env.sh`: pass hết, chỉ có WARN về RAM.
 - `chia up` cluster 1 máy, `ray status` thấy đủ node.
 - Hello World step 1–4. Step 4 cho ra `Hello World (#4) from instruction 1000! again`.
+- Fork RISCVTutorial gắn vào CHIA (08/11/2026): dựng bằng tay trong container, build Verilator
+  `RocketConfig` + chạy `rv64ui-p-simple` (`EXIT=0`), rồi `ChiselBuildNode` qua CHIA ra
+  `SUCCESS: True` (với `clean=False`). Đây là khối `chipyard` của `docs/cluster-blocks.md`.
 
 **Chưa chạy thử** (viết từ docs và mã nguồn CHIA):
 - `configs/cluster-lan.yaml`, `prepare-remote-worker.sh`, `check-remote-worker.sh`.
 - `examples/rtl_agent_loop.py`: mới qua `py_compile`, API đã đối chiếu với mã nguồn CHIA 2.0.1.
 - Phần linger trong `check-bazzite-env.sh` (thêm sau lần chạy script).
-- Tailscale/`tailnet:`, worker Claude Code, phương án Podman rootless.
+- Tailscale/`tailnet:`, phương án Podman rootless.
+- Bản gộp `scripts/setup-chipyard-fork.sh`, `scripts/chia-up-blocks.py` (mới qua `--dry-run`),
+  `examples/blocks_smoke.py`, khối `vivado`, khối `asic` và `docker/orfs-ray.Dockerfile`.
 
 ## Các lỗi đã gặp trên Bazzite và cách sửa
 
@@ -66,6 +75,11 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 5. Thêm `--node-ip-address=<IP>` và `--disable-usage-stats` vào lệnh khởi động Ray head
    để khỏi phụ thuộc IP tự dò và câu hỏi tương tác.
 
+6. **Fork Chipyard 1.10 trong image CHIA**: thiếu `conda-lock` (cài `conda-lock==1.4.0`);
+   `build-setup.sh` hỏi `y/n` mãi khi không có bàn phím vì fork không đứng trên tag release (dùng
+   `-f`); `env.sh` của fork gọi `conda activate` nên phải `source .../anaconda3/etc/profile.d/conda.sh`
+   trước. `TutorialStarterConfig` cố ý không có core, build lỗi; thử bằng `RocketConfig`.
+
 ## Ghi chú kỹ thuật về CHIA (đã đối chiếu mã nguồn)
 
 - CHIA luôn gọi lệnh `docker` (`DockerConfig.engine` cố định là `"docker"`). Lệnh chạy
@@ -77,6 +91,16 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 - `BashTool(name, work_dir, timeout_seconds=120, task_options=...)`. Tool đang chạy giữ
   resource cho tới khi gọi `.stop()`.
 - Image Chipyard của CHIA dùng nhánh `chia_artifact` của `ucb-bar/chipyard`, Ubuntu 22.04.
+- Worker docker: CHIA gộp `worker_env_commands`, `setup_commands`, `worker_setup_commands` và
+  `worker_start_ray_commands` thành MỘT script chạy qua `docker exec -i ... bash --login`
+  (`chia/cluster/node_setup.py`). Biến môi trường đặt ở `worker_setup_commands` đi vào Ray worker;
+  ghi vào `~/.profile` thì không (shell đã đọc `.profile` trước).
+- Tên container thực tế là `container_name` + hậu tố `-<chỉ số>` (ví dụ `chia-riscvtut-dingus-0`).
+- `num_workers: 0` thì node bị bỏ qua: dùng để tắt khối. `${VAR}` được thay trong mọi chuỗi, nhưng
+  kết quả vẫn là chuỗi, nên không dùng được cho `num_workers` (so sánh với số sẽ lỗi).
+- `ChiselBuildNode(chipyard_path, config, ...)` chỉ `cd <path>/sims/verilator && make -j N CONFIG=...`
+  với môi trường của worker; mặc định `clean=True` chạy `make clean` (xoá cả `chipyard.jar`).
+  Không phụ thuộc gì riêng của nhánh `chia_artifact`, nên fork Chipyard 1.10 dùng được.
 
 Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
 - Khi bật profiler (`start_collector`), ObjectRef trả về từ `chia_remote` mà truyền thẳng vào
@@ -128,8 +152,11 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
 
 ## Việc tiếp theo (gợi ý)
 
-1. Chạy thử `examples/rtl_agent_loop.py` trên cluster 1 máy và sửa theo log.
-2. Xác nhận `PYTHONNOUSERSITE=1` cho `chia_env`.
-3. Khi có máy thứ hai: làm theo `docs/usage-remote.md`, kiểm chứng `cluster-lan.yaml`.
-4. Tuỳ chọn: worker Claude Code (`chia-claude-code`, mount `~/.claude`); thử các case
+1. Dựng lại từ đầu theo `docs/cluster-blocks.md` (sau khi người dùng dọn `~`): kiểm chứng
+   `setup-chipyard-fork.sh --verify`, `chia-up-blocks.py`, `blocks_smoke.py --clean`; sau đó thử
+   `--fpga` và `--asic`.
+2. Chạy thử `examples/rtl_agent_loop.py` trên cluster 1 máy và sửa theo log.
+3. Xác nhận `PYTHONNOUSERSITE=1` cho `chia_env`.
+4. Khi có máy thứ hai: làm theo `docs/usage-remote.md`, kiểm chứng `cluster-lan.yaml`.
+5. Tuỳ chọn: thử các case
    study trong `~/work/chia/examples/` (`timing_opt`, `riscv_extensions`, `gem5_align`,...).
