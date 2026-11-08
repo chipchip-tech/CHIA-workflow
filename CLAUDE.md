@@ -57,13 +57,15 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 - Cài lại từ đầu (08/11/2026): `setup-chipyard-fork.sh --clone ... --verify` vào `~/tools/RISCVTutorial`,
   `chia-up-blocks.py` (chipyard + verilator + claude), `blocks_smoke.py --clean` ra
   `SUCCESS=True`, `KẾT QUẢ: OK` (sau 2 lỗi: `${VAR}` trong `worker_setup_commands`, `/home` → `/var/home`).
+- `docker/orfs-ray.Dockerfile` build được (Ray trong Python 3.10 riêng `/opt/raypy`; `openroad/orfs` dùng 3.14),
+  `setup-orfs.sh --verify` chép 1.44 GB ra `~/tools/OpenROAD-flow-scripts`, flow `nangate45/gcd` ra `VERIFY_OK`.
 
 **Chưa chạy thử** (viết từ docs và mã nguồn CHIA):
 - `configs/cluster-lan.yaml`, `prepare-remote-worker.sh`, `check-remote-worker.sh`.
 - `examples/rtl_agent_loop.py`: mới qua `py_compile`, API đã đối chiếu với mã nguồn CHIA 2.0.1.
 - Phần linger trong `check-bazzite-env.sh` (thêm sau lần chạy script).
 - Tailscale/`tailnet:`, phương án Podman rootless.
-- `scripts/setup-orfs.sh`, khối `vivado`, khối `asic` và `docker/orfs-ray.Dockerfile`.
+- Khối `vivado`, khối `asic` qua CHIA (`--asic`).
 
 ## Các lỗi đã gặp trên Bazzite và cách sửa
 

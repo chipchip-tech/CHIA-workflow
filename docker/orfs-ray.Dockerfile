@@ -9,7 +9,7 @@
 # riêng ở /opt/raypy (env conda tạo bằng Miniforge ở /opt/miniforge). Chỉ symlink lệnh `ray` ra PATH; `python3` của image giữ nguyên
 # cho script của ORFS. Ray worker chạy bằng sys.executable của `ray` nên dùng 3.10.
 #
-# CHƯA build thử bản này.
+# Đã build thật (08/11/2026).
 ARG ORFS_TAG=latest
 FROM openroad/orfs:${ORFS_TAG}
 

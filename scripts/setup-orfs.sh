@@ -10,7 +10,7 @@
 #     ORFS_DIR   mặc định $ORFS_DIR, hoặc ~/tools/OpenROAD-flow-scripts
 #     --verify   chạy thử flow mẫu nangate45/gcd trong container (vài phút)
 #
-# CHƯA chạy thử.
+# Đã chạy thật với --verify (08/11/2026).
 set -euo pipefail
 
 IMAGE="chia-orfs:latest"
