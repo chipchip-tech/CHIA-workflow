@@ -15,7 +15,7 @@ Mọi công cụ nằm trong `~/tools` trên host và được mount vào contai
 | `chipyard` | `chipyard` | `chia-chisel-build` + mount fork | bật | ✅ cài lại từ đầu, `blocks_smoke.py --clean` OK (08/11/2026) |
 | `verilator` | `verilator_run` | `chia-verilator-run` | bật | ✅ |
 | `claude` | `claude_creds` | `chia-claude-code` | bật (`--no-claude` để tắt) | ✅ (project rocket-fmax) |
-| `vivado` | `vivado` | `chia-chisel-build` + mount fork + `~/tools/Xilinx` | tắt (`--fpga`) | ❌ chưa chạy thử |
+| `vivado` | `vivado` | `chia-chisel-build` + mount fork + `~/tools/Xilinx` | tắt (`--fpga`) | ✅ `vivado -version` chạy trong worker (08/11/2026); flow `fpga/` chưa thử |
 | `asic` | `asic` | `chia-orfs` tự build + mount `~/tools/OpenROAD-flow-scripts` | tắt (`--asic`) | ✅ `blocks_smoke.py` thấy openroad/yosys, `flow_writable` (08/11/2026) |
 
 File liên quan:

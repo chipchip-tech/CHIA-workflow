@@ -5,7 +5,7 @@
 #   chipyard   chipyard        bật        đã chạy thật (fork RISCVTutorial, 08/11/2026)
 #   verilator  verilator_run   bật        đã chạy thật
 #   claude     claude_creds    bật        đã chạy thật (project rocket-fmax)
-#   vivado     vivado          tắt        CHƯA chạy thử   (--fpga)
+#   vivado     vivado          tắt        đã chạy thật    (--fpga; mới kiểm vivado -version)
 #   asic       asic            tắt        đã chạy thật    (--asic)
 #
 # Biến môi trường (chia-up-blocks.py đặt giá trị mặc định nếu thiếu):
