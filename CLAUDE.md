@@ -59,13 +59,15 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   `SUCCESS=True`, `KẾT QUẢ: OK` (sau 2 lỗi: `${VAR}` trong `worker_setup_commands`, `/home` → `/var/home`).
 - `docker/orfs-ray.Dockerfile` build được (Ray trong Python 3.10 riêng `/opt/raypy`; `openroad/orfs` dùng 3.14),
   `setup-orfs.sh --verify` chép 1.44 GB ra `~/tools/OpenROAD-flow-scripts`, flow `nangate45/gcd` ra `VERIFY_OK`.
+- `chia-up-blocks.py --asic` + `blocks_smoke.py --no-build`: khối asic thấy Yosys 0.68, `flow_writable: True`
+  (`openroad -version` in `unknown` vì image build không có git sha, không phải lỗi).
 
 **Chưa chạy thử** (viết từ docs và mã nguồn CHIA):
 - `configs/cluster-lan.yaml`, `prepare-remote-worker.sh`, `check-remote-worker.sh`.
 - `examples/rtl_agent_loop.py`: mới qua `py_compile`, API đã đối chiếu với mã nguồn CHIA 2.0.1.
 - Phần linger trong `check-bazzite-env.sh` (thêm sau lần chạy script).
 - Tailscale/`tailnet:`, phương án Podman rootless.
-- Khối `vivado`, khối `asic` qua CHIA (`--asic`).
+- Khối `vivado` (`--fpga`).
 
 ## Các lỗi đã gặp trên Bazzite và cách sửa
 

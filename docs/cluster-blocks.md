@@ -16,7 +16,7 @@ Mọi công cụ nằm trong `~/tools` trên host và được mount vào contai
 | `verilator` | `verilator_run` | `chia-verilator-run` | bật | ✅ |
 | `claude` | `claude_creds` | `chia-claude-code` | bật (`--no-claude` để tắt) | ✅ (project rocket-fmax) |
 | `vivado` | `vivado` | `chia-chisel-build` + mount fork + `~/tools/Xilinx` | tắt (`--fpga`) | ❌ chưa chạy thử |
-| `asic` | `asic` | `chia-orfs` tự build + mount `~/tools/OpenROAD-flow-scripts` | tắt (`--asic`) | ⚠️ image + `setup-orfs.sh --verify` OK; chưa thử qua CHIA |
+| `asic` | `asic` | `chia-orfs` tự build + mount `~/tools/OpenROAD-flow-scripts` | tắt (`--asic`) | ✅ `blocks_smoke.py` thấy openroad/yosys, `flow_writable` (08/11/2026) |
 
 File liên quan:
 

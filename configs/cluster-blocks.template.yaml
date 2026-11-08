@@ -6,7 +6,7 @@
 #   verilator  verilator_run   bật        đã chạy thật
 #   claude     claude_creds    bật        đã chạy thật (project rocket-fmax)
 #   vivado     vivado          tắt        CHƯA chạy thử   (--fpga)
-#   asic       asic            tắt        CHƯA chạy thử   (--asic)
+#   asic       asic            tắt        đã chạy thật    (--asic)
 #
 # Biến môi trường (chia-up-blocks.py đặt giá trị mặc định nếu thiếu):
 #   THIS_MACHINE    IP LAN của máy (tự dò)
