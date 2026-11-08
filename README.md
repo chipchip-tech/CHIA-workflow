@@ -14,6 +14,12 @@ Bối cảnh cho session Claude Code mới: [CLAUDE.md](CLAUDE.md).
 
 Chi tiết xem mục "Quy ước nhánh" trong [CLAUDE.md](CLAUDE.md).
 
+## Bắt đầu nhanh
+
+Cài máy theo [docs/setup-bazzite.md](docs/setup-bazzite.md) (mục 1–4), rồi dùng **cluster theo khối**
+([docs/cluster-blocks.md](docs/cluster-blocks.md)): đây là cách chạy chính cho mọi project, đã kiểm chứng cả 5 khối
+(08–09/11/2026). `configs/cluster-local.yaml` (Chipyard có sẵn trong image) giữ lại cho Hello World.
+
 ## Tài liệu
 
 - [docs/setup-bazzite.md](docs/setup-bazzite.md): cài đặt trên Bazzite (Docker qua bazzite-dx, SSH, conda/`chia_env`, image CHIA, Hello World, agent AI, Chipyard native trong distrobox).
@@ -26,7 +32,7 @@ Chi tiết xem mục "Quy ước nhánh" trong [CLAUDE.md](CLAUDE.md).
 ## Config
 
 - [configs/cluster-local.yaml](configs/cluster-local.yaml): cluster một máy (head + chipyard + verilator + opencode). Đã chạy thật hết 4 bước Hello World trên Bazzite.
-- [configs/cluster-blocks.template.yaml](configs/cluster-blocks.template.yaml): template cluster theo khối (chipyard, verilator, claude bật; vivado, asic tắt). Không `chia up` thẳng, dùng `scripts/chia-up-blocks.py`.
+- [configs/cluster-blocks.template.yaml](configs/cluster-blocks.template.yaml): template cluster theo khối (chipyard, verilator, claude bật; vivado, asic tắt). **Cách chạy chính.** Không `chia up` thẳng, dùng `scripts/chia-up-blocks.py`.
 - [configs/cluster-lan.yaml](configs/cluster-lan.yaml): head + một máy remote (chipyard và verilator trên cả hai máy).
 
 ## Script

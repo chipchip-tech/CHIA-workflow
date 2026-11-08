@@ -26,15 +26,10 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 - pip từng lấy `anyio`/`httpx`/`httpcore`/`h11` từ `~/.local` (user site). Đã khuyên chạy
   `conda env config vars set PYTHONNOUSERSITE=1 -n chia_env` rồi `pip install chialoops`
   lại. **Chưa xác nhận người dùng đã làm hay chưa.**
-- Đã clone: `~/work/chia` (repo CHIA), `~/chia-hello-world` (copy của
-  `examples/hello-world`, trong đó `cluster.yaml` đã được sửa giống
-  `configs/cluster-local.yaml`), `~/CHIA-workflow` (repo này).
-  **Lưu ý (23/10/2026):** `git pull` trong `~/CHIA-workflow` báo `not a git repository`,
-  tức thư mục này không phải bản git clone (có thể chép tay). Khi đưa code mới, phải kiểm
-  người dùng đã thật sự lấy được bản mới chưa (ví dụ `grep` một dòng mới trong file).
-  Người dùng **không `git push` được**: tài khoản GitHub đăng nhập bằng Google, không có
-  mật khẩu. Muốn đưa file từ máy họ lên repo thì dùng GitHub web (Upload files), `gh auth
-  login`, hoặc họ dán nội dung để session dựng lại và so `sha256sum`.
+- Sau khi cài lại (08/11/2026): `~/CHIA-workflow` là bản `git clone` thật (nhánh `setup`), cập nhật
+  bằng `git pull`. `chialoops` cài từ PyPI, không còn `~/work/chia`. Người dùng **không `git push`
+  được** (GitHub đăng nhập bằng Google): muốn đưa file từ máy họ lên repo thì dùng GitHub web,
+  `gh auth login`, hoặc họ dán nội dung để session dựng lại.
 - Chưa có máy remote nào.
 - Vivado 2025.1 cài ở `~/tools/Xilinx/2025.1` (bố cục `2025.1/Vivado/settings64.sh`; host in `v2025.1`).
 - **08/11/2026: đã gỡ sạch CHIA** (`chia_env`, `~/work/chia`, `~/chia_cache`, image `chia-*`, fork cũ;
@@ -173,11 +168,9 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
 
 ## Việc tiếp theo (gợi ý)
 
-1. Cài lại từ đầu (`docs/setup-bazzite.md` mục 3–4) rồi theo `docs/cluster-blocks.md`: kiểm chứng
-   `setup-chipyard-fork.sh --verify`, `chia-up-blocks.py`, `blocks_smoke.py --clean`; sau đó thử
-   `--fpga` và `--asic`.
-2. Chạy thử `examples/rtl_agent_loop.py` trên cluster 1 máy và sửa theo log.
-3. Xác nhận `PYTHONNOUSERSITE=1` cho `chia_env`.
-4. Khi có máy thứ hai: làm theo `docs/usage-remote.md`, kiểm chứng `cluster-lan.yaml`.
-5. Tuỳ chọn: thử các case
-   study trong `~/work/chia/examples/` (`timing_opt`, `riscv_extensions`, `gem5_align`,...).
+1. Mở project mới theo **Quy ước nhánh**, dùng cluster theo khối (`docs/cluster-blocks.md`).
+2. Lần đầu dùng khối vivado thật: chạy flow `fpga/` của Chipyard ra bitstream, ghi lỗi vào docs.
+3. Chạy thử `examples/rtl_agent_loop.py` (đang trỏ `/home/ray/chipyard` của image; muốn dùng fork thì
+   đổi sang đường dẫn fork và resource `chipyard` của cluster theo khối).
+4. Xác nhận `PYTHONNOUSERSITE=1` cho `chia_env`.
+5. Khi có máy thứ hai: làm theo `docs/usage-remote.md`, kiểm chứng `cluster-lan.yaml`.

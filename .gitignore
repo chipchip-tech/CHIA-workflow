@@ -1,2 +1,4 @@
 __pycache__/
 *.pyc
+# Sinh bởi scripts/chia-up-blocks.py
+cluster.gen.yaml
