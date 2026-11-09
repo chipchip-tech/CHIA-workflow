@@ -74,7 +74,8 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 - Tailscale/`tailnet:`, phương án Podman rootless.
 - Flow `fpga/` của Chipyard qua khối `vivado` (mới kiểm `vivado -version`).
 - `TimingSoCConfig` + `chipyard/TimingMixins.scala` (`docs/chipyard-timing-soc.md`, spec
-  `docs/timing-soc-config-spec.md`): SoC mẫu tối ưu timing. Build + 6 test `-p-` (ui/um/ua/uc) `EXIT=0` (09/11/2026); chưa kiểm `hello` imac, module. Đo bậc thang L0–L7 ở `project/timing-soc` (chưa mở).
+  `docs/timing-soc-config-spec.md`): SoC mẫu tối ưu timing. Build + 6 test `-p-` (ui/um/ua/uc) `EXIT=0` (09/11/2026); chưa kiểm module. `hello` imac không link được: toolchain chỉ có libc `lp64d`
+  (`can't link double-float modules with soft-float modules`), chương trình C cho core không FPU phải dùng runtime không libc. Đo bậc thang L0–L7 ở `project/timing-soc` (chưa mở).
 
 ## Các lỗi đã gặp trên Bazzite và cách sửa
 

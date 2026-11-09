@@ -4,8 +4,8 @@ Config mẫu để phần SoC nền (core + uncore) không giới hạn timing k
 [timing-soc-config-spec.md](timing-soc-config-spec.md).
 
 **Trạng thái (09/11/2026):** build Verilator trên fork đã chạy thật; `rv64ui-p-simple`, `rv64ui-p-add`,
-`rv64um-p-mul`, `rv64um-p-div`, `rv64ua-p-amoadd_d`, `rv64uc-p-rvc` đều `EXIT=0`. Chưa chạy `hello` `rv64imac`
-và kiểm tra module (mục 3–4). Chưa đo timing (việc của `project/timing-soc`).
+`rv64um-p-mul`, `rv64um-p-div`, `rv64ua-p-amoadd_d`, `rv64uc-p-rvc` đều `EXIT=0`. `hello` `rv64imac` **không link được**
+(giới hạn toolchain, xem mục 3). Chưa kiểm tra module (mục 4). Chưa đo timing (việc của `project/timing-soc`).
 
 ## Chọn config nào
 
@@ -56,8 +56,17 @@ Chỉ dùng test dạng `-p-` (không còn VM). Mỗi dòng in `<test> EXIT=<mã
 docker exec -it chipyard-dev bash -c 'source /home/ray/anaconda3/etc/profile.d/conda.sh && source env.sh && cd sims/verilator && for t in rv64ui-p-simple rv64ui-p-add rv64um-p-mul rv64um-p-div rv64ua-p-amoadd_d rv64uc-p-rvc; do make CONFIG=TimingSoCConfig run-binary BINARY=$RISCV/riscv64-unknown-elf/share/riscv-tests/isa/$t >/dev/null 2>&1; echo "$t EXIT=$?"; done'
 ```
 
-`hello` build không FPU (`rv64imac`/`lp64`). Nếu báo thiếu thư viện `lp64` thì toolchain không có multilib đó:
-ghi lại, bỏ qua bước này.
+**Giới hạn toolchain (kiểm chứng 09/11/2026):** toolchain của fork chỉ có `libc_nano`/`libgloss_htif` build cho
+`lp64d`. Build `hello` với `-march=rv64imac -mabi=lp64` ra lỗi link `can't link double-float modules with
+soft-float modules`. Dùng `-mabi=lp64d` thì GCC đòi `-march` có D, và crt của libgloss có lệnh float nên sẽ trap
+trên core không FPU. Vì vậy **chương trình C dùng libc (printf...) không chạy được trên `TimingSoCConfig`**
+với toolchain hiện tại. Cách làm cho project:
+
+- Runtime không libc: `crt.S` + `link.ld` + ghi trực tiếp HTIF/UART. Có mẫu ở `projects/rocket-fmax/functest/`
+  (`crt.S`, `link.ld`, `ft.h`) trên nhánh `project/rocket-fmax`. Build với `-march=rv64imac -mabi=lp64 -nostdlib`.
+- Hoặc build lại riscv-gnu-toolchain với multilib có `rv64imac/lp64` (tốn nhiều giờ, chưa thử).
+
+Lệnh đã thử (để tham khảo, hiện **lỗi link**):
 
 ```bash
 docker exec -it chipyard-dev bash -c 'source /home/ray/anaconda3/etc/profile.d/conda.sh && source env.sh && cd tests && riscv64-unknown-elf-gcc -std=gnu99 -O2 -fno-common -fno-builtin-printf -march=rv64imac -mabi=lp64 -specs=htif_nano.specs -static hello.c -o hello-imac.riscv && cd ../sims/verilator && make CONFIG=TimingSoCConfig run-binary BINARY=../../tests/hello-imac.riscv; echo EXIT=$?'

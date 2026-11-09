@@ -145,7 +145,7 @@ là bậc đó có thể chỉ chuyển đường găng sang chỗ khác cùng m
 
    Chỉ dùng test `-p-`: không còn VM nên `-v-` không chạy được.
 3. `hello` build với `-march=rv64imac -mabi=lp64` in ra lời chào. Nếu toolchain không có multilib `lp64`, ghi
-   lại và chỉ dùng các test ở bước 2.
+   lại và chỉ dùng các test ở bước 2. **Kết quả 09/11/2026:** không có multilib `lp64`, bước này bỏ qua.
 4. Không còn module `InclusiveCache`, `FPU`, `PTW`, `BTB` trong `generated-src`.
 
 **Timing:**
