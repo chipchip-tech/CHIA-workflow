@@ -71,7 +71,7 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 - Tailscale/`tailnet:`, phương án Podman rootless.
 - Flow `fpga/` của Chipyard qua khối `vivado` (mới kiểm `vivado -version`).
 - `MinimalSoCConfig` (`chipyard/`, `scripts/install-chipyard-config.sh`, `docs/chipyard-minimal-soc.md`):
-  SoC nền 1 Rocket + L2 128 KiB, script cài đã chạy thật trên fork (`MIXIN_OK`, 09/11/2026), chưa build.
+  SoC nền 1 Rocket + L2 128 KiB, cài và build Verilator đã chạy thật trên fork (09/11/2026), chưa chạy test/kiểm L2.
 
 ## Các lỗi đã gặp trên Bazzite và cách sửa
 

@@ -4,7 +4,8 @@ SoC gốc cho mọi project, chạy trên fork RISCVTutorial (Chipyard 1.10.0) �
 Lý do và các quyết định: [minimal-soc-config-spec.md](minimal-soc-config-spec.md).
 
 **Trạng thái:** bước 1 (cài) đã chạy thật trên fork (09/11/2026): `MIXIN_OK`, sha256 `2bf5c9d6…`.
-Build, chạy test và kiểm tra khối chưa chạy.
+Build Verilator đã chạy thật (09/11/2026, sau khi sửa `nBanks` → `WithNBanks`): ra
+`simulator-chipyard.harness-MinimalSoCConfig`. Chạy test và kiểm tra khối chưa chạy.
 
 ## Nội dung
 
