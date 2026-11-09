@@ -174,7 +174,7 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
 ## Việc tiếp theo (gợi ý)
 
 1. Mở project mới theo **Quy ước nhánh**, dùng cluster theo khối (`docs/cluster-blocks.md`), config kế thừa
-   `chipyard.MinimalSoCConfig`.
+   `chipyard.MinimalSoCConfig` (nền mặc định cho mọi project).
 2. Lần đầu dùng khối vivado thật: chạy flow `fpga/` của Chipyard ra bitstream, ghi lỗi vào docs.
 3. Chạy thử `examples/rtl_agent_loop.py` (đang trỏ `/home/ray/chipyard` của image; muốn dùng fork thì
    đổi sang đường dẫn fork và resource `chipyard` của cluster theo khối).
