@@ -2,7 +2,7 @@
 
 - Ngày: 09/11/2026
 - Nhánh: mixin và config trên `setup`; công cụ đo và các lần đo trên `project/timing-soc`
-- Trạng thái: **đã duyệt; phần `setup` đã viết (09/11/2026), chưa build**. Hướng dẫn: `docs/chipyard-timing-soc.md`.
+- Trạng thái: **phần `setup` xong và kiểm chứng (09/11/2026)**: build, 6 test `-p-`, module đã bỏ (PTW còn vỏ); `hello` libc không chạy được (toolchain chỉ có `lp64d`). Chưa đo timing. Hướng dẫn: `docs/chipyard-timing-soc.md`.
 - Liên quan: [minimal-soc-config-spec.md](minimal-soc-config-spec.md) (nền đầy đủ chức năng),
   `projects/rocket-fmax/REPORT.md` trên nhánh `project/rocket-fmax` (số liệu đường găng).
 

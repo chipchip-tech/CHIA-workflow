@@ -5,7 +5,8 @@ Config mẫu để phần SoC nền (core + uncore) không giới hạn timing k
 
 **Trạng thái (09/11/2026):** build Verilator trên fork đã chạy thật; `rv64ui-p-simple`, `rv64ui-p-add`,
 `rv64um-p-mul`, `rv64um-p-div`, `rv64ua-p-amoadd_d`, `rv64uc-p-rvc` đều `EXIT=0`. `hello` `rv64imac` **không link được**
-(giới hạn toolchain, xem mục 3). Chưa kiểm tra module (mục 4). Chưa đo timing (việc của `project/timing-soc`).
+(giới hạn toolchain, xem mục 3). Kiểm tra module (mục 4): không còn
+`InclusiveCache`, `FPU`, `BTB`; `PTW` vẫn còn (xem mục 4). Chưa đo timing (việc của `project/timing-soc`).
 
 ## Chọn config nào
 
@@ -79,5 +80,9 @@ Mỗi tên in số file có chứa module đó. Cần tất cả là `0`:
 ```bash
 cd ~/tools/RISCVTutorial/sims/verilator/generated-src/chipyard.harness.TestHarness.TimingSoCConfig/gen-collateral && for m in InclusiveCache FPU PTW BTB; do echo "$m $(grep -l "^module $m\b" *.sv *.v 2>/dev/null | wc -l)"; done
 ```
+
+**`PTW` luôn còn 1 module:** `RocketTile` luôn tạo page-table walker, kể cả khi `useVM = false`. Kiểm chứng
+09/11/2026: module `PTW` còn 244 dòng Verilog, so với 1015 dòng ở `MinimalSoCConfig`. Nó chỉ còn là vỏ, đầu vào
+là hằng số, nên synth sẽ xoá. Cần thấy `PTW 1` là bình thường, còn ba khối kia phải là `0`.
 
 Gửi lại: output script cài, đuôi `build-timing.log` (hoặc lỗi đầu tiên), các dòng `EXIT=`, kết quả bước 4.
