@@ -28,7 +28,6 @@ Cài máy theo [docs/setup-bazzite.md](docs/setup-bazzite.md) (mục 1–4), r�
 - [docs/workflow-phases.md](docs/workflow-phases.md): khung chung cho mọi project: Simulate (bắt buộc) rồi rẽ sang FPGA và/hoặc ASIC; mục tiêu, tiêu chí vào/ra, quy tắc chung của từng pha.
 - [docs/cluster-blocks.md](docs/cluster-blocks.md): cluster theo khối bật/tắt được: fork Chipyard mount từ host (RISCVTutorial), Verilator, Claude Code, Vivado (FPGA), OpenROAD-flow-scripts (ASIC); dựng fork, bật cluster, lỗi đã gặp.
 - [docs/chipyard-minimal-soc.md](docs/chipyard-minimal-soc.md): SoC nền tối giản `MinimalSoCConfig` (1 Rocket, L2 128 KiB) cho mọi project: cài vào fork, build, kiểm tra, kế thừa. Spec: [docs/minimal-soc-config-spec.md](docs/minimal-soc-config-spec.md).
-- [docs/chipyard-timing-soc.md](docs/chipyard-timing-soc.md): SoC mẫu tối ưu timing `TimingSoCConfig` (RV64IMAC, không L2/MMU/BTB) và các mixin cắt gọn Rocket. Spec: [docs/timing-soc-config-spec.md](docs/timing-soc-config-spec.md).
 - [docs/prompt-template.md](docs/prompt-template.md): template prompt để mở session Claude Code mới cho một project, kèm bước phỏng vấn để dựng prompt.
 
 ## Config
@@ -51,7 +50,6 @@ Cài máy theo [docs/setup-bazzite.md](docs/setup-bazzite.md) (mục 1–4), r�
 ## Chipyard
 
 - [chipyard/MinimalSoCConfig.scala](chipyard/MinimalSoCConfig.scala): SoC nền tối giản cho mọi project.
-- [chipyard/TimingMixins.scala](chipyard/TimingMixins.scala), [chipyard/TimingSoCConfig.scala](chipyard/TimingSoCConfig.scala): mixin cắt gọn Rocket và SoC mẫu tối ưu timing.
 
 ## Docker
 
