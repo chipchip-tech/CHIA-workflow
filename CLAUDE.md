@@ -60,6 +60,9 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   `Vivado v2024.2` vì image `chia-chisel-build` có sẵn `/usr/local/bin/vivado`; đã sửa PATH. Sau đó lộ lỗi thật: `settings64.sh` ghi cứng `/var/home/...`, nên Xilinx
   phải mount đúng đường dẫn thật (`XILINX_DIR`). Chạy lại (09/11/2026): `which` ra
   `/var/home/dingus/tools/Xilinx/2025.1/Vivado/bin/vivado`, `vivado v2025.1`, `KẾT QUẢ: OK`.
+- `MinimalSoCConfig` (`chipyard/`, `scripts/install-chipyard-config.sh`, `docs/chipyard-minimal-soc.md`,
+  09/11/2026): SoC nền 1 Rocket + L2 128 KiB trên fork. Build Verilator, `rv64ui-p-simple` và `hello.riscv`
+  `EXIT=0`, L2 131072 byte, không có GPIO/SPI/I2C/PWM/scratchpad. Project mới kế thừa config này.
 - `chia down` không xoá được container asic (`scoped ray stop ... psutil`): `python3` trên PATH của image là
   `/opt/orfs-python` (3.14), không có `psutil`. Dockerfile đã cài `psutil`; kiểm chứng 09/11/2026:
   `ok=True`, container bị xoá sạch.
@@ -92,6 +95,8 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
    `-f`); `env.sh` của fork gọi `conda activate` nên phải `source .../anaconda3/etc/profile.d/conda.sh`
    trước. `/home` là symlink tới `/var/home`: fork ghi cứng đường dẫn thật, mount phải dùng `realpath`.
    `TutorialStarterConfig` cố ý không có core, build lỗi; thử bằng `RocketConfig`.
+   Chipyard 1.10: `WithInclusiveCache` không có tham số `nBanks` (comment trong `TutorialConfigs.scala`
+   ghi sai), dùng `WithNBanks(n)`. Thư mục build là `generated-src/chipyard.harness.TestHarness.<Config>`.
 
 ## Ghi chú kỹ thuật về CHIA (đã đối chiếu mã nguồn)
 
@@ -168,7 +173,8 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
 
 ## Việc tiếp theo (gợi ý)
 
-1. Mở project mới theo **Quy ước nhánh**, dùng cluster theo khối (`docs/cluster-blocks.md`).
+1. Mở project mới theo **Quy ước nhánh**, dùng cluster theo khối (`docs/cluster-blocks.md`), config kế thừa
+   `chipyard.MinimalSoCConfig`.
 2. Lần đầu dùng khối vivado thật: chạy flow `fpga/` của Chipyard ra bitstream, ghi lỗi vào docs.
 3. Chạy thử `examples/rtl_agent_loop.py` (đang trỏ `/home/ray/chipyard` của image; muốn dùng fork thì
    đổi sang đường dẫn fork và resource `chipyard` của cluster theo khối).
