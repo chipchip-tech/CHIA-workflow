@@ -3,8 +3,8 @@
 SoC gốc cho mọi project, chạy trên fork RISCVTutorial (Chipyard 1.10.0) ở `~/tools/RISCVTutorial`.
 Lý do và các quyết định: [minimal-soc-config-spec.md](minimal-soc-config-spec.md).
 
-**Trạng thái:** chưa chạy thật. File Scala mới qua đối chiếu với mã nguồn Chipyard 1.10.0 upstream,
-script cài mới thử trên bản clone thiếu submodule.
+**Trạng thái:** bước 1 (cài) đã chạy thật trên fork (09/11/2026): `MIXIN_OK`, sha256 `2bf5c9d6…`.
+Build, chạy test và kiểm tra khối chưa chạy.
 
 ## Nội dung
 
@@ -35,6 +35,14 @@ Sửa `chipyard/MinimalSoCConfig.scala` trong repo này rồi chạy lại scrip
 
 Dùng container `chipyard-dev` như [cluster-blocks.md](cluster-blocks.md) mục "Làm việc tay với fork"
 (đừng build cùng lúc với khối `chipyard` của CHIA). Chạy trong `tmux`, lần đầu mất khá lâu vì phải elaborate:
+
+Chưa có container thì tạo (báo trùng tên thì `docker start chipyard-dev`):
+
+```bash
+docker run -dit --name chipyard-dev --shm-size=10.24gb -v $(realpath ~/tools/RISCVTutorial):$(realpath ~/tools/RISCVTutorial):z -w $(realpath ~/tools/RISCVTutorial) ghcr.io/ucb-bar/chia-chisel-build:latest bash
+```
+
+Build:
 
 ```bash
 docker exec -it chipyard-dev bash -c 'source /home/ray/anaconda3/etc/profile.d/conda.sh && source env.sh && cd sims/verilator && make -j16 CONFIG=MinimalSoCConfig 2>&1 | tee build-minimal.log'
