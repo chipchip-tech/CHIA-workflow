@@ -2,7 +2,7 @@
 
 - Ngày: 09/11/2026
 - Nhánh: `setup` (dùng chung cho mọi project)
-- Trạng thái: **chờ người dùng duyệt spec**. Chưa viết code.
+- Trạng thái: **ý tưởng đã được duyệt (09/11/2026)**. Chưa viết code.
 
 ## 1. Mục tiêu
 
@@ -26,19 +26,21 @@ trong `docs/workflow-phases.md` và sẽ có spec riêng.
 
 ## 3. Nội dung SoC
 
-Cơ sở là Chipyard nhánh `chia_artifact`, cùng nhánh với image CHIA (Ubuntu 22.04). Mình đã
-đọc `AbstractConfig.scala` và `RocketConfigs.scala` của nhánh này.
+Cơ sở là fork RISCVTutorial (Chipyard 1.10.0, nhánh `base`) ở `~/tools/RISCVTutorial`, khối
+`chipyard` trong `docs/cluster-blocks.md`. Mình đã đối chiếu `AbstractConfig.scala` và
+`RocketConfigs.scala` của tag `1.10.0` upstream. Fork có thể khác upstream, nên lần cài đầu
+tiên phải `grep` lại các mixin (mục 5, bước 1).
 
 **Giữ:**
 
 | Khối | Thực hiện bằng |
 |---|---|
-| 1 Rocket core (RV64GC, có FPU) | `freechips.rocketchip.rocket.WithNHugeCores(1)` |
+| 1 Rocket core (RV64GC, có FPU) | `freechips.rocketchip.subsystem.WithNBigCores(1)` (cùng mixin `RocketConfig` 1.10 dùng) |
 | L1 I$/D$ | Mặc định của core trên |
 | L2 nhỏ: 1 bank, 4 way, 128 KiB | `freechips.rocketchip.subsystem.WithInclusiveCache(nBanks=1, nWays=4, capacityKB=128)` (mặc định là 512 KiB) |
-| 1 kênh bộ nhớ AXI4 | `WithNMemoryChannels(1)`, có sẵn trong `AbstractConfig` |
+| 1 kênh bộ nhớ AXI4 | Mặc định của `AbstractConfig` |
 | UART | `chipyard.config.WithUART`, có sẵn |
-| Serial-TL / TSI (nạp chương trình trong sim) | `testchipip.serdes.WithSerialTL`, có sẵn |
+| Serial-TL / TSI (nạp chương trình trong sim) | `testchipip.WithDefaultSerialTL`, có sẵn |
 | BootROM | `chipyard.config.WithBootROM`, có sẵn |
 | CLINT, PLIC | Có sẵn trong `BaseConfig` |
 | Debug (JTAG DTM) | Có sẵn |
@@ -47,16 +49,14 @@ Cơ sở là Chipyard nhánh `chia_artifact`, cùng nhánh với image CHIA (Ubu
 
 | Khối | Thực hiện bằng | Ghi chú |
 |---|---|---|
-| Scratchpad 64 KiB trên mbus | `testchipip.soc.WithNoScratchpads` | Đã có DRAM qua mbus |
 | GPIO, SPI, I2C, PWM, block device, NIC | Không cần mixin | `AbstractConfig` vốn không thêm các khối này. IOBinder/HarnessBinder của chúng chỉ chạy khi khối có mặt |
 | Accelerator (Gemmini, Saturn...), BOOM | Không cần mixin | Không được thêm vào |
 
-**Phát hiện khi đọc mã:** `RocketConfig` gốc gần như đã tối giản. Khác biệt thực chất chỉ
-là scratchpad và kích thước L2. Lợi ích chính của `MinimalSoCConfig` là có **một điểm gốc
+**Phát hiện khi đọc mã:** `RocketConfig` của 1.10 gần như đã tối giản: `AbstractConfig` không có
+scratchpad hay ngoại vi thừa. Khác biệt thực chất chỉ là kích thước L2. Lợi ích chính của `MinimalSoCConfig` là có **một điểm gốc
 ổn định, đặt tên rõ**, để các project kế thừa và để so sánh diện tích/timing.
 
-**Để mặc định, không đụng tới:** custom boot pin, boot-addr-reg, clock tap, tần số các bus
-(500 MHz). Bỏ chúng sẽ phải sửa HarnessBinder và bootROM, nên rủi ro cao mà lợi ít. Nếu
+**Để mặc định, không đụng tới:** clocking, tần số bus và các IOBinder/HarnessBinder. Bỏ chúng sẽ phải sửa HarnessBinder và bootROM, nên rủi ro cao mà lợi ít. Nếu
 project ASIC cần thì sẽ xem lại.
 
 ### Bản nháp Config
@@ -68,9 +68,8 @@ import org.chipsalliance.cde.config.Config
 
 // SoC nền cho các project CHIA-workflow. Xem docs/chipyard-minimal-soc.md.
 class MinimalSoCConfig extends Config(
-  new testchipip.soc.WithNoScratchpads ++
   new freechips.rocketchip.subsystem.WithInclusiveCache(nBanks = 1, nWays = 4, capacityKB = 128) ++
-  new freechips.rocketchip.rocket.WithNHugeCores(1) ++
+  new freechips.rocketchip.subsystem.WithNBigCores(1) ++
   new chipyard.config.AbstractConfig)
 ```
 
@@ -79,8 +78,8 @@ Project kế thừa như sau:
 
 **Rủi ro cần kiểm khi chạy thật:** `WithInclusiveCache` có thể được áp hai lần (một lần ở
 đây, một lần trong `AbstractConfig`). Mixin đứng trước trong chuỗi `++` sẽ thắng. Nếu
-elaborate báo lỗi hoặc L2 vẫn là 512 KiB, đổi sang mixin chỉ chỉnh kích thước (ví dụ
-`WithL2Capacity`, nếu có trong nhánh này).
+elaborate báo lỗi hoặc L2 vẫn là 512 KiB thì xem lại thứ tự mixin. Chipyard 1.10 đã dùng
+đúng cú pháp này (`RoCCAcceleratorConfigs.scala`: `WithInclusiveCache(nWays=16, capacityKB=2048)`).
 
 ## 4. File dự kiến (chờ duyệt)
 
@@ -94,8 +93,8 @@ elaborate báo lỗi hoặc L2 vẫn là 512 KiB, đổi sang mixin chỉ chỉn
 
 ### Script `install-chipyard-config.sh`
 
-- Cú pháp: `install-chipyard-config.sh <đường-dẫn-chipyard>`. Mặc định dùng
-  `$CHIPYARD_DIR`; nếu chưa đặt thì báo lỗi, không đoán.
+- Cú pháp: `install-chipyard-config.sh [đường-dẫn-chipyard]`. Mặc định là
+  `~/tools/RISCVTutorial` (dùng `realpath`, vì `/home` là symlink tới `/var/home`).
 - Kiểm tra `<chipyard>/generators/chipyard/src/main/scala/config/` có tồn tại. Nếu
   không có thì báo lỗi rõ ràng và thoát với mã khác 0.
 - Copy (không tạo symlink, để container mount vẫn đọc được) tất cả `chipyard/*.scala` vào
@@ -103,22 +102,22 @@ elaborate báo lỗi hoặc L2 vẫn là 512 KiB, đổi sang mixin chỉ chỉn
   bỏ qua.
 - In `sha256sum` của file đã copy, để người dùng gửi lại xác nhận đúng phiên bản (vì
   `~/CHIA-workflow` trên máy họ không phải bản git clone).
-- Dùng được cả trên host và trong container
-  (`docker exec ... bash install-chipyard-config.sh /root/chipyard`). Đường dẫn
-  Chipyard trong image sẽ xác nhận khi chạy thật.
+- Chạy trên host. Container khối `chipyard` mount cùng thư mục, nên không cần copy lần nữa
+  (sửa tay trên host, build trong container, theo `docs/cluster-blocks.md`).
+- `grep` các mixin `WithNBigCores` và `WithInclusiveCache` trong fork. Nếu không thấy thì cảnh báo.
 
 ## 5. Tiêu chí hoàn thành (người dùng chạy trên máy, gửi log)
 
 Claude không chạy được lệnh trên máy người dùng, nên mỗi bước dưới đây có lệnh cụ thể trong
 `docs/chipyard-minimal-soc.md`:
 
-1. **Cài:** script chạy xong, in đúng `sha256sum`.
-2. **Elaborate + build:** trong `sims/verilator`, lệnh
-   `make CONFIG=MinimalSoCConfig -j 16` kết thúc với mã 0.
-3. **Chạy:** `make CONFIG=MinimalSoCConfig run-binary BINARY=<hello.riscv>` in ra lời
-   chào qua UART và kết thúc pass.
+1. **Cài:** script chạy xong, in đúng `sha256sum`, không có cảnh báo thiếu mixin.
+2. **Elaborate + build:** trong container khối `chipyard`, ở `sims/verilator`, lệnh
+   `make CONFIG=MinimalSoCConfig -j 16` kết thúc với mã 0 (tuỳ chọn: chạy lại qua
+   `ChiselBuildNode`).
+3. **Chạy:** `rv64ui-p-simple` ra `EXIT=0`, giống lần kiểm chứng `RocketConfig`. Thêm
+   `hello.riscv` in ra lời chào qua UART.
 4. **Đã bỏ được khối:** so sánh với `RocketConfig`:
-   - `grep -c` module scratchpad trong `generated-src/*MinimalSoCConfig*/` cho ra 0.
    - L2 trong file `.dts` hoặc `*.memconf` của bản build là 128 KiB.
    - Không có module GPIO/SPI/I2C.
 5. Cập nhật `CLAUDE.md` và docs, chuyển các mục trên sang "đã kiểm chứng".
@@ -130,4 +129,4 @@ Nếu bước 2 hoặc 3 lỗi, dùng skill systematic-debugging dựa trên log
 - Biến thể FPGA (board cụ thể) và ASIC (bỏ phần chỉ có trong sim).
 - Bỏ debug, boot pin, clock tap.
 - Gọn image hoặc mã nguồn để build nhanh hơn.
-- Đưa `MinimalSoCConfig` vào job CHIA (`ChiselBuildNode`): làm sau khi build tay đã chạy.
+- Biến `MinimalSoCConfig` thành mặc định của `blocks_smoke.py`.
