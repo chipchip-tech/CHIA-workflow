@@ -37,7 +37,7 @@ tiên phải `grep` lại các mixin (mục 5, bước 1).
 |---|---|
 | 1 Rocket core (RV64GC, có FPU) | `freechips.rocketchip.subsystem.WithNBigCores(1)` (cùng mixin `RocketConfig` 1.10 dùng) |
 | L1 I$/D$ | Mặc định của core trên |
-| L2 nhỏ: 1 bank, 4 way, 128 KiB | `freechips.rocketchip.subsystem.WithInclusiveCache(nBanks=1, nWays=4, capacityKB=128)` (mặc định là 512 KiB) |
+| L2 nhỏ: 1 bank, 4 way, 128 KiB | `WithInclusiveCache(nWays=4, capacityKB=128)` + `WithNBanks(1)` (1.10 không có tham số `nBanks`, sửa sau lỗi build 09/11/2026) (mặc định là 512 KiB) |
 | 1 kênh bộ nhớ AXI4 | Mặc định của `AbstractConfig` |
 | UART | `chipyard.config.WithUART`, có sẵn |
 | Serial-TL / TSI (nạp chương trình trong sim) | `testchipip.WithDefaultSerialTL`, có sẵn |
@@ -68,7 +68,8 @@ import org.chipsalliance.cde.config.Config
 
 // SoC nền cho các project CHIA-workflow. Xem docs/chipyard-minimal-soc.md.
 class MinimalSoCConfig extends Config(
-  new freechips.rocketchip.subsystem.WithInclusiveCache(nBanks = 1, nWays = 4, capacityKB = 128) ++
+  new freechips.rocketchip.subsystem.WithInclusiveCache(nWays = 4, capacityKB = 128) ++
+  new freechips.rocketchip.subsystem.WithNBanks(1) ++
   new freechips.rocketchip.subsystem.WithNBigCores(1) ++
   new chipyard.config.AbstractConfig)
 ```

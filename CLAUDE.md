@@ -94,6 +94,8 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
    `-f`); `env.sh` của fork gọi `conda activate` nên phải `source .../anaconda3/etc/profile.d/conda.sh`
    trước. `/home` là symlink tới `/var/home`: fork ghi cứng đường dẫn thật, mount phải dùng `realpath`.
    `TutorialStarterConfig` cố ý không có core, build lỗi; thử bằng `RocketConfig`.
+   Chipyard 1.10: `WithInclusiveCache` không có tham số `nBanks` (comment trong `TutorialConfigs.scala`
+   ghi sai), dùng `WithNBanks(n)`. Thư mục build là `generated-src/chipyard.harness.TestHarness.<Config>`.
 
 ## Ghi chú kỹ thuật về CHIA (đã đối chiếu mã nguồn)
 

@@ -14,6 +14,8 @@ import org.chipsalliance.cde.config.Config
 //
 // Mixin đứng trước trong chuỗi `++` thắng, nên WithInclusiveCache ở đây đè cái trong AbstractConfig.
 class MinimalSoCConfig extends Config(
-  new freechips.rocketchip.subsystem.WithInclusiveCache(nBanks = 1, nWays = 4, capacityKB = 128) ++
+  // Chipyard 1.10: WithInclusiveCache không có tham số nBanks; số bank đặt bằng WithNBanks.
+  new freechips.rocketchip.subsystem.WithInclusiveCache(nWays = 4, capacityKB = 128) ++
+  new freechips.rocketchip.subsystem.WithNBanks(1) ++
   new freechips.rocketchip.subsystem.WithNBigCores(1) ++
   new chipyard.config.AbstractConfig)

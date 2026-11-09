@@ -63,7 +63,7 @@ docker exec -it chipyard-dev bash -c 'source /home/ray/anaconda3/etc/profile.d/c
 ## 3. Kiểm tra đã bỏ đúng khối
 
 ```bash
-cd ~/tools/RISCVTutorial/sims/verilator/generated-src/chipyard.TestHarness.MinimalSoCConfig && grep -o 'cache-size = <[0-9]*>' *.dts | sort | uniq -c; ls -R | grep -ciE 'gpio|spi|i2c|pwm|scratchpad'
+cd ~/tools/RISCVTutorial/sims/verilator/generated-src/chipyard.harness.TestHarness.MinimalSoCConfig && grep -o 'cache-size = <[0-9]*>' *.dts | sort | uniq -c; ls -R | grep -ciE 'gpio|spi|i2c|pwm|scratchpad'
 ```
 
 Cần thấy L2 `cache-size = <131072>` (128 KiB; các dòng 16384 là L1) và số đếm thứ hai là `0`.
