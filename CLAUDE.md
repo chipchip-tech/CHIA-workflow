@@ -73,6 +73,8 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 - Phần linger trong `check-bazzite-env.sh` (thêm sau lần chạy script).
 - Tailscale/`tailnet:`, phương án Podman rootless.
 - Flow `fpga/` của Chipyard qua khối `vivado` (mới kiểm `vivado -version`).
+- `TimingSoCConfig` + `chipyard/TimingMixins.scala` (`docs/chipyard-timing-soc.md`, spec
+  `docs/timing-soc-config-spec.md`): SoC mẫu tối ưu timing, chưa build. Đo bậc thang L0–L7 ở `project/timing-soc` (chưa mở).
 
 ## Các lỗi đã gặp trên Bazzite và cách sửa
 
@@ -173,10 +175,11 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
 
 ## Việc tiếp theo (gợi ý)
 
-1. Mở project mới theo **Quy ước nhánh**, dùng cluster theo khối (`docs/cluster-blocks.md`), config kế thừa
+1. Kiểm chứng `TimingSoCConfig` (`docs/chipyard-timing-soc.md`), rồi mở `project/timing-soc` để đo theo spec mục 6.
+2. Mở project mới theo **Quy ước nhánh**, dùng cluster theo khối (`docs/cluster-blocks.md`), config kế thừa
    `chipyard.MinimalSoCConfig`.
-2. Lần đầu dùng khối vivado thật: chạy flow `fpga/` của Chipyard ra bitstream, ghi lỗi vào docs.
-3. Chạy thử `examples/rtl_agent_loop.py` (đang trỏ `/home/ray/chipyard` của image; muốn dùng fork thì
+3. Lần đầu dùng khối vivado thật: chạy flow `fpga/` của Chipyard ra bitstream, ghi lỗi vào docs.
+4. Chạy thử `examples/rtl_agent_loop.py` (đang trỏ `/home/ray/chipyard` của image; muốn dùng fork thì
    đổi sang đường dẫn fork và resource `chipyard` của cluster theo khối).
-4. Xác nhận `PYTHONNOUSERSITE=1` cho `chia_env`.
-5. Khi có máy thứ hai: làm theo `docs/usage-remote.md`, kiểm chứng `cluster-lan.yaml`.
+5. Xác nhận `PYTHONNOUSERSITE=1` cho `chia_env`.
+6. Khi có máy thứ hai: làm theo `docs/usage-remote.md`, kiểm chứng `cluster-lan.yaml`.

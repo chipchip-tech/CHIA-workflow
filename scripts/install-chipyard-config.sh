@@ -39,7 +39,9 @@ done
 
 # Fork có thể khác Chipyard 1.10.0 upstream: kiểm tra các mixin MinimalSoCConfig dùng.
 WARN=0
-for pat in "class WithNBigCores" "class WithInclusiveCache" "class WithNBanks" "class AbstractConfig"; do
+for pat in "class WithNBigCores" "class WithInclusiveCache" "class WithNBanks" "class AbstractConfig" \
+           "class WithoutFPU" "class WithBroadcastManager" "class WithL1DCacheWays" "class WithL1ICacheWays" \
+           "case class MulDivParams" "fastLoadWord" "nL2TLBEntries"; do
     if ! grep -rqs --include="*.scala" "$pat" "$CY/generators"; then
         echo "CẢNH BÁO: không thấy '$pat' trong fork; MinimalSoCConfig có thể không elaborate được." >&2
         WARN=1
