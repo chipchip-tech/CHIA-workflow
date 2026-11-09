@@ -1,0 +1,137 @@
+# CHIA cluster một máy, chia theo khối. KHÔNG `chia up` trực tiếp file này:
+# dùng scripts/chia-up-blocks.py để bật/tắt khối và sinh cluster.gen.yaml.
+#
+#   Khối       Resource        Mặc định   Trạng thái
+#   chipyard   chipyard        bật        đã chạy thật (fork RISCVTutorial, 08/11/2026)
+#   verilator  verilator_run   bật        đã chạy thật
+#   claude     claude_creds    bật        đã chạy thật (project rocket-fmax)
+#   vivado     vivado          tắt        đã chạy thật    (--fpga; mới kiểm vivado -version)
+#   asic       asic            tắt        đã chạy thật    (--asic)
+#
+# Biến môi trường (chia-up-blocks.py đặt giá trị mặc định nếu thiếu):
+#   THIS_MACHINE    IP LAN của máy (tự dò)
+#   CHIPYARD_FORK   đường dẫn tuyệt đối tới fork Chipyard đã dựng xong (có env.sh),
+#                   mặc định ~/tools/RISCVTutorial
+#   ORFS_DIR        OpenROAD-flow-scripts chép ra host (scripts/setup-orfs.sh),
+#                   mặc định ~/tools/OpenROAD-flow-scripts
+#   XILINX_DIR      thư mục cài Xilinx, mặc định ~/tools/Xilinx
+#   VIVADO_VERSION  thư mục phiên bản trong XILINX_DIR (ví dụ 2025.1)
+#
+# Xem docs/cluster-blocks.md.
+
+cluster_name: default
+
+provider:
+    head_ip: ${THIS_MACHINE}
+
+auth:
+    ssh_user: ${USER}
+
+available_node_types:
+    # --- Khối chipyard: build Chisel/Verilog bằng fork Chipyard mount từ host. ---
+    # CHIA chạy worker_setup_commands và `ray start` trong CÙNG một shell, nên biến môi
+    # trường của env.sh đi tiếp vào Ray worker. Phải nạp conda.sh trước env.sh.
+    chipyard:
+        resources: {"chipyard": 1}
+        num_workers: 1
+        compatible_ips: ["${THIS_MACHINE}"]
+        worker_setup_commands:
+            - "source /home/ray/anaconda3/etc/profile.d/conda.sh && source ${CHIPYARD_FORK}/env.sh && export PATH=$PATH:/home/ray/anaconda3/bin"
+        docker:
+            image: "ghcr.io/ucb-bar/chia-chisel-build:latest"
+            container_name: "chia-chipyard-${USER}"
+            pull_before_run: false
+            pull_timeout: 7200
+            run_options:
+                - --shm-size=10.24gb
+                - "-v ${CHIPYARD_FORK}:${CHIPYARD_FORK}:z"
+
+    # --- Khối verilator: chạy mô phỏng (nhận binary từ khối chipyard). ---
+    verilator:
+        resources: {"verilator_run": 1}
+        num_workers: 1
+        compatible_ips: ["${THIS_MACHINE}"]
+        docker:
+            image: "ghcr.io/ucb-bar/chia-verilator-run:latest"
+            container_name: "chia-verilator-${USER}"
+            pull_before_run: false
+            run_options:
+                - --ulimit nofile=65536:65536
+                - --shm-size=10.24gb
+
+    # --- Khối claude: agent Claude Code đăng nhập trên host. ---
+    # Trước lần đầu: chạy `claude` trên host, rồi `cp ~/.claude.json ~/.claude/.claude.json`.
+    claude:
+        resources: {"claude_creds": 1}
+        num_workers: 1
+        compatible_ips: ["${THIS_MACHINE}"]
+        docker:
+            image: "ghcr.io/ucb-bar/chia-claude-code:latest"
+            container_name: "chia-claude-${USER}"
+            pull_before_run: false
+            run_options:
+                - "--user $(id -u):$(id -g)"
+                - "-v ~/.claude:/home/ray/.claude:z"
+            run_setup_commands:
+                - echo "user:x:$(id -u):$(id -g)::/home/ray:/bin/bash" >> /etc/passwd
+                - cp /home/ray/.claude/.claude.json /home/ray/.claude.json
+                - python3 -c "import json,os; p=os.path.expanduser('~/.claude/settings.json'); d=json.load(open(p)) if os.path.exists(p) else {}; d['skipDangerousModePermissionPrompt']=True; json.dump(d,open(p,'w'))"
+
+    # --- Khối vivado (FPGA, tuỳ chọn): flow fpga/ của fork + Vivado trên host (chỉ đọc). ---
+    # Image chia-chisel-build có sẵn /usr/local/bin/vivado (v2024.2, kiểm chứng 08/11/2026): đặt bin của
+    # Vivado trên host lên ĐẦU PATH. settings64.sh ghi cứng đường dẫn thật lúc cài (/var/home/...),
+    # nên Xilinx mount đúng cùng đường dẫn như fork.
+    # Cùng image và cùng fork với khối chipyard. label=disable thay cho relabel (:z) cả cây Xilinx.
+    vivado:
+        resources: {"vivado": 1}
+        num_workers: 0
+        compatible_ips: ["${THIS_MACHINE}"]
+        worker_setup_commands:
+            - "source /home/ray/anaconda3/etc/profile.d/conda.sh && source ${CHIPYARD_FORK}/env.sh && source ${XILINX_DIR}/${VIVADO_VERSION}/Vivado/settings64.sh && export PATH=${XILINX_DIR}/${VIVADO_VERSION}/Vivado/bin:$PATH:/home/ray/anaconda3/bin"
+        docker:
+            image: "ghcr.io/ucb-bar/chia-chisel-build:latest"
+            container_name: "chia-vivado-${USER}"
+            pull_before_run: false
+            run_options:
+                - --shm-size=10.24gb
+                - --security-opt label=disable
+                - "-v ${CHIPYARD_FORK}:${CHIPYARD_FORK}"
+                - "-v ${XILINX_DIR}:${XILINX_DIR}:ro"
+
+    # --- Khối asic (tuỳ chọn): OpenROAD-flow-scripts. Image tự build: docker/orfs-ray.Dockerfile. ---
+    # ORFS trên host (sửa tay được) mount đè lên /OpenROAD-flow-scripts của image.
+    # Fork được mount để đọc Verilog sinh ra từ khối chipyard.
+    asic:
+        resources: {"asic": 1}
+        num_workers: 0
+        compatible_ips: ["${THIS_MACHINE}"]
+        worker_setup_commands:
+            - "source /OpenROAD-flow-scripts/env.sh"
+        docker:
+            image: "chia-orfs:latest"
+            container_name: "chia-asic-${USER}"
+            pull_before_run: false
+            run_options:
+                - --shm-size=4gb
+                - --memory=12g       # flow chạy quá tay chỉ làm chết container này
+                # Image ORFS chạy bằng root: ép UID của host để file sinh ra vẫn sửa được trên host.
+                - "--user $(id -u):$(id -g)"
+                - "-e HOME=/tmp"
+                - "-v ${ORFS_DIR}:/OpenROAD-flow-scripts:z"
+                - "-v ${CHIPYARD_FORK}:${CHIPYARD_FORK}:z"
+
+head_env_commands: ["source ~/.bashrc && conda activate chia_env"]
+head_setup_commands: ["source ~/.bashrc && conda activate chia_env"]
+
+# Bazzite: systemd-logind giết mọi tiến trình của phiên SSH khi phiên đóng, nên Ray head
+# phải chạy trong user scope riêng (cần `loginctl enable-linger`).
+head_start_ray_commands:
+    - "source ~/.bashrc && conda activate chia_env && ray stop"
+    - "source ~/.bashrc && conda activate chia_env && \
+        systemd-run --user --scope --quiet \
+        ray start --head --port=6379 --node-ip-address=${THIS_MACHINE} \
+        --include-dashboard=True --dashboard-agent-listen-port=0 --disable-usage-stats"
+
+worker_start_ray_commands:
+    - "ray stop"
+    - "ray start --address=$RAY_HEAD_IP:6379 --dashboard-agent-listen-port=0"
