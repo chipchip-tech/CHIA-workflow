@@ -3,8 +3,9 @@
 Config mẫu để phần SoC nền (core + uncore) không giới hạn timing khi lên FPGA/ASIC. Lý do và quyết định:
 [timing-soc-config-spec.md](timing-soc-config-spec.md).
 
-**Trạng thái:** chưa chạy thật. Mixin đã đối chiếu với mã nguồn Chipyard 1.10.0 / rocket-chip `47f7b71`, chưa
-build trên fork. Chưa đo timing (việc của `project/timing-soc`).
+**Trạng thái (09/11/2026):** build Verilator trên fork đã chạy thật; `rv64ui-p-simple`, `rv64ui-p-add`,
+`rv64um-p-mul`, `rv64um-p-div`, `rv64ua-p-amoadd_d`, `rv64uc-p-rvc` đều `EXIT=0`. Chưa chạy `hello` `rv64imac`
+và kiểm tra module (mục 3–4). Chưa đo timing (việc của `project/timing-soc`).
 
 ## Chọn config nào
 
