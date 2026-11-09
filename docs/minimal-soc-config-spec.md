@@ -2,7 +2,7 @@
 
 - Ngày: 09/11/2026
 - Nhánh: `setup` (dùng chung cho mọi project)
-- Trạng thái: **ý tưởng đã được duyệt (09/11/2026)**. Chưa viết code.
+- Trạng thái: **đã triển khai (09/11/2026)**, chưa chạy thật. Hướng dẫn chạy: `docs/chipyard-minimal-soc.md`.
 
 ## 1. Mục tiêu
 

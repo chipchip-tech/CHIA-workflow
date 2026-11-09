@@ -27,6 +27,7 @@ Cài máy theo [docs/setup-bazzite.md](docs/setup-bazzite.md) (mục 1–4), r�
 - [docs/usage-remote.md](docs/usage-remote.md): dùng thêm worker trên máy remote: chuẩn bị máy, firewall, SSH, `cluster-lan.yaml`, ghim và rải task qua nhiều máy, Tailscale/`tailnet:`.
 - [docs/workflow-phases.md](docs/workflow-phases.md): khung chung cho mọi project: Simulate (bắt buộc) rồi rẽ sang FPGA và/hoặc ASIC; mục tiêu, tiêu chí vào/ra, quy tắc chung của từng pha.
 - [docs/cluster-blocks.md](docs/cluster-blocks.md): cluster theo khối bật/tắt được: fork Chipyard mount từ host (RISCVTutorial), Verilator, Claude Code, Vivado (FPGA), OpenROAD-flow-scripts (ASIC); dựng fork, bật cluster, lỗi đã gặp.
+- [docs/chipyard-minimal-soc.md](docs/chipyard-minimal-soc.md): SoC nền tối giản `MinimalSoCConfig` (1 Rocket, L2 128 KiB) cho mọi project: cài vào fork, build, kiểm tra, kế thừa. Spec: [docs/minimal-soc-config-spec.md](docs/minimal-soc-config-spec.md).
 - [docs/prompt-template.md](docs/prompt-template.md): template prompt để mở session Claude Code mới cho một project, kèm bước phỏng vấn để dựng prompt.
 
 ## Config
@@ -43,6 +44,12 @@ Cài máy theo [docs/setup-bazzite.md](docs/setup-bazzite.md) (mục 1–4), r�
 - [scripts/setup-chipyard-fork.sh](scripts/setup-chipyard-fork.sh): clone (tuỳ chọn) và dựng một fork Chipyard trong container `chia-chisel-build`; `--verify` build và chạy thử RocketConfig.
 - [scripts/setup-orfs.sh](scripts/setup-orfs.sh): chép OpenROAD-flow-scripts từ image `chia-orfs` ra `~/tools` để sửa tay; `--verify` chạy flow mẫu nangate45/gcd.
 - [scripts/chia-up-blocks.py](scripts/chia-up-blocks.py): sinh `cluster.gen.yaml` từ template theo khối (`--fpga`, `--asic`, `--no-claude`) và `chia up`.
+
+- [scripts/install-chipyard-config.sh](scripts/install-chipyard-config.sh): copy `chipyard/*.scala` (Config dùng chung, ví dụ `MinimalSoCConfig`) vào fork Chipyard, in `diff` và `sha256sum`, kiểm tra mixin.
+
+## Chipyard
+
+- [chipyard/MinimalSoCConfig.scala](chipyard/MinimalSoCConfig.scala): SoC nền tối giản cho mọi project.
 
 ## Docker
 
