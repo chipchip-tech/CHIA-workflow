@@ -3,9 +3,9 @@
 SoC gốc cho mọi project, chạy trên fork RISCVTutorial (Chipyard 1.10.0) ở `~/tools/RISCVTutorial`.
 Lý do và các quyết định: [minimal-soc-config-spec.md](minimal-soc-config-spec.md).
 
-**Trạng thái:** bước 1 (cài) đã chạy thật trên fork (09/11/2026): `MIXIN_OK`, sha256 `2bf5c9d6…`.
-Build Verilator đã chạy thật (09/11/2026, sau khi sửa `nBanks` → `WithNBanks`): ra
-`simulator-chipyard.harness-MinimalSoCConfig`. Chạy test và kiểm tra khối chưa chạy.
+**Trạng thái: đã kiểm chứng trên fork (09/11/2026).** Cài (`MIXIN_OK`), build Verilator, `rv64ui-p-simple`
+(`EXIT=0`), `hello.riscv` in `Hello world from core 0, a rocket` (`EXIT=0`), L2 `cache-size = <131072>`
+(L1 I/D mỗi cái 16384), không có module GPIO/SPI/I2C/PWM/scratchpad.
 
 ## Nội dung
 

@@ -2,7 +2,7 @@
 
 - Ngày: 09/11/2026
 - Nhánh: `setup` (dùng chung cho mọi project)
-- Trạng thái: **đã triển khai (09/11/2026)**, chưa chạy thật. Hướng dẫn chạy: `docs/chipyard-minimal-soc.md`.
+- Trạng thái: **đã triển khai và kiểm chứng trên fork (09/11/2026)**, đủ 5 tiêu chí ở mục 5. Hướng dẫn: `docs/chipyard-minimal-soc.md`.
 
 ## 1. Mục tiêu
 
