@@ -31,6 +31,20 @@ def fork_dir() -> str:
 
 
 @ChiaFunction(resources={"chipyard": 1})
+def elaborate_fpga(config: str, jobs: int = 8) -> dict:
+    """Chỉ elaborate (Chisel -> Verilog) config FPGA, không Vivado. ~10-20 phút."""
+    cy = fork_dir()
+    log = f"{cy}/fpga/minsoc-elab-{config}.log"
+    out = sh(f"cd {cy}/fpga && make -j{jobs} SUB_PROJECT=arty100t CONFIG_PACKAGE=chipyard.fpga.arty100t "
+             f"CONFIG={config} verilog > {log} 2>&1; echo RC=$?", timeout=5400)
+    tail = sh(f"tail -40 {log}")
+    gen = sh(f"ls -d {cy}/fpga/generated-src/*{config}* 2>/dev/null; "
+             f"grep -l -iE 'InclusiveCache' {cy}/fpga/generated-src/*{config}*/gen-collateral/*.sv 2>/dev/null | head -3; "
+             f"grep -ohE 'cache-size = <[0-9]+>' {cy}/fpga/generated-src/*{config}*/*.dts 2>/dev/null | sort | uniq -c")
+    return {"rc": out.strip().splitlines()[-1], "log": log, "tail": tail, "generated": gen}
+
+
+@ChiaFunction(resources={"chipyard": 1})
 def probe_chipyard() -> dict:
     cy = fork_dir()
     r = {"RISCV": os.environ.get("RISCV"), "fork": cy, "env_sh": os.path.exists(f"{cy}/env.sh")}
@@ -38,7 +52,7 @@ def probe_chipyard() -> dict:
         return r
     st = sh("git status --short; git submodule foreach --quiet 'git status --short | sed \"s|^|$sm_path: |\"'", cwd=cy)
     r["dirty"] = [l for l in st.splitlines() if l.strip() and not any(o in l for o in OWN)]
-    r["heads"] = sh("git rev-parse --short HEAD; for s in generators/rocket-chip generators/rocket-chip-inclusive-cache "
+    r["heads"] = sh("git rev-parse --short HEAD; for s in generators/rocket-chip generators/sifive-cache "
                     "generators/testchipip; do echo \"$s $(git -C $s rev-parse --short HEAD)\"; done", cwd=cy)
     r["configs_installed"] = {o: bool(glob.glob(f"{cy}/**/{o}", recursive=True)) for o in OWN}
     r["arty_tweaks"] = sh("grep -n 'class WithArty100TTweaks' fpga/src/main/scala/arty100t/*.scala", cwd=cy)
@@ -47,6 +61,8 @@ def probe_chipyard() -> dict:
     r["fpga_shells_arty100"] = sh("ls fpga/fpga-shells/xilinx | grep -i arty; "
                                   "grep -rhoE '(board_part|BOARD_PART|part)[^\\n]{0,80}' fpga/fpga-shells/xilinx/arty_a7_100/tcl "
                                   "2>/dev/null | head -10", cwd=cy)
+    r["arty_scala"] = sh("ls fpga/src/main/scala/arty100t/; grep -n -iE 'ddr|mig|extmem|mem_axi|TLMem|MemPort|HarnessBinder\\(' "
+                         "fpga/src/main/scala/arty100t/*.scala | grep -v MinSoc | head -40", cwd=cy)
     share = os.path.join(os.environ.get("RISCV", ""), "riscv64-unknown-elf", "share", "riscv-tests")
     isa = sorted(os.path.basename(p) for p in glob.glob(f"{share}/isa/rv64*-p-*") if not p.endswith(".dump"))
     r["isa_dir"], r["isa_count"] = f"{share}/isa", len(isa)
@@ -85,6 +101,11 @@ def probe_vivado() -> dict:
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--elaborate", default=None, metavar="CONFIG",
+                    help="thêm: elaborate config FPGA (vd MinSocArty100TF100Config), không chạy Vivado")
+    args = ap.parse_args()
     ray.init(address="auto", namespace="minsoc_fmax", ignore_reinit_error=True)
     res = ray.cluster_resources()
     ok = True
@@ -106,6 +127,12 @@ def main():
         else:
             if not r["board_xml"] or not any("@@PART" in l for l in r["vivado_part_check"]):
                 ok = False
+    if args.elaborate:
+        e = get(elaborate_fpga.chia_remote(args.elaborate))
+        print(f"\n===== [elaborate {args.elaborate}] =====")
+        for k, v in e.items():
+            print(f"{k}: {v}")
+        ok = ok and e["rc"] == "RC=0"
     print("\nKẾT QUẢ:", "OK" if ok else "CÓ VẤN ĐỀ (gửi lại toàn bộ log)")
 
 

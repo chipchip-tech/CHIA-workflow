@@ -30,6 +30,18 @@ testchipip, chipyard/src}`; không sửa `fpga/`, `fpga-shells`.
 Config FPGA = `WithArty100TTweaks(freqMHz)` + `MinSocFmaxConfig`, **giữ L2 128 KiB** (khác `RocketArty100TConfig`
 dùng `WithBroadcastManager`, không L2).
 
+## Phát hiện ở Bước 0 (probe 10/11/2026, chạy thật)
+
+- Fork sạch; 144 ISA test, đủ 8 benchmark trong `$RISCV/riscv64-unknown-elf/share/riscv-tests/`; Vivado 2025.1
+  mở được `xc7a100tcsg324-1` (license OK); không cần vá `wf_active`.
+- L2 (sifive `InclusiveCache`) ở `generators/sifive-cache`, không phải `rocket-chip-inclusive-cache`.
+- `WithArty100TTweaks` của fork **không có tham số** (ghi cứng 50 MHz, `RocketArty100TConfig` dùng `TinyRocketConfig`),
+  thêm GPIO/SPI/UART của harness, bỏ SerialTL. Tần số được đè bằng `WithMinSocFreqMHz`.
+- fpga-shells đặt `part_fpga {xc7a100ticsg324-1L}`; project ép `xc7a100tcsg324-1` (chip thật của Arty) khi chạy
+  bitstream (đè tạm `board.tcl`, khôi phục sau). Cần board files Digilent ở `~/tools/Xilinx/vivado-boards`.
+- **Chưa rõ:** harness của fork có nối cổng bộ nhớ ngoài (DDR) không; `TinyRocketConfig` không có cổng bộ nhớ,
+  còn `MinimalSoCConfig` có. Kiểm bằng `probe.py --elaborate`.
+
 ## Tài nguyên
 
 - Cluster: `python scripts/chia-up-blocks.py --fpga` (khối chipyard, verilator, claude, vivado 1 slot). Không yaml riêng.
