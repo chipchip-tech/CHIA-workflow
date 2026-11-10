@@ -193,7 +193,8 @@ def _board_repo() -> str:
 
 @ChiaFunction(resources={"vivado": 1}, max_retries=0)
 def vivado_impl(config: str, run_name: str, simdram_fpga_v: str, fpga_mem: str = "bram",
-                n_impl: int = 3, write_bit: bool = True, timeout_s: int = 6 * 3600) -> dict:
+                n_impl: int = 3, write_bit: bool = True, timeout_s: int = 6 * 3600,
+                extra_xdc: str = "") -> dict:
     """Synth một lần + n_impl lần place/route của Arty100THarness.<config> (đã elaborate).
     Kết quả ở <build_dir>/minsoc-vivado/<run_name>/obj; trả về số đo và nội dung report."""
     cy = fork_dir()
@@ -212,9 +213,14 @@ def vivado_impl(config: str, run_name: str, simdram_fpga_v: str, fpga_mem: str =
     vsrcs_f = f"{run_dir}/vsrcs.f"
     open(vsrcs_f, "w").write("\n".join(vsrcs) + "\n")
     ip_tcls = sorted(glob.glob(f"{g}/*.vivado.tcl"))
+    xdcs = sorted(glob.glob(f"{g}/*.xdc"))
+    if extra_xdc:  # nạp sau shell.xdc: ràng buộc trực tiếp của project (vd. chân reset)
+        px = f"{run_dir}/minsoc_extra.xdc"
+        open(px, "w").write(extra_xdc)
+        xdcs.append(px)
     tcl = VT.make_tcl(shells_tcl_dir=f"{cy}/fpga/fpga-shells/xilinx/common/tcl", vsrcs_f=vsrcs_f,
                       ip_tcls=ip_tcls, run_dir=run_dir, n_impl=n_impl, write_bit=write_bit,
-                      board_repo=_board_repo(), gen_xdcs=sorted(glob.glob(f"{g}/*.xdc")))
+                      board_repo=_board_repo(), gen_xdcs=xdcs)
     open(f"{run_dir}/run.tcl", "w").write(tcl)
     t0 = time.time()
     try:

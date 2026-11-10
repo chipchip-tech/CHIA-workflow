@@ -151,7 +151,8 @@ def phase_sim(a, out: Path, st: dict):
 def phase_fpga(a, out: Path, st: dict):
     cfg = N.FPGA_CONFIGS[a.period_ns]
     simdram_v = (HERE / "fpga" / "SimDRAM_fpga.v").read_text()
-    vh = hashlib.sha256((simdram_v + (HERE / "vivado_tcl.py").read_text()).encode()).hexdigest()[:8]
+    extra_xdc = (HERE / "fpga" / "minsoc_reset.xdc").read_text()
+    vh = hashlib.sha256((simdram_v + extra_xdc + (HERE / "vivado_tcl.py").read_text()).encode()).hexdigest()[:8]
     tag = f"baseline_fpga_{st['hash']}_p{a.period_ns:g}_{a.fpga_mem}_n{a.repeat}_v{vh}"
     from chia.base.cache import get_active_cache
     if not get(get_active_cache().has.chia_remote(tag)):
@@ -162,7 +163,7 @@ def phase_fpga(a, out: Path, st: dict):
             raise SystemExit(f"elaborate lỗi:\n{e['tail']}")
     print(f"vivado {cfg} (tag {tag}): synth + {a.repeat} lần place/route ...", flush=True)
     v = get(N.vivado_impl.chia_remote(cfg, a.run, simdram_v, fpga_mem=a.fpga_mem, n_impl=a.repeat,
-                                      write_bit=not a.no_bitstream, _chia_tag=tag))
+                                      write_bit=not a.no_bitstream, extra_xdc=extra_xdc, _chia_tag=tag))
     rep = out / "reports"
     for t, im in v.get("impls", {}).items():
         for k, txt in im.pop("reports", {}).items():
