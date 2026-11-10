@@ -177,7 +177,10 @@ Tối ưu timing cả SoC `MinimalSoCConfig` từ baseline upstream: FPGA Arty A
 10 → 6,667 → 5 ns), rồi ASIC 5 ns. Code ở `projects/minsoc-fmax/` (xem README, mục **Pha**). Trạng thái (10/11/2026):
 Bước 0 chạy thật (probe OK, elaborate `MinSocArty100TF100Config` OK sau khi xoá file `.lock`/`.part` của coursier).
 Harness Arty không có DDR: `SimDRAM` (DPI-C) được thay bằng `fpga/SimDRAM_fpga.v` (AXI4 → BRAM) chỉ ở bước Vivado.
-Mốc 1 đã viết (`minsoc_fmax.py`, `minsoc_nodes.py`, `vivado_tcl.py`), **chưa chạy thật**; dừng chờ log.
+**Mốc 1 xong (chạy thật):** sim 131/144 ISA pass, geomean 23666 (ngân sách ≤ 24376); FPGA 10 ns WNS −9,326 ns
+(≈ 51,7 MHz, bitstream OK), path xấu nhất ở MSHR scheduler của L2; P&R tất định, ngưỡng nhận WNS > 0,8 ns.
+Cổng `reset` cần `fpga/minsoc_reset.xdc` (project Vivado không có board part nên `BOARD_PIN` không ra chân).
+Tiếp: Mốc 2 (vòng agent), chờ người dùng.
 
 ## Việc tiếp theo (gợi ý)
 

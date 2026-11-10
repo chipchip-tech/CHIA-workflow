@@ -13,8 +13,8 @@ Mọi build (sim, Verilog, bitstream) chạy trên fork `~/tools/RISCVTutorial` 
 
 | Pha | Lệnh | Tiêu chí vào | Tiêu chí ra | Trạng thái |
 |---|---|---|---|---|
-| Simulate | `minsoc_fmax.py --phase sim` | Bước 0 OK | Gate pass ở baseline (test fail sẵn ghi rõ, loại khỏi gate), cycle baseline đo thật | Mốc 1 đã viết, chưa chạy |
-| FPGA | `minsoc_fmax.py --phase fpga --period-ns 10\|6.667\|5` | Sim xong, baseline bitstream 10 ns, nhiễu P&R đo 2 lần | WNS post-route ≥ 0 ở period, gate pass, cycle ≤ +3 %, không vượt tài nguyên xc7a100t | Mốc 1 đã viết, chưa chạy |
+| Simulate | `minsoc_fmax.py --phase sim` | Bước 0 OK | Gate pass ở baseline (test fail sẵn ghi rõ, loại khỏi gate), cycle baseline đo thật | Mốc 1 xong: 131/144 ISA pass (13 loại), geomean 23666, ngân sách ≤ 24376 |
+| FPGA | `minsoc_fmax.py --phase fpga --period-ns 10\|6.667\|5` | Sim xong, baseline bitstream 10 ns, nhiễu P&R đo 2 lần | WNS post-route ≥ 0 ở period, gate pass, cycle ≤ +3 %, không vượt tài nguyên xc7a100t | Mốc 1 xong: WNS −9,326 ns ở 10 ns (≈ 51,7 MHz), ngưỡng nhận 0,8 ns |
 | ASIC | `minsoc_fmax.py --phase asic` | Sau FPGA, PDK/corner đã duyệt (mặc định sky130hd tt_025C_1v80, Yosys + OpenROAD) | WNS ≥ 0 ở 5 ns, gate pass | chưa làm |
 
 **Gate** (như soc-fmax): riscv-tests ISA (`rv64*-p-*`) + 8 benchmark (dhrystone, median, multiply, qsort,
@@ -88,7 +88,21 @@ cd ~/CHIA-workflow/projects/minsoc-fmax && chia job submit --working-dir . -- py
 Cần thấy `KẾT QUẢ: OK`. Gửi lại toàn bộ log (đặc biệt `board_part`, `@@PART`, `fpga_shells_arty100`, `bench`,
 `isa_count`, `dirty`).
 
-## Mốc 1: baseline (đã viết 10/11/2026, chưa chạy thật)
+## Mốc 1: baseline (chạy thật 10/11/2026, xong)
+
+**Kết quả** (run `m1-sim`, `m1-fpga10c`):
+- Sim: 131/144 ISA pass, 13 test fail sẵn loại khỏi gate; geomean `mcycle` 8 benchmark = 23666, ngân sách +3 % ≤ 24376.
+- FPGA 10 ns (Vivado 42 phút, bitstream OK): impl0 = impl1 = −9,326 ns (tất định), impl2 `ExtraTimingOpt` −9,025 ns.
+  Fmax ≈ 51,7 MHz. LUT 39,7k, FF 19,3k, BRAM 88, DSP 24. WHS +0,035 ns.
+- Path xấu nhất: L2 `inclusive_cache_bank_sched`, từ `c_mshr/w_grantlast_reg` sang `s_writeback`/`w_*` của các MSHR
+  khác, 22–25 tầng logic.
+- **Ngưỡng nhận: cải thiện WNS > 0,8 ns.** Chênh giữa directive là 0,301 ns (công thức cho 0,602 ns), nhưng chỉ
+  thêm một file xdc gán chân reset (m1-fpga10b → 10c) đã làm WNS đổi 0,777 ns (−10,103 → −9,326). Nên lấy
+  max(0,602; 0,777) ≈ 0,8 ns, so sánh theo WNS tốt nhất trong các impl.
+- Lỗi đã sửa: `reset` không có chân (DRC NSTD-1/UCIO-1) vì `shell.xdc` chỉ đặt `BOARD_PIN` mà project không có
+  board part. Thêm `fpga/minsoc_reset.xdc` (C2, LVCMOS33). CRITICAL WARNING về IP trùng và `arty-master.xdc`
+  thiếu port là vô hại.
+
 
 Cần cluster `--fpga` (chipyard, verilator, claude, vivado). Chạy **lần lượt**, không song song (cùng sửa fork).
 
@@ -123,6 +137,7 @@ cd ~/CHIA-workflow/projects/minsoc-fmax && chia job submit --working-dir . -- py
 | `minsoc_nodes.py` | ChiaFunction: `fork_state`, `load_test_elfs`, `elaborate_fpga`, `run_gate`, `vivado_impl` |
 | `vivado_tcl.py` | Sinh tcl Vivado (part ép `xc7a100tcsg324-1`, thay SimDRAM, synth 1 lần + N lần place/route), đọc report |
 | `minsoc_fmax.py` | Driver: `--phase sim\|fpga --baseline-only --run <tên> [--period-ns] [--repeat] [--fpga-mem]` |
+| `fpga/minsoc_reset.xdc` | Gán chân `reset` = C2 (nạp sau `shell.xdc`) |
 | `fpga/SimDRAM_fpga.v` | AXI4 → BRAM 128 KiB thay `SimDRAM` khi tổng hợp FPGA |
 | `exp.yaml` | Cache/bypass CHIA cho tag `baseline_*` |
 | (Mốc 2) `prompts/*.md` | Prompt agent |
