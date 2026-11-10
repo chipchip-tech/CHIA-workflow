@@ -182,6 +182,11 @@ Harness Arty không có DDR: `SimDRAM` (DPI-C) được thay bằng `fpga/SimDRA
 Cổng `reset` cần `fpga/minsoc_reset.xdc` (project Vivado không có board part nên `BOARD_PIN` không ra chân).
 **Mốc 2 đã viết** (vòng agent: `minsoc_fmax.py` không `--baseline-only`, `prompts/`, git fork trong `minsoc_nodes.py`),
 chưa chạy thật; hàm git đã thử trên repo giả. Batch đầu `m2-f100a` (10 ns, 5 lượt); dừng chờ log.
+Lần chạy đầu của `m2-f100a` (10/11/2026) gặp 2 lỗi:
+- **sbt treo dưới Ray:** `ChiselBuildNode` build lần đầu, java đứng yên khoảng 50 phút. Chạy tay `make` có TTY trong container thì được. Chưa rõ nguyên nhân.
+- **`Option --top-module failed`:** `sims/verilator` và `fpga/` dùng chung `.classpath_cache/chipyard.jar`. Build Verilator sau elaborate làm ra jar thiếu class FPGA, và `make` của `fpga/` không build lại. `elaborate_fpga` nay tự xoá jar khi thiếu `Arty100THarness`.
+
+Chạy tay trong container phải `source /home/ray/anaconda3/etc/profile.d/conda.sh` trước `env.sh`. Image không có `unzip`/`jstack`.
 
 ## Việc tiếp theo (gợi ý)
 

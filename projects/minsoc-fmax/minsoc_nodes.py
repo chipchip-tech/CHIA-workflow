@@ -111,12 +111,31 @@ def _clean_coursier() -> str:
     return sh("find /home/ray/.cache/coursier \\( -name '*.lock' -o -name '*.part' \\) -print -delete 2>/dev/null | head")
 
 
+def _drop_jar_without_fpga(cy: str) -> str:
+    """sims/verilator và fpga/ dùng chung .classpath_cache/chipyard.jar. Nếu jar do project sbt `chipyard`
+    build (thiếu class fpga_platforms) mà mới hơn nguồn Scala, make của fpga/ không build lại và
+    chipyard.Generator báo `Option --top-module failed`. Xoá jar thiếu Arty100THarness để make build lại."""
+    import zipfile
+    jar = f"{cy}/.classpath_cache/chipyard.jar"
+    if not os.path.exists(jar):
+        return ""
+    try:
+        has = any("fpga/arty100t/Arty100THarness" in n for n in zipfile.ZipFile(jar).namelist())
+    except zipfile.BadZipFile:
+        has = False
+    if has:
+        return ""
+    os.remove(jar)
+    return f"xoá {jar} (thiếu class Arty100THarness)"
+
+
 @ChiaFunction(resources={"chipyard": 1}, max_retries=0)
 def elaborate_fpga(config: str, jobs: int = 8, tries: int = 3) -> dict:
     """make verilog của flow fpga/ (Chisel -> Verilog + tcl IP + xdc), thử lại khi lỗi mạng khi tải thư viện."""
     cy = fork_dir()
     log = f"{cy}/fpga/minsoc-elab-{config}.log"
     t0, rc, notes = time.time(), None, []
+    notes.append(_drop_jar_without_fpga(cy))
     for i in range(tries):
         notes.append(_clean_coursier())
         out = sh(f"cd {cy}/fpga && make -j{jobs} SUB_PROJECT=arty100t CONFIG_PACKAGE=chipyard.fpga.arty100t "
