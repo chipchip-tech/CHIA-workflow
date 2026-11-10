@@ -171,6 +171,13 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
 - Project hiện có: `project/ascon-secureboot` (RoCC Ascon-Hash256, secure boot; xong M1–M4),
   `project/rocket-fmax` (tối ưu Fmax RocketTile; chi tiết trong `CLAUDE.md` của nhánh đó).
 
+## Project minsoc-fmax (nhánh này)
+
+Tối ưu timing cả SoC `MinimalSoCConfig` từ baseline upstream: FPGA Arty A7-100T (WNS post-route ≥ 0 ở
+10 → 6,667 → 5 ns), rồi ASIC 5 ns. Code ở `projects/minsoc-fmax/` (xem README, mục **Pha**). Trạng thái (10/11/2026):
+Bước 0 đã viết (`install.sh`, `probe.py`, Config Scala), **chưa chạy thật**. Tiếp: Mốc 1 (gate baseline, bitstream
+10 ns, đo nhiễu P&R), dừng chờ log.
+
 ## Việc tiếp theo (gợi ý)
 
 1. Mở project mới theo **Quy ước nhánh**, dùng cluster theo khối (`docs/cluster-blocks.md`), config kế thừa
