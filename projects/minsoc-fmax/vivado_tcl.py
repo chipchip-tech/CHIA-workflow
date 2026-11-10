@@ -32,9 +32,10 @@ def vsrc_list(sim_common_files: list, extra: list, fpga_mem: str) -> list:
 
 
 def make_tcl(*, shells_tcl_dir: str, vsrcs_f: str, ip_tcls: list, run_dir: str, n_impl: int,
-             write_bit: bool, board_repo: str = "", gen_xdcs: list = ()) -> str:
-    """Script Vivado batch. Mọi đường dẫn tuyệt đối. Kết quả ghi vào run_dir/obj/."""
-    variants = " ".join(PLACE_VARIANTS[i % len(PLACE_VARIANTS)] for i in range(n_impl))
+             write_bit: bool, board_repo: str = "", gen_xdcs: list = (), directives: list | None = None) -> str:
+    """Script Vivado batch. Mọi đường dẫn tuyệt đối. Kết quả ghi vào run_dir/obj/.
+    `directives`: directive place_design cho từng impl (mặc định PLACE_VARIANTS, n_impl cái đầu)."""
+    variants = " ".join(directives or [PLACE_VARIANTS[i % len(PLACE_VARIANTS)] for i in range(n_impl)])
     return f"""# sinh bởi minsoc-fmax/vivado_tcl.py
 set scriptdir {shells_tcl_dir}
 set commondir [file dirname $scriptdir]

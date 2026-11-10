@@ -1,10 +1,12 @@
-"""Các ChiaFunction của minsoc-fmax (Mốc 1: baseline). Mọi build chạy trên fork (đường dẫn suy từ $RISCV).
+"""Các ChiaFunction của minsoc-fmax (Mốc 1: baseline, Mốc 2: vòng agent). Mọi build chạy trên fork (đường dẫn suy từ $RISCV).
 
   chipyard   fork_state, load_test_elfs, elaborate_fpga (make verilog của flow fpga/)
   verilator  run_gate (qua VerilatorRunNode của CHIA, binary build bởi ChiselBuildNode trên khối chipyard)
+  chipyard   (Mốc 2) fork_checkpoint, fork_scope, fork_revert, fork_commit: git trong fork + submodule
   vivado     vivado_impl (tcl của vivado_tcl.py)
+  claude     read_text_claude; MinSocClaudeLLM (`claude --print`, có timeout thật)
 
-Cache (exp.yaml) theo _chia_tag: chỉ các tag baseline_*.
+Cache (exp.yaml) theo _chia_tag: tag baseline_* và m2_*.
 """
 from __future__ import annotations
 
@@ -12,7 +14,9 @@ import glob
 import hashlib
 import os
 import re
+import shlex
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 
@@ -21,6 +25,15 @@ from chia.base.ChiaFunction import ChiaFunction, get
 import vivado_tcl as VT
 
 SIM_CONFIG = "MinSocFmaxConfig"
+SIM_FPGA_CONFIG = "MinSocFmaxFpgaConfig"   # Mốc 2: gate chạy kèm WithMinSocFpgaTweaks (giống bản Arty)
+AGENT_BRANCH = "minsoc-fmax/agent"
+# Agent chỉ được sửa: Scala nguồn của 3 submodule và file điểm gắn mixin của project.
+AGENT_SCOPE = {"generators/rocket-chip": r"^src/main/scala/.*\.scala$",
+               "generators/sifive-cache": r"^(design/craft/inclusivecache/)?src/.*\.scala$",
+               "generators/testchipip": r"^src/main/scala/.*\.scala$"}
+AGENT_OWN_OK = ("MinSocFmaxConfig.scala",)
+LLM_PARTIAL_FILE = "/home/ray/minsoc_fmax_llm_partial.txt"
+GIT_ID = "-c user.name=minsoc-agent -c user.email=minsoc-agent@localhost"
 FPGA_CONFIGS = {10.0: "MinSocArty100TF100Config", 6.667: "MinSocArty100TF150Config", 5.0: "MinSocArty100TF200Config"}
 BENCHMARKS = ("dhrystone", "median", "multiply", "qsort", "towers", "vvadd", "mm", "spmv")
 OWN_FILES = ("MinSocFmaxConfig.scala", "MinSocArty100TConfigs.scala", "MinimalSoCConfig.scala")
@@ -64,6 +77,9 @@ def fork_state() -> dict:
         if diff.strip():
             parts.append(f"### {d or '.'}\n{diff}")
             dirty.append(d or ".")
+        for f in _untracked_scala(path):   # file .scala mới (agent tạo) cũng vào hash
+            if os.path.basename(f) not in OWN_FILES:
+                parts.append(f"### {d or '.'} untracked {f}\n" + open(os.path.join(path, f), errors="replace").read())
     own = {}
     for o in OWN_FILES:
         hits = glob.glob(f"{cy}/generators/chipyard/src/main/scala/config/{o}") + \
@@ -73,7 +89,8 @@ def fork_state() -> dict:
     h = hashlib.sha256((patch + "".join(f"{k}{v}" for k, v in sorted(own.items()))).encode()).hexdigest()[:10]
     heads = sh("git rev-parse --short HEAD; for s in " + " ".join(SUBMODULES) +
                "; do echo \"$s $(git -C $s rev-parse --short HEAD)\"; done", cwd=cy)
-    return {"fork": cy, "patch": patch, "dirty": dirty, "hash": h, "heads": heads,
+    rev = hashlib.sha256(heads.encode()).hexdigest()[:8]   # commit hiện tại của fork + submodule (Mốc 2)
+    return {"fork": cy, "patch": patch, "dirty": dirty, "hash": h, "heads": heads, "rev": rev,
             "own_missing": [k for k, v in own.items() if v is None]}
 
 
@@ -194,7 +211,7 @@ def _board_repo() -> str:
 @ChiaFunction(resources={"vivado": 1}, max_retries=0)
 def vivado_impl(config: str, run_name: str, simdram_fpga_v: str, fpga_mem: str = "bram",
                 n_impl: int = 3, write_bit: bool = True, timeout_s: int = 6 * 3600,
-                extra_xdc: str = "") -> dict:
+                extra_xdc: str = "", directives: list | None = None) -> dict:
     """Synth một lần + n_impl lần place/route của Arty100THarness.<config> (đã elaborate).
     Kết quả ở <build_dir>/minsoc-vivado/<run_name>/obj; trả về số đo và nội dung report."""
     cy = fork_dir()
@@ -220,7 +237,8 @@ def vivado_impl(config: str, run_name: str, simdram_fpga_v: str, fpga_mem: str =
         xdcs.append(px)
     tcl = VT.make_tcl(shells_tcl_dir=f"{cy}/fpga/fpga-shells/xilinx/common/tcl", vsrcs_f=vsrcs_f,
                       ip_tcls=ip_tcls, run_dir=run_dir, n_impl=n_impl, write_bit=write_bit,
-                      board_repo=_board_repo(), gen_xdcs=xdcs)
+                      board_repo=_board_repo(), gen_xdcs=xdcs,
+                      directives=directives)
     open(f"{run_dir}/run.tcl", "w").write(tcl)
     t0 = time.time()
     try:
@@ -250,6 +268,205 @@ def vivado_impl(config: str, run_name: str, simdram_fpga_v: str, fpga_mem: str =
             "bit": m["bit"], "bit_fail": m["bit_fail"], "impls": impls, "errors": errors,
             "synth": {**VT.parse_wns_tns(rd("timing_synth.rpt")), **VT.parse_util(rd("util_synth.rpt"))},
             "n_vsrcs": len(vsrcs), "ip_tcls": ip_tcls, "log_tail": log[-4000:]}
+
+
+# ---------------------------------------------------------------------------
+# Mốc 2: git trong fork (khối chipyard)
+# ---------------------------------------------------------------------------
+
+def _own_paths(cy: str) -> dict:
+    out = {}
+    for o in OWN_FILES:
+        hits = glob.glob(f"{cy}/generators/chipyard/src/main/scala/config/{o}") + \
+            glob.glob(f"{cy}/fpga/src/main/scala/arty100t/{o}")
+        if hits:
+            out[o] = hits[0]
+    return out
+
+
+def _untracked_scala(path: str) -> list:
+    return [f for f in sh("git ls-files -o --exclude-standard", cwd=path).splitlines()
+            if f.endswith(".scala") and not f.startswith("[rc=")]
+
+
+@ChiaFunction(resources={"chipyard": 1}, max_retries=0)
+def fork_checkpoint() -> dict:
+    """Điểm quay lui trước một lượt agent: HEAD từng repo, file .scala chưa track sẵn có, nội dung file Config."""
+    cy = fork_dir()
+    ck = {"fork": cy, "heads": {}, "untracked": {}, "own": {}}
+    for d in ("",) + SUBMODULES:
+        path = os.path.join(cy, d) if d else cy
+        ck["heads"][d] = sh("git rev-parse HEAD", cwd=path, check=True).strip()
+        ck["untracked"][d] = _untracked_scala(path)
+    for o, p in _own_paths(cy).items():
+        ck["own"][o] = open(p).read()
+    return ck
+
+
+@ChiaFunction(resources={"chipyard": 1}, max_retries=0)
+def fork_scope(ck: dict) -> dict:
+    """File agent đã đổi so với checkpoint, chia trong/ngoài phạm vi cho phép (AGENT_SCOPE, AGENT_OWN_OK)."""
+    cy, inside, outside = ck["fork"], [], []
+    for d in ("",) + SUBMODULES:
+        path = os.path.join(cy, d) if d else cy
+        files = [f for f in sh(f"git diff --name-only --ignore-submodules=all {ck['heads'][d]}", cwd=path).splitlines()
+                 if f and not f.startswith("[rc=")]
+        files += [f for f in _untracked_scala(path) if f not in ck["untracked"][d]]
+        own_rel = {os.path.relpath(p, cy) for p in _own_paths(cy).values()}
+        for f in dict.fromkeys(files):
+            full = f"{d}/{f}" if d else f
+            if not d and full in own_rel:
+                continue                                    # file Config: xét bên dưới theo nội dung
+            ok = bool(d) and re.search(AGENT_SCOPE[d], f)
+            (inside if ok else outside).append(full)
+    for o, p in _own_paths(cy).items():
+        if open(p).read() != ck["own"].get(o):
+            (inside if o in AGENT_OWN_OK else outside).append(os.path.relpath(p, cy))
+    return {"inside": inside, "outside": outside, "changed": bool(inside or outside)}
+
+
+@ChiaFunction(resources={"chipyard": 1}, max_retries=0)
+def fork_revert(ck: dict) -> dict:
+    """Đưa fork về checkpoint: reset --hard từng repo, xoá .scala mới, ghi lại file Config. Không đụng file build."""
+    cy, log = ck["fork"], []
+    for d in ("",) + SUBMODULES:
+        path = os.path.join(cy, d) if d else cy
+        log.append(sh(f"git reset -q --hard {ck['heads'][d]}", cwd=path))
+        for f in _untracked_scala(path):
+            if f not in ck["untracked"][d] and os.path.basename(f) not in OWN_FILES:
+                os.remove(os.path.join(path, f))
+                log.append(f"xoá {d}/{f}")
+    for o, p in _own_paths(cy).items():
+        if o in ck["own"]:
+            open(p, "w").write(ck["own"][o])
+    left = [d or "." for d in ("",) + SUBMODULES
+            if sh("git diff --name-only --ignore-submodules=all HEAD",
+                  cwd=os.path.join(cy, d) if d else cy).strip()]
+    return {"ok": not left, "left": left, "log": "\n".join(x for x in log if x.strip())}
+
+
+@ChiaFunction(resources={"chipyard": 1}, max_retries=0)
+def fork_commit(message: str, ck: dict) -> dict:
+    """Commit lượt được nhận lên nhánh AGENT_BRANCH: từng submodule có thay đổi, rồi fork gốc
+    (con trỏ submodule + file Config của project, `add -f` vì có thể nằm trong .gitignore)."""
+    cy, out = fork_dir(), {}
+    msg = shlex.quote(message)
+    for d in SUBMODULES:
+        path = os.path.join(cy, d)
+        new = " ".join(shlex.quote(f) for f in _untracked_scala(path) if f not in ck["untracked"][d])
+        if sh("git diff --name-only HEAD", cwd=path).strip() or new:
+            out[d] = sh(f"git checkout -q -B {AGENT_BRANCH} && git add -u" + (f" && git add -- {new}" if new else "") +
+                        f" && git {GIT_ID} commit -q -m {msg} && git rev-parse --short HEAD", cwd=path, check=True)
+    own = " ".join(shlex.quote(os.path.relpath(p, cy)) for p in _own_paths(cy).values())
+    out["."] = sh(f"git checkout -q -B {AGENT_BRANCH} && git add -- {' '.join(SUBMODULES)} && git add -f -- {own} && "
+                  f"(git diff --cached --quiet || git {GIT_ID} commit -q -m {msg}) && git rev-parse --short HEAD",
+                  cwd=cy, check=True)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# khối claude: agent
+# ---------------------------------------------------------------------------
+
+def _read_local(path: str, remove: bool) -> str | None:
+    if not os.path.isfile(path):
+        return None
+    text = open(path, errors="replace").read()
+    if remove:
+        os.remove(path)
+    return text
+
+
+@ChiaFunction(resources={"claude_creds": 0.01}, max_retries=0)
+def read_text_claude(path: str, remove: bool = False) -> str | None:
+    """File trên khối claude (transcript dở của MinSocClaudeLLM)."""
+    return _read_local(path, remove)
+
+
+def _kill(proc):
+    try:
+        os.killpg(proc.pid, 9)
+    except (ProcessLookupError, PermissionError):
+        proc.kill()
+    proc.wait()
+
+
+def make_llm_class():
+    """Import trễ: chỉ driver và khối claude cần chia.models.claude."""
+    from chia.models.claude import ClaudeCodeLLM, ClaudeCodeQueryResult, parse_rate_limit_event
+
+    class MinSocClaudeLLM(ClaudeCodeLLM):
+        """ClaudeCodeLLM (`claude --print`) như project rocket-fmax: bỏ hết tool riêng của Claude (container
+        claude không có fork), chỉ dùng MCP tool vòng lặp đưa vào (chipyard_bash); `--effort`; giết tiến trình
+        sau timeout_seconds và ghi transcript dở vào LLM_PARTIAL_FILE."""
+
+        def __init__(self, *args, effort: str | None = None, **kwargs):
+            kwargs.setdefault("log_stream", True)
+            super().__init__(*args, **kwargs)
+            extra = ["--tools", "", "--strict-mcp-config"] + (["--effort", effort] if effort else [])
+            self.extra_cli_args = extra + list(self.extra_cli_args or [])
+
+        def _run_claude_streaming(self, user_message, tools=None):
+            cmd = self._build_cmd(tools)
+            env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+            result_parts, stderr_parts = [], []
+            stream_parts = [f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] claude {' '.join(cmd[1:4])}\n\n"]
+            lock = threading.Lock()
+
+            class _Tee:
+                def write(self, s):
+                    stream_parts.append(s)
+
+                def flush(self):
+                    pass
+
+            tee = _Tee()
+            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    text=True, env=env, start_new_session=True)
+            proc.stdin.write(user_message)
+            proc.stdin.close()
+
+            def drain_out():
+                for line in proc.stdout:
+                    if line.strip():
+                        with lock:
+                            self._process_event_line(line.strip(), tee, result_parts)
+
+            def drain_err():
+                for line in proc.stderr:
+                    with lock:
+                        stderr_parts.append(line)
+                        stream_parts.append(f"[stderr] {line}")
+
+            threads = [threading.Thread(target=drain_out), threading.Thread(target=drain_err)]
+            for t in threads:
+                t.start()
+            try:
+                proc.wait(timeout=self.timeout_seconds)
+            except subprocess.TimeoutExpired:
+                _kill(proc)
+                for t in threads:
+                    t.join(10)
+                self._salvage(stream_parts, f"hết {self.timeout_seconds} s")
+                raise
+            for t in threads:
+                t.join()
+            result = "".join(result_parts)
+            limited = (self._rate_limit_event is not None and parse_rate_limit_event(self._rate_limit_event)) \
+                or "hit your limit" in result
+            if proc.returncode != 0 or limited:
+                self._salvage(stream_parts, "usage limit" if limited else f"exit {proc.returncode}")
+            return ClaudeCodeQueryResult(result=result, returncode=proc.returncode, stderr="".join(stderr_parts),
+                                         stream_result="".join(stream_parts))
+
+        def _salvage(self, stream_parts, why):
+            try:
+                with open(LLM_PARTIAL_FILE, "w") as f:
+                    f.write(f"[claude {why}]\n\n{''.join(stream_parts)}")
+            except OSError:
+                pass
+
+    return MinSocClaudeLLM
 
 
 # ---------------------------------------------------------------------------

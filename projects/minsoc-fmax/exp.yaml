@@ -1,12 +1,14 @@
 # Cache + bypass của minsoc_fmax.py (start_cache và Bypass đọc file này).
 # Cache chỉ phân biệt theo _chia_tag; tag gồm hash patch (fork_state), pha và period:
-#   run_gate     -> baseline_gate_<hash>
-#   vivado_impl  -> baseline_fpga_<hash>_p<period>_<mem>_n<n_impl>_v<hash SimDRAM_fpga.v + vivado_tcl.py>
+#   run_gate     -> baseline_gate_<hash>                 (Mốc 1)
+#                   m2_gate_<hash>_<rev>                  (Mốc 2, rev = commit fork + submodule)
+#   vivado_impl  -> baseline_fpga_<hash>_p<period>_<mem>_n<n_impl>_v<hash SimDRAM_fpga.v + xdc + vivado_tcl.py>
+#                   m2_fpga_<hash>_<rev>_p<period>_<mem>_<directive>_v<...>
 # Lần đầu chạy thật và ghi; lần sau đọc lại (bypass chỉ khi cache thật sự có tag, xem cache_hit_cond).
 cache:
-  run_gate:    {cache: true, tags: ["baseline_.*"]}
-  vivado_impl: {cache: true, tags: ["baseline_.*"]}
+  run_gate:    {cache: true, tags: ["baseline_.*", "m2_.*"]}
+  vivado_impl: {cache: true, tags: ["baseline_.*", "m2_.*"]}
 
 bypass:
-  run_gate:    {bypass: true, tags: ["baseline_.*"]}
-  vivado_impl: {bypass: true, tags: ["baseline_.*"]}
+  run_gate:    {bypass: true, tags: ["baseline_.*", "m2_.*"]}
+  vivado_impl: {bypass: true, tags: ["baseline_.*", "m2_.*"]}

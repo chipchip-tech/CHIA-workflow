@@ -180,7 +180,8 @@ Harness Arty không có DDR: `SimDRAM` (DPI-C) được thay bằng `fpga/SimDRA
 **Mốc 1 xong (chạy thật):** sim 131/144 ISA pass, geomean 23666 (ngân sách ≤ 24376); FPGA 10 ns WNS −9,326 ns
 (≈ 51,7 MHz, bitstream OK), path xấu nhất ở MSHR scheduler của L2; P&R tất định, ngưỡng nhận WNS > 0,8 ns.
 Cổng `reset` cần `fpga/minsoc_reset.xdc` (project Vivado không có board part nên `BOARD_PIN` không ra chân).
-Tiếp: Mốc 2 (vòng agent), chờ người dùng.
+**Mốc 2 đã viết** (vòng agent: `minsoc_fmax.py` không `--baseline-only`, `prompts/`, git fork trong `minsoc_nodes.py`),
+chưa chạy thật; hàm git đã thử trên repo giả. Batch đầu `m2-f100a` (10 ns, 5 lượt); dừng chờ log.
 
 ## Việc tiếp theo (gợi ý)
 

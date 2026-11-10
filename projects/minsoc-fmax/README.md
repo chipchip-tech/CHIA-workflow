@@ -126,18 +126,55 @@ cd ~/CHIA-workflow/projects/minsoc-fmax && chia job submit --working-dir . -- py
   impl0. Ra WNS/TNS/WHS, Fmax clock SoC, LUT/FF/BRAM/DSP, top 10 path, ngưỡng nhận đề xuất = max(0,05 ns; 2 × chênh WNS).
   Report ở `~/minsoc-fmax/<run>/reports/`, checkpoint ở `<fork>/fpga/generated-src/...<Config>/minsoc-vivado/<run>/obj/`.
 
+## Mốc 2: vòng agent (viết 10/11/2026, chưa chạy thật)
+
+Mục tiêu lần lượt 100 → 150 → 200 MHz (`--period-ns 10 | 6.667 | 5`), mỗi batch tối đa 5 lượt, dừng chờ người dùng
+sau mỗi batch. Cần cluster `--fpga` (chipyard, verilator, claude, vivado) và run `m1-sim` (lấy `known_fail.txt`,
+ngân sách geomean).
+
+```bash
+cd ~/CHIA-workflow && git pull && projects/minsoc-fmax/install.sh
+```
+
+```bash
+cd ~/CHIA-workflow/projects/minsoc-fmax && chia job submit --working-dir . -- python minsoc_fmax.py --phase fpga --run m2-f100a --period-ns 10 --rounds 5
+```
+
+Mỗi lượt (khoảng 60–70 phút):
+1. `fork_checkpoint`: HEAD fork + 3 submodule, file `.scala` chưa track, nội dung file Config.
+2. Agent (Claude Code `--model opus --effort medium`, timeout 30 phút) chỉ có tool `chipyard_bash` trên fork; đọc top
+   path, report của best, lịch sử mọi lượt trước (`~/minsoc-fmax/*/history.json`). Không được build, không dùng git.
+3. `fork_scope`: chỉ cho sửa Scala của `rocket-chip`, `sifive-cache`, `testchipip` và `MinSocFmaxConfig.scala`.
+4. Elaborate `MinSocArty100TF<f>Config`; lỗi compile thì agent sửa (tối đa 2 lần).
+5. Build Verilator `MinSocFmaxFpgaConfig` (= `WithMinSocFpgaTweaks ++ MinSocFmaxConfig`, cùng RTL với bản Arty), gate:
+   ISA trừ test fail sẵn, 8 benchmark, geomean ≤ 24376.
+6. Vivado: synth + place/route `Explore` và `ExtraTimingOpt`, lấy WNS tốt nhất, không ghi bitstream.
+7. Nhận nếu gate pass và WNS tốt hơn best > 0,8 ns: commit lên nhánh `minsoc-fmax/agent` của fork (từng submodule
+   rồi fork gốc). Không thì `fork_revert`.
+
+Lượt `r0` đo điểm xuất phát (commit hiện tại của fork), nên batch sau tiếp từ các lượt đã nhận.
+Thay đổi chỉ dành cho FPGA phải có tham số mặc định giữ hành vi cũ, bật trong `chipyard.WithMinSocFpgaTweaks`.
+
+Kết quả ở `~/minsoc-fmax/<run>/`: `summary.md`, `history.json`, `results.csv`, `patches/r<i>.patch`,
+`r<i>/agent_prompt.md`, `agent_response.md`, `agent_transcript.txt`, `eval.json`, `reports/`.
+Checkpoint Vivado mỗi lượt ở `<fork>/fpga/generated-src/...<Config>/minsoc-vivado/<run>-r<i>/` (vài trăm MB mỗi lượt,
+xoá khi cần chỗ).
+
+**Lưu ý:** đang có lượt được nhận thì không chạy lại `install.sh` (nó ghi đè `MinSocFmaxConfig.scala` mà agent đã sửa).
+Muốn bỏ hết kết quả agent: checkout lại nhánh gốc trong fork và từng submodule (`base` / commit cũ trong `fork_heads_start.txt`).
+
 ## File
 
 | File | Nội dung |
 |---|---|
-| `scala/MinSocFmaxConfig.scala` | `chipyard.MinSocFmaxConfig` = `MinimalSoCConfig` (điểm gắn mixin) |
-| `scala/MinSocArty100TConfigs.scala` | `MinSocArty100TF{100,150,200}Config`, `WithMinSocFpgaTweaks` |
+| `scala/MinSocFmaxConfig.scala` | `chipyard.MinSocFmaxConfig` = `MinimalSoCConfig` (điểm gắn mixin), `WithMinSocFpgaTweaks`, `MinSocFmaxFpgaConfig` (gate Mốc 2) |
+| `scala/MinSocArty100TConfigs.scala` | `MinSocArty100TF{100,150,200}Config` |
 | `install.sh` | Chép 2 file trên vào fork |
 | `probe.py` | Bước 0: kiểm fork, gate, Vivado/board/part, không build |
 | `minsoc_nodes.py` | ChiaFunction: `fork_state`, `load_test_elfs`, `elaborate_fpga`, `run_gate`, `vivado_impl` |
 | `vivado_tcl.py` | Sinh tcl Vivado (part ép `xc7a100tcsg324-1`, thay SimDRAM, synth 1 lần + N lần place/route), đọc report |
-| `minsoc_fmax.py` | Driver: `--phase sim\|fpga --baseline-only --run <tên> [--period-ns] [--repeat] [--fpga-mem]` |
+| `minsoc_fmax.py` | Driver: `--phase sim\|fpga --baseline-only --run <tên> [--period-ns] [--repeat] [--fpga-mem]`; không `--baseline-only` = vòng agent Mốc 2 |
 | `fpga/minsoc_reset.xdc` | Gán chân `reset` = C2 (nạp sau `shell.xdc`) |
 | `fpga/SimDRAM_fpga.v` | AXI4 → BRAM 128 KiB thay `SimDRAM` khi tổng hợp FPGA |
 | `exp.yaml` | Cache/bypass CHIA cho tag `baseline_*` |
-| (Mốc 2) `prompts/*.md` | Prompt agent |
+| `prompts/system.md`, `round.md`, `fix_build.md` | Prompt agent Mốc 2 |
