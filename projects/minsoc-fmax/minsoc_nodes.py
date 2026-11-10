@@ -214,7 +214,7 @@ def vivado_impl(config: str, run_name: str, simdram_fpga_v: str, fpga_mem: str =
     ip_tcls = sorted(glob.glob(f"{g}/*.vivado.tcl"))
     tcl = VT.make_tcl(shells_tcl_dir=f"{cy}/fpga/fpga-shells/xilinx/common/tcl", vsrcs_f=vsrcs_f,
                       ip_tcls=ip_tcls, run_dir=run_dir, n_impl=n_impl, write_bit=write_bit,
-                      board_repo=_board_repo())
+                      board_repo=_board_repo(), gen_xdcs=sorted(glob.glob(f"{g}/*.xdc")))
     open(f"{run_dir}/run.tcl", "w").write(tcl)
     t0 = time.time()
     try:
@@ -237,7 +237,7 @@ def vivado_impl(config: str, run_name: str, simdram_fpga_v: str, fpga_mem: str =
         impls[tag] = {"directive": directive, **VT.parse_wns_tns(ts), **VT.parse_util(rd(f"util_{tag}.rpt")),
                       "dut_clock": clk, "fmax_mhz": VT.fmax_mhz(clk["period"], clk["slack"]) if clk else None,
                       "paths": m["paths"].get(tag, []),
-                      "reports": {k: rd(f"{k}_{tag}.rpt") for k in ("timing", "paths", "util", "util_hier", "clocks")}}
+                      "reports": {k: rd(f"{k}_{tag}.rpt") for k in ("timing", "paths", "util", "util_hier", "clocks", "drc")}}
     errors = [l for l in log.splitlines() if l.startswith(("ERROR", "CRITICAL WARNING"))][:60]
     return {"ok": m["all_done"] and bool(impls), "error": err, "run_dir": run_dir, "seconds": time.time() - t0,
             "part": m["part"], "board_part": m["board_part"], "synth_done": m["synth_done"],

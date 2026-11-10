@@ -15,7 +15,7 @@ BOARD = "arty_a7_100"
 TOP = "Arty100THarness"
 PLACE_VARIANTS = ["Explore", "Explore", "ExtraTimingOpt", "ExtraPostPlacementOpt", "WLDrivenBlockPlacement",
                   "AltSpreadLogic_high", "EarlyBlockPlacement"]
-DROP_RE = re.compile(r"\.(cc|cpp|c|h|hpp|svh|vh)$")
+DROP_RE = re.compile(r"\.(cc|cpp|c|h|hpp|svh|vh|xdc)$")
 
 
 def vsrc_list(sim_common_files: list, extra: list, fpga_mem: str) -> list:
@@ -32,7 +32,7 @@ def vsrc_list(sim_common_files: list, extra: list, fpga_mem: str) -> list:
 
 
 def make_tcl(*, shells_tcl_dir: str, vsrcs_f: str, ip_tcls: list, run_dir: str, n_impl: int,
-             write_bit: bool, board_repo: str = "") -> str:
+             write_bit: bool, board_repo: str = "", gen_xdcs: list = ()) -> str:
     """Script Vivado batch. Mọi đường dẫn tuyệt đối. Kết quả ghi vào run_dir/obj/."""
     variants = " ".join(PLACE_VARIANTS[i % len(PLACE_VARIANTS)] for i in range(n_impl))
     return f"""# sinh bởi minsoc-fmax/vivado_tcl.py
@@ -66,6 +66,8 @@ close $fp
 add_files -norecurse -fileset [current_fileset] {{*}}$files
 add_files -quiet -norecurse -fileset [get_filesets constrs_1] [lsort [glob -directory $constraintsdir -nocomplain {{*.tcl}}]]
 add_files -quiet -norecurse -fileset [get_filesets constrs_1] [lsort [glob -directory $constraintsdir -nocomplain {{*.xdc}}]]
+# xdc do elaborate sinh (shell.xdc: chân IO, clock, false path của harness)
+foreach x [list {" ".join(gen_xdcs)}] {{ add_files -norecurse -fileset [get_filesets constrs_1] $x; puts "@@XDC $x" }}
 
 # --- init + synth của fpga-shells (IP: clk_wiz, proc_sys_reset, ila, PLL harness) ---
 source [file join $scriptdir init.tcl]
@@ -95,7 +97,9 @@ proc minsoc_metrics {{tag}} {{
 set k 0
 foreach dir {{{variants}}} {{
   set tag impl$k
-  if {{$k > 0}} {{ open_checkpoint $wrkdir/post_synth.dcp }}
+  # mọi biến thể đều mở lại post_synth.dcp (impl0 = impl1 thì P&R tất định)
+  if {{$k == 0}} {{ close_design }}
+  open_checkpoint $wrkdir/post_synth.dcp
   opt_design -directive Explore
   place_design -directive $dir
   phys_opt_design -directive Explore
@@ -106,6 +110,7 @@ foreach dir {{{variants}}} {{
   puts "@@IMPL $tag $dir"
   minsoc_metrics $tag
   if {{$k == 0 && {1 if write_bit else 0}}} {{
+    report_drc -file $wrkdir/drc_$tag.rpt
     if {{[catch {{ write_bitstream -force $wrkdir/$top.bit }} err]}} {{ puts "@@BIT_FAIL $err" }} else {{ puts "@@BIT_OK $wrkdir/$top.bit" }}
   }}
   close_design
