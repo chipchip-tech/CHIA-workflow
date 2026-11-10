@@ -175,8 +175,9 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
 
 Tối ưu timing cả SoC `MinimalSoCConfig` từ baseline upstream: FPGA Arty A7-100T (WNS post-route ≥ 0 ở
 10 → 6,667 → 5 ns), rồi ASIC 5 ns. Code ở `projects/minsoc-fmax/` (xem README, mục **Pha**). Trạng thái (10/11/2026):
-Bước 0 đã viết (`install.sh`, `probe.py`, Config Scala), **chưa chạy thật**. Tiếp: Mốc 1 (gate baseline, bitstream
-10 ns, đo nhiễu P&R), dừng chờ log.
+Bước 0 chạy thật (probe OK, elaborate `MinSocArty100TF100Config` OK sau khi xoá file `.lock`/`.part` của coursier).
+Harness Arty không có DDR: `SimDRAM` (DPI-C) được thay bằng `fpga/SimDRAM_fpga.v` (AXI4 → BRAM) chỉ ở bước Vivado.
+Mốc 1 đã viết (`minsoc_fmax.py`, `minsoc_nodes.py`, `vivado_tcl.py`), **chưa chạy thật**; dừng chờ log.
 
 ## Việc tiếp theo (gợi ý)
 

@@ -21,7 +21,8 @@ OWN = ("MinSocFmaxConfig.scala", "MinSocArty100TConfigs.scala", "MinimalSoCConfi
 
 
 def sh(cmd: str, cwd=None, timeout=600) -> str:
-    p = subprocess.run(["bash", "-c", cmd], cwd=cwd, capture_output=True, text=True, timeout=timeout)
+    p = subprocess.run(["bash", "-c", cmd], cwd=cwd, capture_output=True, text=True, timeout=timeout,
+                       stdin=subprocess.DEVNULL)
     return (p.stdout + p.stderr).strip() + ("" if p.returncode == 0 else f"\n[rc={p.returncode}]")
 
 
@@ -35,8 +36,10 @@ def elaborate_fpga(config: str, jobs: int = 8) -> dict:
     """Chỉ elaborate (Chisel -> Verilog) config FPGA, không Vivado. ~10-20 phút."""
     cy = fork_dir()
     log = f"{cy}/fpga/minsoc-elab-{config}.log"
+    # file khoá/tải dở của coursier làm sbt treo (gặp ở Bước 0); sbt không được đọc stdin
+    sh("find /home/ray/.cache/coursier \\( -name '*.lock' -o -name '*.part' \\) -delete 2>/dev/null")
     out = sh(f"cd {cy}/fpga && make -j{jobs} SUB_PROJECT=arty100t CONFIG_PACKAGE=chipyard.fpga.arty100t "
-             f"CONFIG={config} verilog > {log} 2>&1; echo RC=$?", timeout=5400)
+             f"CONFIG={config} verilog > {log} 2>&1 < /dev/null; echo RC=$?", timeout=5400)
     tail = sh(f"tail -40 {log}")
     gen = sh(f"ls -d {cy}/fpga/generated-src/*{config}* 2>/dev/null; "
              f"grep -l -iE 'InclusiveCache' {cy}/fpga/generated-src/*{config}*/gen-collateral/*.sv 2>/dev/null | head -3; "
@@ -84,7 +87,9 @@ def probe_vivado() -> dict:
     xv = os.environ.get("XILINX_VIVADO", "")
     root = os.path.realpath(os.path.join(xv, "..", "..")) if xv else ""   # .../Xilinx
     r = {"XILINX_VIVADO": xv, "which": sh("which vivado"), "version": sh("vivado -version | head -1")}
-    boards = glob.glob(f"{root}/**/arty-a7-100/*/board.xml", recursive=True) if root else []
+    # glob "**" không đi qua symlink/thư mục mount: tìm thẳng ở chỗ clone board files Digilent
+    boards = [b for c in ("vivado-boards/new/board_files", "vivado-boards/board_files")
+              for b in glob.glob(f"{root}/{c}/arty-a7-100/*/board.xml")] if root else []
     r["board_xml"] = boards
     r["board_part"] = sh("grep -ohE 'part_name=\"[^\"]+\"' " + " ".join(boards) + " | sort -u") if boards else "KHÔNG THẤY"
     tcl = "/tmp/minsoc_probe.tcl"

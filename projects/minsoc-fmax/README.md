@@ -13,8 +13,8 @@ Mọi build (sim, Verilog, bitstream) chạy trên fork `~/tools/RISCVTutorial` 
 
 | Pha | Lệnh | Tiêu chí vào | Tiêu chí ra | Trạng thái |
 |---|---|---|---|---|
-| Simulate | `minsoc_fmax.py --phase sim` | Bước 0 OK | Gate pass ở baseline (test fail sẵn ghi rõ, loại khỏi gate), cycle baseline đo thật | chưa viết |
-| FPGA | `minsoc_fmax.py --phase fpga --period-ns 10\|6.667\|5` | Sim xong, baseline bitstream 10 ns, nhiễu P&R đo 2 lần | WNS post-route ≥ 0 ở period, gate pass, cycle ≤ +3 %, không vượt tài nguyên xc7a100t | chưa viết |
+| Simulate | `minsoc_fmax.py --phase sim` | Bước 0 OK | Gate pass ở baseline (test fail sẵn ghi rõ, loại khỏi gate), cycle baseline đo thật | Mốc 1 đã viết, chưa chạy |
+| FPGA | `minsoc_fmax.py --phase fpga --period-ns 10\|6.667\|5` | Sim xong, baseline bitstream 10 ns, nhiễu P&R đo 2 lần | WNS post-route ≥ 0 ở period, gate pass, cycle ≤ +3 %, không vượt tài nguyên xc7a100t | Mốc 1 đã viết, chưa chạy |
 | ASIC | `minsoc_fmax.py --phase asic` | Sau FPGA, PDK/corner đã duyệt (mặc định sky130hd tt_025C_1v80, Yosys + OpenROAD) | WNS ≥ 0 ở 5 ns, gate pass | chưa làm |
 
 **Gate** (như soc-fmax): riscv-tests ISA (`rv64*-p-*`) + 8 benchmark (dhrystone, median, multiply, qsort,
@@ -24,7 +24,7 @@ towers, vvadd, mm, spmv), Verilator cả SoC, chạy trên khối `chipyard` (c�
 **Nhận/loại FPGA:** theo WNS post-route; ngưỡng nhận > nhiễu đo ở Mốc 1(c).
 
 Thay đổi chỉ cho FPGA nằm trong `WithMinSocFpgaTweaks` (`scala/MinSocArty100TConfigs.scala`), không lẫn vào
-`MinSocFmaxConfig` dùng cho sim/ASIC. Agent được sửa `generators/{rocket-chip, rocket-chip-inclusive-cache,
+`MinSocFmaxConfig` dùng cho sim/ASIC. Agent được sửa `generators/{rocket-chip, sifive-cache,
 testchipip, chipyard/src}`; không sửa `fpga/`, `fpga-shells`.
 
 Config FPGA = `WithArty100TTweaks(freqMHz)` + `MinSocFmaxConfig`, **giữ L2 128 KiB** (khác `RocketArty100TConfig`
@@ -39,8 +39,23 @@ dùng `WithBroadcastManager`, không L2).
   thêm GPIO/SPI/UART của harness, bỏ SerialTL. Tần số được đè bằng `WithMinSocFreqMHz`.
 - fpga-shells đặt `part_fpga {xc7a100ticsg324-1L}`; project ép `xc7a100tcsg324-1` (chip thật của Arty) khi chạy
   bitstream (đè tạm `board.tcl`, khôi phục sau). Cần board files Digilent ở `~/tools/Xilinx/vivado-boards`.
-- **Chưa rõ:** harness của fork có nối cổng bộ nhớ ngoài (DDR) không; `TinyRocketConfig` không có cổng bộ nhớ,
-  còn `MinimalSoCConfig` có. Kiểm bằng `probe.py --elaborate`.
+- Elaborate `MinSocArty100TF100Config` chạy được (10/11/2026): 4 bus 100 MHz, L2 131072 byte, I$/D$ 16 KiB, UART/SPI/GPIO
+  ở `0x6400xxxx`. Lần đầu build `fpga_platforms` phải tải thêm thư viện (hardfloat test, breeze, commons-lang3);
+  Maven Central hay ngắt (`Connection reset`), file `.lock`/`.part` dở của coursier làm sbt treo: xoá chúng rồi chạy lại
+  (`elaborate_fpga` tự làm, thử 3 lần). `cp: missing destination` và `Empty *.mems.conf` trong log là bình thường.
+  Cache coursier nằm trong container (`/home/ray/.cache`), mất khi `chia down`.
+
+## Cổng bộ nhớ trên FPGA
+
+Harness Arty100T của fork (`Arty100TwoDDRHarnessImp`) **không có DDR/MIG**. Cổng `axi4_mem_0` (AXI4 64 bit, ID 4 bit)
+của ChipTop được binder mặc định `WithBlackBoxSimMem` nối vào `SimDRAM` (DPI-C, 256 MiB ở `0x80000000`): chỉ dùng cho
+mô phỏng, Vivado không tổng hợp được. Fork upstream cũng vậy.
+
+Cách xử lý (duyệt 10/11/2026, phương án A): ở bước Vivado, `vivado_tcl.py` bỏ `SimDRAM.v/.cc` và nạp
+`fpga/SimDRAM_fpga.v`: cùng tên module, tham số, cổng; bên trong là AXI4 slave nối BRAM 128 KiB (suy luận, ghi theo
+byte, địa chỉ cao bị bỏ qua). **RTL ChipTop không đổi**, nên cái đo trên FPGA đúng là cái chạy gate và sau này ASIC.
+Tắt bằng `--fpga-mem simdram` (flow gốc). Wrapper đã qua testbench iverilog (burst ghi/đọc, strobe, backpressure,
+alias); chưa chạy trên board (Mốc 1 chỉ đo timing, không boot).
 
 ## Tài nguyên
 
@@ -73,6 +88,30 @@ cd ~/CHIA-workflow/projects/minsoc-fmax && chia job submit --working-dir . -- py
 Cần thấy `KẾT QUẢ: OK`. Gửi lại toàn bộ log (đặc biệt `board_part`, `@@PART`, `fpga_shells_arty100`, `bench`,
 `isa_count`, `dirty`).
 
+## Mốc 1: baseline (đã viết 10/11/2026, chưa chạy thật)
+
+Cần cluster `--fpga` (chipyard, verilator, claude, vivado). Chạy **lần lượt**, không song song (cùng sửa fork).
+
+```bash
+cd ~/CHIA-workflow && git pull && projects/minsoc-fmax/install.sh
+```
+
+```bash
+cd ~/CHIA-workflow/projects/minsoc-fmax && chia job submit --working-dir . -- python minsoc_fmax.py --phase sim --baseline-only --run m1-sim
+```
+
+```bash
+cd ~/CHIA-workflow/projects/minsoc-fmax && chia job submit --working-dir . -- python minsoc_fmax.py --phase fpga --baseline-only --run m1-fpga10 --period-ns 10 --repeat 3
+```
+
+- Sim: build Verilator `MinSocFmaxConfig` (`bundle_runtime_libs=True` để binary chạy được ở khối verilator), gate ISA
+  `rv64*-p-*` + 8 benchmark, benchmark chạy lại với seed 7. Ra `summary.md`, `gate.json`, `known_fail.txt` (test fail
+  sẵn, loại khỏi gate), trung bình nhân `mcycle`.
+- FPGA: elaborate, rồi Vivado synth một lần và place/route `--repeat` lần từ cùng `post_synth.dcp`: impl0, impl1 cùng
+  directive Explore (kiểm tất định), impl2+ đổi directive của `place_design` (đo độ nhạy, dùng làm nhiễu). Bitstream ở
+  impl0. Ra WNS/TNS/WHS, Fmax clock SoC, LUT/FF/BRAM/DSP, top 10 path, ngưỡng nhận đề xuất = max(0,05 ns; 2 × chênh WNS).
+  Report ở `~/minsoc-fmax/<run>/reports/`, checkpoint ở `<fork>/fpga/generated-src/...<Config>/minsoc-vivado/<run>/obj/`.
+
 ## File
 
 | File | Nội dung |
@@ -81,5 +120,9 @@ Cần thấy `KẾT QUẢ: OK`. Gửi lại toàn bộ log (đặc biệt `board
 | `scala/MinSocArty100TConfigs.scala` | `MinSocArty100TF{100,150,200}Config`, `WithMinSocFpgaTweaks` |
 | `install.sh` | Chép 2 file trên vào fork |
 | `probe.py` | Bước 0: kiểm fork, gate, Vivado/board/part, không build |
-| (Mốc 1) `minsoc_nodes.py`, `vivado_tcl.py`, `minsoc_fmax.py` | Gate, bitstream, driver |
+| `minsoc_nodes.py` | ChiaFunction: `fork_state`, `load_test_elfs`, `elaborate_fpga`, `run_gate`, `vivado_impl` |
+| `vivado_tcl.py` | Sinh tcl Vivado (part ép `xc7a100tcsg324-1`, thay SimDRAM, synth 1 lần + N lần place/route), đọc report |
+| `minsoc_fmax.py` | Driver: `--phase sim\|fpga --baseline-only --run <tên> [--period-ns] [--repeat] [--fpga-mem]` |
+| `fpga/SimDRAM_fpga.v` | AXI4 → BRAM 128 KiB thay `SimDRAM` khi tổng hợp FPGA |
+| `exp.yaml` | Cache/bypass CHIA cho tag `baseline_*` |
 | (Mốc 2) `prompts/*.md` | Prompt agent |
