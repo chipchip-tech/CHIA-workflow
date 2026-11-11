@@ -137,6 +137,10 @@ Explore 2/5, chênh 0,1–0,5 ns, nên giữ cả hai. Mỗi lượt 50–60 ph�
 `power_opt_design`, phys_opt trước route = Default), nên r0 của batch sau đo lại điểm xuất phát; `summary.md` thêm
 cột phút Vivado. Không chạy gate song song với Vivado (23 GB RAM không đủ).
 
+**Chạy tiếp batch đã dừng (`--resume`, chưa chạy thật):** chỉ `chia job stop` sau khi log in `rN: NHẬN …` hoặc
+`rN: loại …` (dừng giữa lượt thì fork bẩn, `--resume` từ chối). Submit lại đúng lệnh cũ, thêm `--resume`: bỏ r0, đọc
+`history.json`, best = lượt NHẬN cuối, đánh số tiếp từ r(N+1); `--rounds` vẫn là tổng số lượt của batch.
+
 
 Mục tiêu lần lượt 100 → 150 → 200 MHz (`--period-ns 10 | 6.667 | 5`), mỗi batch tối đa 5 lượt, dừng chờ người dùng
 sau mỗi batch. Cần cluster `--fpga` (chipyard, verilator, claude, vivado) và run `m1-sim` (lấy `known_fail.txt`,

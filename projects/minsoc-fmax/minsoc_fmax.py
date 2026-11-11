@@ -63,6 +63,8 @@ def args_():
     p.add_argument("--no-bitstream", action="store_true")
     # Mốc 2: vòng agent
     p.add_argument("--rounds", type=int, default=5, help="số lượt agent tối đa của batch")
+    p.add_argument("--resume", action="store_true",
+                   help="chạy tiếp batch --run đã dừng: đọc history.json, bỏ r0, đánh số tiếp (fork phải sạch)")
     p.add_argument("--baseline-run", default="m1-sim", help="run sim Mốc 1: known_fail.txt và geomean ngân sách")
     p.add_argument("--cycle-budget", type=float, default=None, help="mặc định geomean baseline × 1,03")
     p.add_argument("--accept-ns", type=float, default=0.5, help="ngưỡng nhận: WNS phải tốt hơn best quá số này")
@@ -399,6 +401,24 @@ def write_loop_summary(a, out: Path, start: dict, best: dict, rounds: list):
     write(out / "summary.md", "\n".join(lines) + "\n")
 
 
+def resume_state(out: Path, st: dict):
+    """--resume: dựng lại (start, best, rounds) từ r0-start/eval.json, history.json và eval.json của lượt NHẬN cuối.
+    --rounds vẫn là tổng số lượt của batch, nên lượt kế tiếp là r<len(rounds)+1>."""
+    if st["dirty"]:
+        raise SystemExit(f"--resume cần fork sạch (job bị dừng giữa lượt?), đang sửa: {st['dirty']}")
+    f0 = out / "r0-start" / "eval.json"
+    if not f0.exists():
+        raise SystemExit(f"--resume: thiếu {f0}, chạy lại không có --resume")
+    start = json.loads(f0.read_text())
+    hp = out / "history.json"
+    rounds = json.loads(hp.read_text()) if hp.exists() else []
+    best = dict(start, label="r0")
+    for r in rounds:
+        if r.get("verdict") == "NHẬN":
+            best = dict(json.loads((out / r["label"] / "eval.json").read_text()), label=r["label"])
+    return start, best, rounds
+
+
 def phase_loop(a, out: Path, st: dict):
     base = Path(a.out_dir) / a.baseline_run
     if not (base / "known_fail.txt").exists() or not (base / "gate.json").exists():
@@ -411,15 +431,19 @@ def phase_loop(a, out: Path, st: dict):
     print(f"vòng agent: {len(known)} test ISA loại, geomean baseline {base_gm:.1f}, ngân sách {budget:.1f}", flush=True)
     write(out / "fork_heads_start.txt", st["heads"])
 
-    start = evaluate(a, out / "r0-start", st, "r0", gate_cfg, elaborated=False)
-    write(out / "r0-start" / "eval.json", json.dumps(start, indent=2))
-    if not start["gate_ok"] or start["wns"] is None:
-        raise SystemExit(f"điểm xuất phát không dùng được: {start['problems']}")
-    best, rounds = dict(start, label="r0"), []
+    if a.resume:
+        start, best, rounds = resume_state(out, st)
+        print(f"resume {a.run}: {len(rounds)} lượt cũ, best {best['label']} WNS {best['wns']} ns", flush=True)
+    else:
+        start = evaluate(a, out / "r0-start", st, "r0", gate_cfg, elaborated=False)
+        write(out / "r0-start" / "eval.json", json.dumps(start, indent=2))
+        if not start["gate_ok"] or start["wns"] is None:
+            raise SystemExit(f"điểm xuất phát không dùng được: {start['problems']}")
+        best, rounds = dict(start, label="r0"), []
     history = load_history(out)
     llm = make_llm(a)
     write_loop_summary(a, out, start, best, rounds)
-    for i in range(1, a.rounds + 1):
+    for i in range(len(rounds) + 1, a.rounds + 1):
         if best["wns"] >= 0:
             print(f"đạt WNS ≥ 0 ở {a.period_ns:g} ns, dừng", flush=True)
             break

@@ -192,6 +192,7 @@ Chạy tay trong container phải `source /home/ray/anaconda3/etc/profile.d/cond
 Ngưỡng 0,8 ns loại 2 lượt tốt thật (+0,74, +0,61) nên hạ còn **0,5 ns**. Giữ 2 directive (ExtraTimingOpt thắng 3/5).
 Flow Vivado rút gọn (maxThreads 8, bỏ power_opt, phys_opt trước route Default), chưa chạy thật; batch sau đo lại r0.
 Không chạy gate song song Vivado (thiếu RAM).
+Thêm `--resume` (chạy tiếp batch đã dừng giữa hai lượt; cần fork sạch), chưa chạy thật.
 
 ## Việc tiếp theo (gợi ý)
 
