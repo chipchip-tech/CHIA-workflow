@@ -536,6 +536,8 @@ def asic_rtl_list(config: str) -> dict:
     base = os.path.basename(d)
     topf = f"{d}/{base}.top.f"
     mems = f"{d}/{base}.top.mems.v"
+    if not os.path.exists(mems):  # Chipyard 1.10 đặt mems.v trong gen-collateral
+        mems = f"{d}/gen-collateral/{base}.top.mems.v"
     if os.path.exists(topf):
         files = [ln.strip() for ln in open(topf) if ln.strip() and not ln.startswith("#")]
         files = [f if os.path.isabs(f) else os.path.join(d, f) for f in files]

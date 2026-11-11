@@ -197,7 +197,7 @@ Vivado nhanh (11/11/2026, chưa chạy thật): mỗi lượt chạy incremental
 (biên 1,5 ns); chỉ lượt có triển vọng mới chạy FULL 2 directive và quyết theo số FULL. `--no-incremental` tắt.
 ASIC bước A (11/11/2026, chưa chạy thật): `--phase asic --baseline-only`, Yosys ORFS + STA OpenROAD không tải dây,
 sky130hd (mặc định, đổi từ nangate45 vì nangate45 chỉ là PDK dự đoán) 5 ns, SRAM black-box; ước lượng lạc quan trước P&R.
-Lần chạy đầu `a0-s130-5ns`: Yosys frontend cũ lỗi `Assignment pattern` ở SV của firtool (`TLAtomicAutomata.sv`); nay mặc định `SYNTH_HDL_FRONTEND=slang` (có sẵn trong Yosys 0.68, không cần plugin), `--asic-frontend yosys` để quay lại.
+Lần chạy đầu `a0-s130-5ns`: Yosys frontend cũ lỗi `Assignment pattern` ở SV của firtool (`TLAtomicAutomata.sv`); nay mặc định `SYNTH_HDL_FRONTEND=slang` (có sẵn trong Yosys 0.68, không cần plugin), `--asic-frontend yosys` để quay lại. Lần 2: slang báo `unknown module *_ext` (SRAM) vì `top.mems.v` nằm trong `gen-collateral/`, không ở thư mục build; đã sửa chỗ tìm.
 
 ## Việc tiếp theo (gợi ý)
 
