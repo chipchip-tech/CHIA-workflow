@@ -197,7 +197,7 @@ cd ~/CHIA-workflow/projects/minsoc-fmax && chia job submit --working-dir . -- py
 - Cần cluster có khối `asic` (`chia-up-blocks.py --asic`, thêm `--fpga` nếu muốn giữ vivado), fork sạch, không chạy cùng Vivado.
 - Khối chipyard: build Verilator `MinSocFmaxConfig` (`clean=False`, có sẵn thì nhanh), lấy RTL ChipTop từ `<build>.top.f`
   (dự phòng: `gen-collateral` trừ harness), bỏ `*.top.mems.v`.
-- Khối asic: stub `(* blackbox *)` cho các module SRAM, `make synth` của ORFS (`designs/nangate45/minsoc_<run>/`),
+- Khối asic: stub `(* blackbox *)` cho các module SRAM, `make synth` của ORFS (`designs/<pdk>/minsoc_<run>/`),
   rồi `openroad sta.tcl` (`asic/sta.tcl`, `asic/constraint.sdc`: mọi cổng `*clock*` trừ jtag thành một clock, IO delay 20 %).
 - Kết quả `~/minsoc-fmax/<run>/summary.md`: WNS/TNS, Fmax ≈ 1/(T − WNS), 10 path xấu nhất, cell, diện tích.
 - **Lạc quan:** không tải dây (P&R thường xấu thêm 20–40 %), path vào/ra SRAM không tính. Không cache.
