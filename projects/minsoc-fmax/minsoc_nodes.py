@@ -594,7 +594,18 @@ def asic_synth_sta(run: str, rtl: dict, period_ns: float, sdc: str, sta_tcl: str
     open(f"{ddir}/mems_bb.v", "w").write(stubs)
     open(f"{ddir}/constraint.sdc", "w").write(sdc)
     open(f"{ddir}/sta.tcl", "w").write(sta_tcl)
-    vfiles = " ".join(rtl["files"] + [f"{ddir}/mems_bb.v"])
+    # IOCell của Chipyard dùng tristate (oe ? o : 1'bz): sky130hd không có cell TBUF -> check -assert lỗi.
+    # Bước A không cần pad thật: chép file có 'bz ra ddir, thay z bằng 0 (thành buffer thường).
+    files, tri = [], []
+    for f in rtl["files"]:
+        txt = open(f).read()
+        if re.search(r"'b[zZ]", txt):
+            nf = f"{ddir}/notri_{os.path.basename(f)}"
+            open(nf, "w").write(re.sub(r"'b[zZ]+\b", "'b0", txt))
+            files.append(nf); tri.append(os.path.basename(f))
+        else:
+            files.append(f)
+    vfiles = " ".join(files + [f"{ddir}/mems_bb.v"])
     open(f"{ddir}/config.mk", "w").write("\n".join([
         f"export PLATFORM = {platform}", f"export DESIGN_NAME = {top}", f"export DESIGN_NICKNAME = {nick}",
         f"export VERILOG_FILES = {vfiles}", f"export SDC_FILE = {ddir}/constraint.sdc",
@@ -610,7 +621,7 @@ def asic_synth_sta(run: str, rtl: dict, period_ns: float, sdc: str, sta_tcl: str
     logs = f"{ORFS}/flow/logs/{platform}/{nick}/base"
     net = next((p for p in (f"{res}/1_synth.v", f"{res}/1_2_yosys.v", f"{res}/1_yosys.v") if os.path.exists(p)), None)
     out = {"ok": False, "platform": platform, "period_ns": period_ns, "design_dir": ddir, "results": res,
-           "n_files": len(rtl["files"]), "blackboxes": bb, "synth_tail": synth[-4000:], "netlist": net,
+           "n_files": len(rtl["files"]), "blackboxes": bb, "notri": tri, "synth_tail": synth[-4000:], "netlist": net,
            "synth_stat": sh(f"cat {rep}/synth_stat.txt 2>/dev/null | tail -60"),
            "yosys_errors": sh(f"grep -hiE 'error|blackbox' {logs}/1_*.log 2>/dev/null | head -40")}
     if not net:

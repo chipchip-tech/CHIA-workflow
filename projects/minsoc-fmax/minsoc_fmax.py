@@ -275,6 +275,7 @@ def phase_asic(a, out: Path, st: dict):
     lines = [f"# {a.run} — ASIC bước A ({a.asic_pdk}, {a.asic_period_ns:g} ns, {N.SIM_CONFIG})", "",
              f"- fork hash `{st['hash']}`, {r.get('seconds', 0) / 60:.1f} phút, ok={r.get('ok')}, netlist `{r.get('netlist')}`",
              f"- {r['n_files']} file RTL, {len(r['blackboxes'])} module SRAM black-box: {', '.join(r['blackboxes']) or 'không'}",
+             f"- file bỏ tristate (z→0): {', '.join(r.get('notri', [])) or 'không'}",
              f"- cell {r.get('cells')}, diện tích {r.get('area_um2')} µm² (chưa tính SRAM)",
              f"- clock: {r.get('clocks')}",
              f"- **WNS {wns} ns, TNS {r.get('tns')} ns → Fmax ước lượng {fmax and round(fmax, 1)} MHz** "
