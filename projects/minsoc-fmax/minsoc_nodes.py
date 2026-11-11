@@ -513,6 +513,9 @@ def cache_hit_cond(tag, data_path, *args, **kwargs):
 # ---------------------------------------------------------------------------
 ORFS = "/OpenROAD-flow-scripts"
 ASIC_PLATFORMS = {
+    "sky130hd": {"tech_lef": "lef/sky130_fd_sc_hd.tlef",
+                 "sc_lef": "lef/sky130_fd_sc_hd_merged.lef",
+                 "lib": "lib/sky130_fd_sc_hd__tt_025C_1v80.lib"},
     "nangate45": {"tech_lef": "lef/NangateOpenCellLibrary.tech.lef",
                   "sc_lef": "lef/NangateOpenCellLibrary.macro.mod.lef",
                   "lib": "lib/NangateOpenCellLibrary_typical.lib"},

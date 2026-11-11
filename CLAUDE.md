@@ -196,7 +196,7 @@ Thêm `--resume` (chạy tiếp batch đã dừng giữa hai lượt; cần fork
 Vivado nhanh (11/11/2026, chưa chạy thật): mỗi lượt chạy incremental 1 directive từ .dcp của best, loại sớm sau place
 (biên 1,5 ns); chỉ lượt có triển vọng mới chạy FULL 2 directive và quyết theo số FULL. `--no-incremental` tắt.
 ASIC bước A (11/11/2026, chưa chạy thật): `--phase asic --baseline-only`, Yosys ORFS + STA OpenROAD không tải dây,
-nangate45 5 ns, SRAM black-box; ước lượng lạc quan xem 200 MHz có khả thi trước khi làm P&R + `fakeram45`.
+sky130hd (mặc định, đổi từ nangate45 vì nangate45 chỉ là PDK dự đoán) 5 ns, SRAM black-box; ước lượng lạc quan trước P&R.
 
 ## Việc tiếp theo (gợi ý)
 

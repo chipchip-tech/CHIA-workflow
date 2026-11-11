@@ -15,7 +15,7 @@ Mọi build (sim, Verilog, bitstream) chạy trên fork `~/tools/RISCVTutorial` 
 |---|---|---|---|---|
 | Simulate | `minsoc_fmax.py --phase sim` | Bước 0 OK | Gate pass ở baseline (test fail sẵn ghi rõ, loại khỏi gate), cycle baseline đo thật | Mốc 1 xong: 131/144 ISA pass (13 loại), geomean 23666, ngân sách ≤ 24376 |
 | FPGA | `minsoc_fmax.py --phase fpga --period-ns 10\|6.667\|5` | Sim xong, baseline bitstream 10 ns, nhiễu P&R đo 2 lần | WNS post-route ≥ 0 ở period, gate pass, cycle ≤ +3 %, không vượt tài nguyên xc7a100t | Mốc 1 xong: WNS −9,326 ns ở 10 ns (≈ 51,7 MHz), ngưỡng nhận 0,8 ns |
-| ASIC | `minsoc_fmax.py --phase asic` | Sau FPGA, PDK/corner đã duyệt (mặc định sky130hd tt_025C_1v80, Yosys + OpenROAD) | WNS ≥ 0 ở 5 ns, gate pass | Bước A (synth + STA, nangate45) đã viết, chưa chạy thật |
+| ASIC | `minsoc_fmax.py --phase asic` | Sau FPGA, PDK/corner đã duyệt (mặc định sky130hd tt_025C_1v80, Yosys + OpenROAD) | WNS ≥ 0 ở 5 ns, gate pass | Bước A (synth + STA, sky130hd) đã viết, chưa chạy thật |
 
 **Gate** (như soc-fmax): riscv-tests ISA (`rv64*-p-*`) + 8 benchmark (dhrystone, median, multiply, qsort,
 towers, vvadd, mm, spmv), Verilator cả SoC, chạy trên khối `chipyard` (cần môi trường của fork). Test fail sẵn
@@ -188,10 +188,10 @@ Muốn bỏ hết kết quả agent: checkout lại nhánh gốc trong fork và 
 
 ## ASIC bước A: synth + STA ước lượng (chưa chạy thật)
 
-Hỏi nhanh "200 MHz có khả thi không" trước khi đầu tư P&R. PDK **nangate45** (sky130 quá chậm cho 200 MHz).
+Hỏi nhanh "200 MHz có khả thi không" trước khi đầu tư P&R. PDK mặc định **sky130hd** (tt_025C_1v80, PDK thật); `--asic-pdk nangate45` vẫn dùng được để so.
 
 ```bash
-cd ~/CHIA-workflow/projects/minsoc-fmax && chia job submit --working-dir . -- python minsoc_fmax.py --phase asic --baseline-only --run a0-ng45-5ns --asic-period-ns 5
+cd ~/CHIA-workflow/projects/minsoc-fmax && chia job submit --working-dir . -- python minsoc_fmax.py --phase asic --baseline-only --run a0-s130-5ns --asic-period-ns 5
 ```
 
 - Cần cluster có khối `asic` (`chia-up-blocks.py --asic`, thêm `--fpga` nếu muốn giữ vivado), fork sạch, không chạy cùng Vivado.
@@ -201,7 +201,7 @@ cd ~/CHIA-workflow/projects/minsoc-fmax && chia job submit --working-dir . -- py
   rồi `openroad sta.tcl` (`asic/sta.tcl`, `asic/constraint.sdc`: mọi cổng `*clock*` trừ jtag thành một clock, IO delay 20 %).
 - Kết quả `~/minsoc-fmax/<run>/summary.md`: WNS/TNS, Fmax ≈ 1/(T − WNS), 10 path xấu nhất, cell, diện tích.
 - **Lạc quan:** không tải dây (P&R thường xấu thêm 20–40 %), path vào/ra SRAM không tính. Không cache.
-- Bước B (nếu A ổn): map SRAM sang `fakeram45`, P&R đầy đủ.
+- Bước B (nếu A ổn): map SRAM sang macro (sky130: `sky130_sram_*` của ORFS; nangate45: `fakeram45`), P&R đầy đủ.
 
 ## File
 

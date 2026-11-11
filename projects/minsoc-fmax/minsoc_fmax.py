@@ -10,7 +10,7 @@
   cd ~/CHIA-workflow/projects/minsoc-fmax
   chia job submit --working-dir . -- python minsoc_fmax.py --phase sim  --baseline-only --run m1-sim
   chia job submit --working-dir . -- python minsoc_fmax.py --phase fpga --baseline-only --run m1-fpga10 --period-ns 10
-  chia job submit --working-dir . -- python minsoc_fmax.py --phase asic --baseline-only --run a0-ng45-5ns
+  chia job submit --working-dir . -- python minsoc_fmax.py --phase asic --baseline-only --run a0-s130-5ns
   chia job submit --working-dir . -- python minsoc_fmax.py --phase fpga --run m2-f100a --period-ns 10 --rounds 5
 
 Vòng agent (Mốc 2), mỗi lượt: checkpoint fork -> agent Claude Code sửa Chisel (chỉ qua chipyard_bash) -> kiểm phạm vi
@@ -84,7 +84,7 @@ def args_():
     p.add_argument("--model", default="opus")
     p.add_argument("--effort", default="medium", choices=["low", "medium", "high", "xhigh", "max"])
     p.add_argument("--agent-timeout", type=int, default=1800, help="giây cho một lần gọi agent")
-    p.add_argument("--asic-pdk", default="nangate45", choices=sorted(N.ASIC_PLATFORMS))
+    p.add_argument("--asic-pdk", default="sky130hd", choices=sorted(N.ASIC_PLATFORMS))
     p.add_argument("--asic-period-ns", type=float, default=5.0, help="chu kỳ clock của pha asic (ns)")
     p.add_argument("--fix-tries", type=int, default=2, help="số lần agent sửa lỗi compile trong một lượt")
     a = p.parse_args()
