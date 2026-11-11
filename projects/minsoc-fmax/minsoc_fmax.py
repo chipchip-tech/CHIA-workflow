@@ -85,6 +85,8 @@ def args_():
     p.add_argument("--effort", default="medium", choices=["low", "medium", "high", "xhigh", "max"])
     p.add_argument("--agent-timeout", type=int, default=1800, help="giây cho một lần gọi agent")
     p.add_argument("--asic-pdk", default="sky130hd", choices=sorted(N.ASIC_PLATFORMS))
+    p.add_argument("--asic-frontend", default="slang", choices=["slang", "yosys"],
+                   help="bộ đọc HDL của Yosys (slang đọc được SV của firtool; yosys là bộ đọc cũ)")
     p.add_argument("--asic-period-ns", type=float, default=5.0, help="chu kỳ clock của pha asic (ns)")
     p.add_argument("--fix-tries", type=int, default=2, help="số lần agent sửa lỗi compile trong một lượt")
     a = p.parse_args()
@@ -265,7 +267,8 @@ def phase_asic(a, out: Path, st: dict):
         print("CẢNH BÁO: không có *.top.mems.v, SRAM sẽ bị tổng hợp thành flip-flop", flush=True)
     print(f"asic {a.asic_pdk} {a.asic_period_ns:g} ns: Yosys + STA (có thể vài giờ) ...", flush=True)
     r = get(N.asic_synth_sta.chia_remote(a.run, rtl, a.asic_period_ns, (HERE / "asic" / "constraint.sdc").read_text(),
-                                         (HERE / "asic" / "sta.tcl").read_text(), platform=a.asic_pdk))
+                                         (HERE / "asic" / "sta.tcl").read_text(), platform=a.asic_pdk,
+                                         frontend=a.asic_frontend))
     write(out / "asic.json", json.dumps(r, indent=2))
     wns = r.get("wns")
     fmax = 1000.0 / (a.asic_period_ns - wns) if wns is not None and a.asic_period_ns - wns > 0 else None

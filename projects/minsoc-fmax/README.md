@@ -194,6 +194,8 @@ Hỏi nhanh "200 MHz có khả thi không" trước khi đầu tư P&R. PDK mặ
 cd ~/CHIA-workflow/projects/minsoc-fmax && chia job submit --working-dir . -- python minsoc_fmax.py --phase asic --baseline-only --run a0-s130-5ns --asic-period-ns 5
 ```
 
+Frontend HDL mặc định là slang (`SYNTH_HDL_FRONTEND=slang`): bộ đọc Verilog cũ của Yosys không hiểu cú pháp `'{...}` firtool sinh ra (lỗi `Assignment pattern` ở `TLAtomicAutomata.sv`). Dùng `--asic-frontend yosys` để quay lại bộ đọc cũ.
+
 - Cần cluster có khối `asic` (`chia-up-blocks.py --asic`, thêm `--fpga` nếu muốn giữ vivado), fork sạch, không chạy cùng Vivado.
 - Khối chipyard: build Verilator `MinSocFmaxConfig` (`clean=False`, có sẵn thì nhanh), lấy RTL ChipTop từ `<build>.top.f`
   (dự phòng: `gen-collateral` trừ harness), bỏ `*.top.mems.v`.

@@ -580,7 +580,8 @@ def _parse_sta(txt: str) -> dict:
 
 @ChiaFunction(resources={"asic": 1}, max_retries=0)
 def asic_synth_sta(run: str, rtl: dict, period_ns: float, sdc: str, sta_tcl: str,
-                   platform: str = "nangate45", top: str = "ChipTop", timeout: int = 4 * 3600) -> dict:
+                   platform: str = "nangate45", top: str = "ChipTop", timeout: int = 4 * 3600,
+                   frontend: str = "slang") -> dict:
     t0 = time.time()
     plat = ASIC_PLATFORMS[platform]
     pdir = f"{ORFS}/flow/platforms/{platform}"
@@ -596,7 +597,8 @@ def asic_synth_sta(run: str, rtl: dict, period_ns: float, sdc: str, sta_tcl: str
         f"export PLATFORM = {platform}", f"export DESIGN_NAME = {top}", f"export DESIGN_NICKNAME = {nick}",
         f"export VERILOG_FILES = {vfiles}", f"export SDC_FILE = {ddir}/constraint.sdc",
         f"export ABC_CLOCK_PERIOD_IN_PS = {int(period_ns * 1000)}", "export SYNTH_HIERARCHICAL = 0",
-        "export CORE_UTILIZATION = 40", ""]))
+        "export CORE_UTILIZATION = 40"]
+        + ([f"export SYNTH_HDL_FRONTEND = {frontend}"] if frontend != "yosys" else []) + [""]))
     env = f"export MINSOC_PERIOD_NS={period_ns}; source {ORFS}/env.sh >/dev/null"
     mk = f"make -C {ORFS}/flow DESIGN_CONFIG={ddir}/config.mk"
     sh(f"{env}; {mk} clean_synth", timeout=600)
