@@ -9,6 +9,9 @@ foreach p [get_ports -quiet *clock*] {
 if {[llength $clk_ports] == 0} { error "minsoc: không thấy cổng clock nào khớp *clock*" }
 create_clock -name core_clock -period $period $clk_ports
 set io [expr {0.2 * $period}]
-set non_clk [lsearch -all -inline -not -exact [all_inputs] {*}$clk_ports]
+set clk_names {}
+foreach p $clk_ports { lappend clk_names [get_full_name $p] }
+set non_clk {}
+foreach p [all_inputs] { if {[lsearch -exact $clk_names [get_full_name $p]] < 0} { lappend non_clk $p } }
 if {[llength $non_clk]} { set_input_delay $io -clock core_clock $non_clk }
 set_output_delay $io -clock core_clock [all_outputs]
