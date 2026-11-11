@@ -15,7 +15,7 @@ Mọi build (sim, Verilog, bitstream) chạy trên fork `~/tools/RISCVTutorial` 
 |---|---|---|---|---|
 | Simulate | `minsoc_fmax.py --phase sim` | Bước 0 OK | Gate pass ở baseline (test fail sẵn ghi rõ, loại khỏi gate), cycle baseline đo thật | Mốc 1 xong: 131/144 ISA pass (13 loại), geomean 23666, ngân sách ≤ 24376 |
 | FPGA | `minsoc_fmax.py --phase fpga --period-ns 10\|6.667\|5` | Sim xong, baseline bitstream 10 ns, nhiễu P&R đo 2 lần | WNS post-route ≥ 0 ở period, gate pass, cycle ≤ +3 %, không vượt tài nguyên xc7a100t | Mốc 1 xong: WNS −9,326 ns ở 10 ns (≈ 51,7 MHz), ngưỡng nhận 0,8 ns |
-| ASIC | `minsoc_fmax.py --phase asic` | Sau FPGA, PDK/corner đã duyệt (mặc định sky130hd tt_025C_1v80, Yosys + OpenROAD) | WNS ≥ 0 ở 10 ns (hạ từ 5 ns), gate pass | Bước A chạy thật: WNS −6,0 ns ở 10 ns (FPU FMA), bỏ FPU −1,73 ns (core); vòng agent ASIC đã viết, chưa chạy thật |
+| ASIC | `minsoc_fmax.py --phase asic` | Sau FPGA, PDK/corner đã duyệt (mặc định sky130hd tt_025C_1v80, Yosys + OpenROAD) | WNS ≥ 0 ở 10 ns (hạ từ 5 ns), gate pass | Bước A chạy thật: WNS −6,0 ns ở 10 ns (FPU FMA), bỏ FPU −1,73 ns (core); vòng agent `m2a-s130-10a`: −1,031 ns (90,7 MHz) |
 
 **Gate** (như soc-fmax): riscv-tests ISA (`rv64*-p-*`) + 8 benchmark (dhrystone, median, multiply, qsort,
 towers, vvadd, mm, spmv), Verilator cả SoC, chạy trên khối `chipyard` (cần môi trường của fork). Test fail sẵn
@@ -205,18 +205,30 @@ Frontend HDL mặc định là slang (`SYNTH_HDL_FRONTEND=slang`): bộ đọc V
 - **Lạc quan:** không tải dây (P&R thường xấu thêm 20–40 %), path vào/ra SRAM không tính. Không cache.
 - Bước B (nếu A ổn): map SRAM sang macro (sky130: `sky130_sram_*` của ORFS; nangate45: `fakeram45`), P&R đầy đủ.
 
-## ASIC: vòng agent (chưa chạy thật)
+## ASIC: vòng agent
 
 Mỗi lượt: agent sửa Scala (phạm vi như Mốc 2) → build Verilator `MinSocFmaxConfig` (lỗi compile thì agent sửa,
-tối đa `--fix-tries`) → gate (tag cache `m2_gate_MinSocFmaxConfig_*`) → asic_rtl_list → Yosys + STA trên chính RTL đó
-(`designs/<pdk>/minsoc_<run>_<lượt>/`, ~6 phút) → nhận nếu WNS tốt hơn best quá `--asic-accept-ns` (mặc định 0,2 ns;
-Yosys/STA tất định) → commit lên `minsoc-fmax/agent` của fork, không thì revert. r0 đo lại điểm xuất phát.
-Prompt: `prompts/asic_system.md`, `prompts/asic_round.md` (kèm báo cáo path từng cell của OpenROAD).
-Thay đổi chỉ dành cho ASIC: Field mặc định giữ hành vi cũ, bật trong `MinSocFmaxConfig`, tắt lại trong `WithMinSocFpgaTweaks`.
-Lịch sử ASIC (`phase: asic` trong history.json) tách khỏi lịch sử FPGA.
+tối đa `--fix-tries`) → asic_rtl_list → Yosys + STA trên chính RTL đó (`designs/<pdk>/minsoc_<run>_<lượt>/`, ~6 phút)
+→ nhận nếu WNS tốt hơn best quá `--asic-accept-ns` (0,2 ns), **hoặc** điểm họ tăng ≥ `--asic-family-gain` (1,0 ns)
+mà WNS không tệ đi quá `--asic-worst-tol` (0,05 ns) → commit lên `minsoc-fmax/agent` của fork, không thì revert.
+r0 đo lại điểm xuất phát (có gate).
+
+- **Họ path** (theo `project/soc-fmax`): STA in thêm 3000 endpoint (`endpoints.rpt`), gom theo register bỏ chỉ số bit
+  (`families.txt`). Điểm họ = tổng slack xấu nhất của 8 họ xấu nhất, chặn ở 0. Prompt nhận bảng họ và path xấu nhất
+  của mỗi họ (trước đây 10 path đều là các bit của cùng một register).
+- **Gate** (`--asic-gate`, mặc định `end`): lượt chỉ build + synth; gate chạy một lần cuối batch trên best. Hỏng thì
+  lùi fork về lượt NHẬN trước (`fork_restore`; đỉnh cũ giữ ở nhánh `minsoc-fmax/gatefail-<run>`), gate lại, tới khi
+  pass hoặc về r0. Kết quả trong `final-gate/`, `final_gate.json`, mục "Gate cuối batch" của summary. `each`: gate mỗi lượt.
+- Effort mặc định `high` (cả FPGA).
+- Prompt: `prompts/asic_system.md`, `prompts/asic_round.md`.
+- Thay đổi chỉ dành cho ASIC: Field mặc định giữ hành vi cũ, bật trong `MinSocFmaxConfig`, tắt lại trong `WithMinSocFpgaTweaks`.
+- Lịch sử ASIC (`phase: asic` trong history.json) tách khỏi lịch sử FPGA.
+
+**`m2a-s130-10a` (chạy thật, gate mỗi lượt, effort medium):** WNS −6,002 → −1,031 ns (90,7 MHz), nhận r1, r4, r5,
+geomean giữ 23666. Path xấu nhất sau r5: frontend `fq.valid_0` → `fq.elts_4_*`.
 
 ```bash
-cd ~/CHIA-workflow/projects/minsoc-fmax && chia job submit --working-dir . -- python minsoc_fmax.py --phase asic --run m2a-s130-10a --rounds 5
+cd ~/CHIA-workflow/projects/minsoc-fmax && chia job submit --working-dir . -- python minsoc_fmax.py --phase asic --run m2a-s130-10b --rounds 5
 ```
 
 - Cần cluster có chipyard + verilator + claude + asic (`chia-up-blocks.py --asic`), fork sạch, không chạy cùng Vivado.

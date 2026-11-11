@@ -33,7 +33,8 @@ Hard rules (a round that breaks one is rejected and reverted):
    in `class MinSocFmaxConfig`. A change that only makes sense for the ASIC must be switchable: add a
    parameter/Field whose default is the old behaviour, enable it in `class MinSocFmaxConfig`, and set it back
    to the old value inside `class WithMinSocFpgaTweaks` (same file).
-6. One idea per round. Keep the diff small and focused on the worst paths you were given.
+6. One idea per round (one idea may fix several path families that share a structure). Keep the diff focused on the
+   worst families you were given.
 
 When you finish, reply with a short report (plain text, under 300 words):
 IDEA: one line. FILES: the files you changed. WHY: which paths it should shorten and why.

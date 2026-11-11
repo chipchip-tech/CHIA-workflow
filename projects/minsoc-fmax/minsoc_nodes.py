@@ -386,6 +386,23 @@ def fork_commit(message: str, ck: dict) -> dict:
     return out
 
 
+@ChiaFunction(resources={"chipyard": 1}, max_retries=0)
+def fork_restore(heads: dict, save_branch: str) -> dict:
+    """Gate cuối batch hỏng: lưu đỉnh hiện tại vào save_branch, đưa AGENT_BRANCH của từng repo về `heads`
+    (HEAD lúc một lượt được NHẬN). Không xoá commit nào: chúng còn ở save_branch."""
+    cy, out = fork_dir(), {}
+    for d in ("",) + SUBMODULES:
+        if d not in heads:
+            continue
+        path = os.path.join(cy, d) if d else cy
+        out[d or "."] = sh(f"(git rev-parse -q --verify {shlex.quote(save_branch)} >/dev/null || "
+                           f"git branch {shlex.quote(save_branch)} HEAD) && git checkout -q -B {AGENT_BRANCH} && "
+                           f"git reset -q --hard {heads[d]} && git rev-parse --short HEAD", cwd=path, check=True)
+    left = [d or "." for d in ("",) + SUBMODULES
+            if sh("git diff --name-only --ignore-submodules=all HEAD", cwd=os.path.join(cy, d) if d else cy).strip()]
+    return {"ok": not left, "left": left, "heads": out}
+
+
 # ---------------------------------------------------------------------------
 # khối claude: agent
 # ---------------------------------------------------------------------------
@@ -580,7 +597,76 @@ def _parse_sta(txt: str) -> dict:
     return {"wns": wns and float(wns.group(1)), "tns": tns and float(tns.group(1)),
             "clocks": clk and clk.group(1),
             "wns_raw": raw and float(raw.group(1)), "exclude_log": re.findall(r"MINSOC_EXCLUDE [^\n]*", txt),
-            "paths": sorted(paths, key=lambda p: p["slack"] if p["slack"] is not None else 1e9)[:10]}
+            "paths": _one_per_family(sorted(paths, key=lambda p: p["slack"] if p["slack"] is not None else 1e9))[:10]}
+
+
+def _one_per_family(paths: list) -> list:
+    """Path xấu nhất của mỗi họ endpoint (top 10 thôi thì toàn bit của cùng một register)."""
+    seen, out = set(), []
+    for p in paths:
+        k = family_key(p["end"] or "")
+        if k not in seen:
+            seen.add(k)
+            out.append(dict(p, family=k))
+    return out
+
+
+_END_LINE_RE = re.compile(r"\s*(\S+)\s.*?(-?\d+\.\d+)\s*(?:\(VIOLATED\)|\(MET\))?\s*$")
+
+
+def family_key(pin: str) -> str:
+    """Họ register của một endpoint (theo soc-fmax): bỏ chân, chỉ số bit thành [*], bỏ hậu tố kiểu cell Yosys.
+    core.ex_reg_rs_msb_1[3]$_DFFE_PP_/D -> core.ex_reg_rs_msb_1[*]"""
+    k = pin.rsplit("/", 1)[0] if "/" in pin.rsplit(".", 1)[-1] else pin
+    k = re.sub(r"\$_\w+$", "", k)
+    return re.sub(r"\[\d+\]", "[*]", k)
+
+
+def family_table(endpoints: str) -> dict:
+    """{họ: [slack xấu nhất, số endpoint, endpoint xấu nhất]} từ dòng `report_checks -format end`."""
+    fam: dict = {}
+    for line in endpoints.splitlines():
+        m = _END_LINE_RE.match(line)
+        if not m or m.group(1).lower() in ("endpoint", "slack"):
+            continue
+        pin, slack = m.group(1), float(m.group(2))
+        f = fam.setdefault(family_key(pin), [slack, 0, pin])
+        f[1] += 1
+        if slack < f[0]:
+            f[0], f[2] = slack, pin
+    return fam
+
+
+def endpoint_families(endpoints: str, n: int = 15) -> str:
+    rows = sorted(family_table(endpoints).items(), key=lambda kv: kv[1][0])[:n]
+    out = [f"{'worst slack':>11}  {'bits':>4}  register family (bit index -> [*])"]
+    out += [f"{v[0]:11.3f}  {v[1]:4d}  {k}" for k, v in rows]
+    return "\n".join(out)
+
+
+def family_score(endpoints: str, k: int = 8) -> float:
+    """Tổng slack xấu nhất của k họ xấu nhất, mỗi họ chặn ở 0 (ns, ≤ 0). Fmax chỉ tăng khi mọi họ trên
+    WNS mới đều được rút ngắn, nên một lượt nâng điểm này mà không làm WNS tệ đi cũng có giá trị."""
+    worst = sorted(v[0] for v in family_table(endpoints).values())[:k]
+    return round(sum(min(x, 0.0) for x in worst), 3)
+
+
+def _family_paths(rpt: str, n_fam: int = 8, per_path: int = 6000, total: int = 40000) -> str:
+    """Báo cáo path: giữ path xấu nhất của mỗi họ endpoint (tối đa n_fam họ), sắp theo slack."""
+    blocks = re.split(r"\n(?=Startpoint:)", rpt)
+    keep, seen = [], set()
+    for blk in blocks[1:]:
+        e = re.search(r"Endpoint:\s*(\S+)", blk)
+        sl = re.search(r"(-?[\d.]+)\s+slack", blk)
+        if not e or not sl:
+            continue
+        k = family_key(e.group(1))
+        if k not in seen:
+            seen.add(k)
+            keep.append((float(sl.group(1)), k, blk.strip()))
+    keep.sort(key=lambda x: x[0])
+    out = "\n\n".join(f"===== family {k} (worst slack {s})\n{b[:per_path]}" for s, k, b in keep[:n_fam])
+    return out[:total]
 
 
 @ChiaFunction(resources={"asic": 1}, max_retries=0)
@@ -643,8 +729,13 @@ def asic_synth_sta(run: str, rtl: dict, period_ns: float, sdc: str, sta_tcl: str
     area = re.search(r"Chip area[^:]*:\s*([\d.]+)", out["synth_stat"])
     cells = (re.search(r"Number of cells:\s*(\d+)", out["synth_stat"])
              or re.search(r"^\s*(\d+)\s+(?:[\d.]+\s+)?cells\s*$", out["synth_stat"], re.M))
-    rpt = sta.split("MINSOC_END_SUMMARY", 1)[-1]
-    out.update(_parse_sta(sta), sta_tail=sta[-6000:], sta_report=rpt[:40000], area_um2=area and float(area.group(1)),
+    ends = sta.split("MINSOC_BEGIN_ENDPOINTS", 1)[-1].split("MINSOC_END_ENDPOINTS", 1)[0] \
+        if "MINSOC_BEGIN_ENDPOINTS" in sta else ""
+    rpt = sta.split("MINSOC_END_ENDPOINTS" if ends else "MINSOC_END_SUMMARY", 1)[-1]
+    open(f"{ddir}/endpoints.rpt", "w").write(ends)
+    out.update(_parse_sta(sta), sta_tail=sta[-6000:], area_um2=area and float(area.group(1)),
+               sta_report=_family_paths(rpt) if ends else rpt[:40000],
+               families=endpoint_families(ends) if ends else "", family_score=family_score(ends) if ends else None,
                cells=cells and int(cells.group(1)), seconds=time.time() - t0)
     out["ok"] = out["wns"] is not None
     return out

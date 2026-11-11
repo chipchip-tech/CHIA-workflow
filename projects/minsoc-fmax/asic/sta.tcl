@@ -23,4 +23,8 @@ report_worst_slack -max -digits 3
 report_tns -digits 3
 puts "MINSOC_CLOCKS [llength [all_clocks]] [get_full_name [all_clocks]]"
 puts "MINSOC_END_SUMMARY"
-report_checks -path_delay max -group_path_count 10 -endpoint_path_count 1 -fields {fanout} -digits 3
+puts "MINSOC_BEGIN_ENDPOINTS"
+report_checks -path_delay max -group_path_count 3000 -endpoint_path_count 1 -format end -digits 3
+puts "MINSOC_END_ENDPOINTS"
+# Nhiều path (1 path/endpoint) để Python chọn path xấu nhất của từng họ register.
+report_checks -path_delay max -group_path_count 400 -endpoint_path_count 1 -fields {fanout} -digits 3
