@@ -14,6 +14,9 @@ Vòng agent (Mốc 2), mỗi lượt: checkpoint fork -> agent Claude Code sửa
 -> elaborate bản Arty (lỗi compile: agent sửa, tối đa --fix-tries) -> build Verilator MinSocFmaxFpgaConfig + gate
 -> Vivado synth + place/route Explore và ExtraTimingOpt, lấy WNS tốt nhất -> nhận (commit nhánh minsoc-fmax/agent
 của fork) nếu gate pass, geomean ≤ ngân sách và WNS tốt hơn best > --accept-ns; không thì revert.
+Từ 11/11/2026 Vivado mỗi lượt chạy NHANH trước: incremental từ post_route .dcp của best, 1 directive (--incr-directive),
+dừng sau place nếu WNS kém best quá --early-reject-margin. Chỉ khi WNS nhanh ≥ best + --accept-ns - --confirm-slack mới
+chạy FULL (như cũ, 2 directive, không incremental) và quyết nhận/loại theo số FULL. --no-incremental: flow cũ.
 
 Kết quả: ~/minsoc-fmax/<run>/ (summary.md, results.csv, gate.json / fpga.json, reports/). Cache ~/chia_cache_minsoc,
 namespace Ray minsoc_fmax. Một Vivado một lúc; không chạy song song với job khác sửa fork.
@@ -69,6 +72,12 @@ def args_():
     p.add_argument("--cycle-budget", type=float, default=None, help="mặc định geomean baseline × 1,03")
     p.add_argument("--accept-ns", type=float, default=0.5, help="ngưỡng nhận: WNS phải tốt hơn best quá số này")
     p.add_argument("--directives", default="Explore,ExtraTimingOpt", help="directive place_design mỗi lượt")
+    p.add_argument("--no-incremental", action="store_true", help="tắt Vivado nhanh (incremental + loại sớm)")
+    p.add_argument("--incr-directive", default="ExtraTimingOpt", help="directive place_design của lần chạy nhanh")
+    p.add_argument("--early-reject-margin", type=float, default=1.5,
+                   help="dừng sau place nếu WNS sau place < best - số này (ns)")
+    p.add_argument("--confirm-slack", type=float, default=0.3,
+                   help="chạy FULL xác nhận nếu WNS nhanh ≥ best + accept-ns - số này")
     p.add_argument("--model", default="opus")
     p.add_argument("--effort", default="medium", choices=["low", "medium", "high", "xhigh", "max"])
     p.add_argument("--agent-timeout", type=int, default=1800, help="giây cho một lần gọi agent")
@@ -285,39 +294,116 @@ def evaluate(a, d: Path, st: dict, label: str, gate_cfg: dict, elaborated: bool)
     print(f"  [{label}] gate ok={ev['gate_ok']} geomean={gm and round(gm, 1)} {ev['problems']}", flush=True)
     if not ev["gate_ok"]:
         return ev
-    cfg = N.FPGA_CONFIGS[a.period_ns]
-    simdram_v, extra_xdc, vh = vivado_hash()
-    dirs = [x.strip() for x in a.directives.split(",") if x.strip()]
-    tag = f"m2_fpga_{key}_p{a.period_ns:g}_{a.fpga_mem}_{'-'.join(dirs)}_v{vh}"
     from chia.base.cache import get_active_cache
-    if not elaborated and not get(get_active_cache().has.chia_remote(tag)):
+    if not elaborated and not get(get_active_cache().has.chia_remote(full_tag(a, st))):
+        cfg = N.FPGA_CONFIGS[a.period_ns]
         e = get(N.elaborate_fpga.chia_remote(cfg, jobs=min(a.make_jobs, 8)))
         if not e["ok"]:
             ev["problems"].append("elaborate lỗi")
             write(d / "elaborate_tail.log", e["tail"])
             ev["gate_ok"] = False
             return ev
+    return ev
+
+
+def full_tag(a, st: dict) -> str:
+    """Tag cache của Vivado FULL (giữ nguyên dạng cũ để trúng cache các batch trước)."""
+    dirs = [x.strip() for x in a.directives.split(",") if x.strip()]
+    return f"m2_fpga_{st['hash']}_{st['rev']}_p{a.period_ns:g}_{a.fpga_mem}_{'-'.join(dirs)}_v{vivado_hash()[2]}"
+
+
+def run_vivado(a, d: Path, st: dict, label: str, *, mode: str, incr_ref: str = "",
+               stop_below: float | None = None) -> dict:
+    """Vivado cho một trạng thái fork đã elaborate. mode 'full': --directives, không incremental (như Mốc 2 gốc);
+    'fast': 1 directive, incremental từ incr_ref, dừng sau place nếu WNS < stop_below. Trả dict số đo (wns None = lỗi)."""
+    key = f"{st['hash']}_{st['rev']}"
+    cfg = N.FPGA_CONFIGS[a.period_ns]
+    simdram_v, extra_xdc, vh = vivado_hash()
+    if mode == "full":
+        dirs, incr_ref, stop_below = [x.strip() for x in a.directives.split(",") if x.strip()], "", None
+        tag = full_tag(a, st)
+        sub = d
+    else:
+        dirs = [a.incr_directive]
+        rh = hashlib.sha256(f"{incr_ref}|{stop_below}".encode()).hexdigest()[:8]
+        tag = f"m2_fast_{key}_p{a.period_ns:g}_{a.fpga_mem}_{dirs[0]}_r{rh}_v{vh}"
+        sub = d / "fast"
+    r = {"mode": mode, "wns": None, "problems": [], "early": False}
     t0 = time.time()
-    print(f"  [{label}] vivado {cfg} ({', '.join(dirs)}) ...", flush=True)
-    v = get(N.vivado_impl.chia_remote(cfg, f"{a.run}-{label}", simdram_v, fpga_mem=a.fpga_mem, n_impl=len(dirs),
-                                      write_bit=False, extra_xdc=extra_xdc, directives=dirs, _chia_tag=tag))
+    print(f"  [{label}] vivado {mode} {cfg} ({', '.join(dirs)}{', incr' if incr_ref else ''}"
+          f"{f', dừng nếu place < {stop_below:.3f}' if stop_below is not None else ''}) ...", flush=True)
+    v = get(N.vivado_impl.chia_remote(cfg, f"{a.run}-{label}{'' if mode == 'full' else '-fast'}", simdram_v,
+                                      fpga_mem=a.fpga_mem, n_impl=len(dirs), write_bit=False, extra_xdc=extra_xdc,
+                                      directives=dirs, incr_ref=incr_ref, stop_below=stop_below, _chia_tag=tag))
     for t, im in v.get("impls", {}).items():
         for k, txt in im.pop("reports", {}).items():
             if k in ("timing", "paths", "util", "util_hier"):
-                write(d / "reports" / f"{k}_{t}.rpt", txt)
-    write(d / "fpga.json", json.dumps(v, indent=2))
+                write(sub / "reports" / f"{k}_{t}.rpt", txt)
+    write(sub / "fpga.json", json.dumps(v, indent=2))
+    r.update(vivado_min=round((time.time() - t0) / 60, 1), place_wns=v.get("place_wns"), incr=v.get("incr"),
+             run_dir=v.get("run_dir"))
     impls = {t: im for t, im in v.get("impls", {}).items() if im.get("wns") is not None}
+    if v.get("ok") and not impls and v.get("early"):
+        r.update(early=True, wns=None, place_wns_min=min(v["early"].values()))
+        print(f"  [{label}] loại sớm: WNS sau place {r['place_wns_min']} < {stop_below:.3f}", flush=True)
+        return r
     if not v.get("ok") or not impls:
-        ev["problems"].append(f"Vivado lỗi: {v.get('error')} (xem {v.get('run_dir')}/vivado.log)")
-        write(d / "vivado_tail.log", v.get("log_tail", ""))
-        return ev
+        r["problems"].append(f"Vivado lỗi: {v.get('error')} (xem {v.get('run_dir')}/vivado.log)")
+        write(sub / "vivado_tail.log", v.get("log_tail", ""))
+        return r
     bt, bi = max(impls.items(), key=lambda kv: kv[1]["wns"])
-    ev.update(wns=bi["wns"], tns=bi["tns"], whs=bi["whs"], fmax=bi.get("fmax_mhz"), impl=bt,
-              directive=bi["directive"], lut=bi["lut"], ff=bi["ff"], bram=bi["bram"], dsp=bi["dsp"],
-              paths=bi["paths"], run_dir=v["run_dir"], vivado_min=round((time.time() - t0) / 60, 1),
-              all_wns={t: im["wns"] for t, im in impls.items()})
-    print(f"  [{label}] WNS {ev['wns']} ns ({bt} {ev['directive']}), Fmax {ev['fmax'] and round(ev['fmax'], 2)} MHz",
-          flush=True)
+    r.update(wns=bi["wns"], tns=bi["tns"], whs=bi["whs"], fmax=bi.get("fmax_mhz"), impl=bt,
+             directive=bi["directive"], lut=bi["lut"], ff=bi["ff"], bram=bi["bram"], dsp=bi["dsp"],
+             paths=bi["paths"], all_wns={t: im["wns"] for t, im in impls.items()},
+             dcp=f"{v['run_dir']}/obj/post_route_{bt}.dcp")
+    print(f"  [{label}] {mode}: WNS {r['wns']} ns ({bt} {r['directive']}), Fmax {r['fmax'] and round(r['fmax'], 2)} MHz"
+          f", {r['vivado_min']} phút", flush=True)
+    return r
+
+
+def apply_vivado(ev: dict, r: dict):
+    """Chép số đo Vivado (mode full) vào ev, giữ khoá cũ của eval.json."""
+    ev["problems"] += r["problems"]
+    for k in ("wns", "tns", "whs", "fmax", "impl", "directive", "lut", "ff", "bram", "dsp", "paths", "run_dir",
+              "all_wns", "dcp", "place_wns", "incr"):
+        if k in r:
+            ev[k] = r[k]
+    ev["vivado_min"] = round(ev.get("vivado_min", 0) + (r.get("vivado_min") or 0), 1)
+
+
+def best_dcp(best: dict) -> str:
+    """post_route .dcp của best (eval.json cũ chưa có khoá dcp thì suy từ run_dir/impl)."""
+    if best.get("dcp"):
+        return best["dcp"]
+    if best.get("run_dir") and best.get("impl"):
+        return f"{best['run_dir']}/obj/post_route_{best['impl']}.dcp"
+    return ""
+
+
+def evaluate_round(a, d: Path, st: dict, label: str, gate_cfg: dict, best: dict, elaborated: bool) -> dict:
+    """Gate rồi Vivado. r0 / --no-incremental: FULL. Lượt agent: NHANH trước, FULL chỉ khi có thể được nhận."""
+    ev = evaluate(a, d, st, label, gate_cfg, elaborated)
+    if not ev["gate_ok"]:
+        return ev
+    if best is None or a.no_incremental:
+        apply_vivado(ev, run_vivado(a, d, st, label, mode="full"))
+        return ev
+    stop = best["wns"] - a.early_reject_margin
+    f = run_vivado(a, d, st, label, mode="fast", incr_ref=best_dcp(best), stop_below=stop)
+    ev["fast"] = {k: f.get(k) for k in ("wns", "early", "place_wns", "place_wns_min", "incr", "vivado_min",
+                                         "directive", "problems")}
+    ev["vivado_min"] = f.get("vivado_min") or 0
+    if f["early"]:
+        ev["problems"].append(f"loại sớm: WNS sau place {f['place_wns_min']} < best {best['wns']} - "
+                              f"{a.early_reject_margin}")
+        return ev
+    if f["wns"] is not None and f["wns"] < best["wns"] + a.accept_ns - a.confirm_slack:
+        ev.update(wns=f["wns"], fmax=f.get("fmax"), lut=f.get("lut"), ff=f.get("ff"), directive=f.get("directive"))
+        ev["problems"].append(f"WNS nhanh {f['wns']} < best {best['wns']} + {a.accept_ns} - {a.confirm_slack}"
+                              " (không chạy FULL)")
+        return ev
+    # nhanh có triển vọng (hoặc lỗi): quyết bằng FULL
+    apply_vivado(ev, run_vivado(a, d, st, label, mode="full"))
     return ev
 
 
@@ -435,7 +521,7 @@ def phase_loop(a, out: Path, st: dict):
         start, best, rounds = resume_state(out, st)
         print(f"resume {a.run}: {len(rounds)} lượt cũ, best {best['label']} WNS {best['wns']} ns", flush=True)
     else:
-        start = evaluate(a, out / "r0-start", st, "r0", gate_cfg, elaborated=False)
+        start = evaluate_round(a, out / "r0-start", st, "r0", gate_cfg, None, elaborated=False)
         write(out / "r0-start" / "eval.json", json.dumps(start, indent=2))
         if not start["gate_ok"] or start["wns"] is None:
             raise SystemExit(f"điểm xuất phát không dùng được: {start['problems']}")
@@ -493,12 +579,12 @@ def phase_loop(a, out: Path, st: dict):
         if not reason:
             st2 = get(N.fork_state.chia_remote())
             write(out / "patches" / f"{label}.patch", st2["patch"])
-            ev = evaluate(a, d, st2, label, gate_cfg, elaborated=True)
+            ev = evaluate_round(a, d, st2, label, gate_cfg, best, elaborated=True)
             write(d / "eval.json", json.dumps(ev, indent=2))
             rec.update({k: ev.get(k) for k in ("wns", "tns", "fmax", "geomean", "lut", "ff", "bram", "dsp", "impl",
                                                "directive", "all_wns")})
-            if ev["problems"]:
-                reason = "; ".join(ev["problems"])
+            if ev["problems"] or ev["wns"] is None:
+                reason = "; ".join(ev["problems"]) or "không có WNS"
             elif ev["wns"] <= best["wns"] + a.accept_ns:
                 reason = f"WNS {ev['wns']} không tốt hơn {best['wns']} quá {a.accept_ns} ns"
         if not reason:

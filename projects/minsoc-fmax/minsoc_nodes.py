@@ -230,7 +230,8 @@ def _board_repo() -> str:
 @ChiaFunction(resources={"vivado": 1}, max_retries=0)
 def vivado_impl(config: str, run_name: str, simdram_fpga_v: str, fpga_mem: str = "bram",
                 n_impl: int = 3, write_bit: bool = True, timeout_s: int = 6 * 3600,
-                extra_xdc: str = "", directives: list | None = None) -> dict:
+                extra_xdc: str = "", directives: list | None = None, incr_ref: str = "",
+                stop_below: float | None = None) -> dict:
     """Synth một lần + n_impl lần place/route của Arty100THarness.<config> (đã elaborate).
     Kết quả ở <build_dir>/minsoc-vivado/<run_name>/obj; trả về số đo và nội dung report."""
     cy = fork_dir()
@@ -257,7 +258,7 @@ def vivado_impl(config: str, run_name: str, simdram_fpga_v: str, fpga_mem: str =
     tcl = VT.make_tcl(shells_tcl_dir=f"{cy}/fpga/fpga-shells/xilinx/common/tcl", vsrcs_f=vsrcs_f,
                       ip_tcls=ip_tcls, run_dir=run_dir, n_impl=n_impl, write_bit=write_bit,
                       board_repo=_board_repo(), gen_xdcs=xdcs,
-                      directives=directives)
+                      directives=directives, incr_ref=incr_ref, stop_below=stop_below)
     open(f"{run_dir}/run.tcl", "w").write(tcl)
     t0 = time.time()
     try:
@@ -282,7 +283,9 @@ def vivado_impl(config: str, run_name: str, simdram_fpga_v: str, fpga_mem: str =
                       "paths": m["paths"].get(tag, []),
                       "reports": {k: rd(f"{k}_{tag}.rpt") for k in ("timing", "paths", "util", "util_hier", "clocks", "drc")}}
     errors = [l for l in log.splitlines() if l.startswith(("ERROR", "CRITICAL WARNING"))][:60]
-    return {"ok": m["all_done"] and bool(impls), "error": err, "run_dir": run_dir, "seconds": time.time() - t0,
+    return {"ok": m["all_done"] and bool(impls or m["early"]), "error": err,
+            "place_wns": m["place"], "incr": m["incr"], "early": m["early"],
+            "incr_ref": incr_ref, "incr_ref_exists": bool(incr_ref) and os.path.exists(incr_ref), "run_dir": run_dir, "seconds": time.time() - t0,
             "part": m["part"], "board_part": m["board_part"], "synth_done": m["synth_done"],
             "bit": m["bit"], "bit_fail": m["bit_fail"], "impls": impls, "errors": errors,
             "synth": {**VT.parse_wns_tns(rd("timing_synth.rpt")), **VT.parse_util(rd("util_synth.rpt"))},

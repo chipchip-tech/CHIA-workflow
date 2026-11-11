@@ -137,6 +137,15 @@ Explore 2/5, chênh 0,1–0,5 ns, nên giữ cả hai. Mỗi lượt 50–60 ph�
 `power_opt_design`, phys_opt trước route = Default), nên r0 của batch sau đo lại điểm xuất phát; `summary.md` thêm
 cột phút Vivado. Không chạy gate song song với Vivado (23 GB RAM không đủ).
 
+**Vivado nhanh (mặc định từ 11/11/2026, chưa chạy thật):** r0 luôn chạy FULL (flow cũ, `--directives`). Mỗi lượt agent:
+1. NHANH: 1 directive (`--incr-directive`, mặc định ExtraTimingOpt), incremental từ `post_route_*.dcp` của best
+   (`read_checkpoint -incremental -auto_incremental`; Vivado tự chạy thường khi dùng lại được ít). Sau place, nếu
+   WNS < best − `--early-reject-margin` (1,5 ns) thì dừng, không route: `loại sớm`.
+2. WNS nhanh < best + `--accept-ns` − `--confirm-slack` (0,5 − 0,3 ns): loại, không chạy FULL.
+3. Ngược lại: chạy FULL (2 directive, không incremental), quyết nhận/loại theo số FULL. Lượt được nhận luôn đo bằng FULL.
+`eval.json` có thêm `fast` (WNS nhanh, WNS sau place, incremental có dùng không) để kiểm biên sau mỗi batch.
+`--no-incremental` quay về flow cũ. Đổi `vivado_tcl.py` làm cache Vivado cũ không trúng nữa (gate vẫn trúng).
+
 **Chạy tiếp batch đã dừng (`--resume`, chưa chạy thật):** chỉ `chia job stop` sau khi log in `rN: NHẬN …` hoặc
 `rN: loại …` (dừng giữa lượt thì fork bẩn, `--resume` từ chối). Submit lại đúng lệnh cũ, thêm `--resume`: bỏ r0, đọc
 `history.json`, best = lượt NHẬN cuối, đánh số tiếp từ r(N+1); `--rounds` vẫn là tổng số lượt của batch.

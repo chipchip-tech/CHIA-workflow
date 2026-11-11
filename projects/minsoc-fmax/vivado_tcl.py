@@ -9,6 +9,10 @@ khác ở 4 điểm:
   4. Không `exit 1` khi WNS < 0; in số đo dạng `@@KEY ...` để Python đọc.
   5. (11/11/2026, cho nhanh) `general.maxThreads 8`, bỏ `power_opt_design`, phys_opt trước route dùng Default;
      phys_opt sau route vẫn Explore. Số WNS trước đó không so trực tiếp được với flow này.
+  6. (11/11/2026) Incremental tuỳ chọn: `incr_ref` = post_route_*.dcp của lượt best, đọc bằng
+     `read_checkpoint -incremental -auto_incremental` (Vivado tự chạy thường nếu dùng lại được ít).
+     `stop_below`: WNS sau place (trước route) thấp hơn số này thì dừng, không route, bỏ các directive còn lại.
+     In `@@PLACE tag wns`, `@@INCR tag 0|1`, `@@EARLY tag wns`.
 """
 import re
 
@@ -34,10 +38,12 @@ def vsrc_list(sim_common_files: list, extra: list, fpga_mem: str) -> list:
 
 
 def make_tcl(*, shells_tcl_dir: str, vsrcs_f: str, ip_tcls: list, run_dir: str, n_impl: int,
-             write_bit: bool, board_repo: str = "", gen_xdcs: list = (), directives: list | None = None) -> str:
+             write_bit: bool, board_repo: str = "", gen_xdcs: list = (), directives: list | None = None,
+             incr_ref: str = "", stop_below: float | None = None) -> str:
     """Script Vivado batch. Mọi đường dẫn tuyệt đối. Kết quả ghi vào run_dir/obj/.
     `directives`: directive place_design cho từng impl (mặc định PLACE_VARIANTS, n_impl cái đầu)."""
     variants = " ".join(directives or [PLACE_VARIANTS[i % len(PLACE_VARIANTS)] for i in range(n_impl)])
+    stop = "" if stop_below is None else f"{stop_below:.3f}"
     return f"""# sinh bởi minsoc-fmax/vivado_tcl.py
 set scriptdir {shells_tcl_dir}
 set commondir [file dirname $scriptdir]
@@ -98,6 +104,8 @@ proc minsoc_metrics {{tag}} {{
   }}
 }}
 
+set incr_ref {{{incr_ref}}}
+set stop_below {{{stop}}}
 set k 0
 foreach dir {{{variants}}} {{
   set tag impl$k
@@ -105,8 +113,21 @@ foreach dir {{{variants}}} {{
   if {{$k == 0}} {{ close_design }}
   open_checkpoint $wrkdir/post_synth.dcp
   opt_design -directive Explore
+  set incr 0
+  if {{$incr_ref ne "" && [file exists $incr_ref]}} {{
+    if {{![catch {{ read_checkpoint -incremental -auto_incremental $incr_ref }} err]}} {{ set incr 1 }} else {{ puts "@@INCR_FAIL $err" }}
+  }}
+  puts "@@INCR $tag $incr"
   place_design -directive $dir
   phys_opt_design -directive Default
+  set pp [lindex [get_timing_paths -quiet -setup -max_paths 1] 0]
+  set pw [expr {{$pp eq "" ? 0.0 : [get_property SLACK $pp]}}]
+  puts "@@PLACE $tag $pw"
+  if {{$stop_below ne "" && $pw < $stop_below}} {{
+    puts "@@EARLY $tag $pw"
+    close_design
+    break
+  }}
   route_design -directive Explore
   phys_opt_design -directive Explore
   write_checkpoint -force $wrkdir/post_route_$tag.dcp
@@ -150,7 +171,7 @@ def parse_wns_tns(timing_summary: str) -> dict:
 def parse_markers(log: str) -> dict:
     """Đọc các dòng @@ do make_tcl in ra."""
     r = {"part": None, "board_part": None, "synth_done": False, "all_done": False, "bit": None,
-         "bit_fail": None, "impl": {}, "clk": {}, "paths": {}}
+         "bit_fail": None, "impl": {}, "clk": {}, "paths": {}, "place": {}, "incr": {}, "early": {}}
     for l in log.splitlines():
         if not l.startswith("@@"):
             continue
@@ -171,6 +192,12 @@ def parse_markers(log: str) -> dict:
         elif key == "@@IMPL":
             tag, d = rest.split()
             r["impl"][tag] = d
+        elif key in ("@@PLACE", "@@EARLY"):
+            tag, w = rest.split()
+            r["place" if key == "@@PLACE" else "early"][tag] = float(w)
+        elif key == "@@INCR":
+            tag, used = rest.split()
+            r["incr"][tag] = used == "1"
         elif key == "@@CLK":
             tag, name, period, slack = rest.split()
             r["clk"].setdefault(tag, []).append({"clock": name, "period": float(period), "slack": float(slack)})
