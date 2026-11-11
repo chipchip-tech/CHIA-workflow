@@ -506,3 +506,117 @@ def cache_provider(tag, data_path, *args, **kwargs):
 def cache_hit_cond(tag, data_path, *args, **kwargs):
     from chia.base.cache import get_active_cache
     return get(get_active_cache().has.chia_remote(tag))
+
+
+# ---------------------------------------------------------------------------
+# Pha ASIC, bước A: synth Yosys (ORFS) + STA không tải dây. SRAM (*.top.mems.v) để black-box.
+# ---------------------------------------------------------------------------
+ORFS = "/OpenROAD-flow-scripts"
+ASIC_PLATFORMS = {
+    "nangate45": {"tech_lef": "lef/NangateOpenCellLibrary.tech.lef",
+                  "sc_lef": "lef/NangateOpenCellLibrary.macro.mod.lef",
+                  "lib": "lib/NangateOpenCellLibrary_typical.lib"},
+}
+
+
+def verilator_build_dir(cy: str, config: str) -> str:
+    return f"{cy}/sims/verilator/generated-src/chipyard.harness.TestHarness.{config}"
+
+
+@ChiaFunction(resources={"chipyard": 1}, max_retries=0)
+def asic_rtl_list(config: str) -> dict:
+    """File RTL của ChipTop (từ bản build Verilator), bỏ file bộ nhớ hành vi; trả kèm nội dung mems.v để làm stub."""
+    cy = fork_dir()
+    d = verilator_build_dir(cy, config)
+    if not os.path.isdir(d):
+        raise RuntimeError(f"chưa có {d}: build Verilator {config} trước")
+    base = os.path.basename(d)
+    topf = f"{d}/{base}.top.f"
+    mems = f"{d}/{base}.top.mems.v"
+    if os.path.exists(topf):
+        files = [ln.strip() for ln in open(topf) if ln.strip() and not ln.startswith("#")]
+        files = [f if os.path.isabs(f) else os.path.join(d, f) for f in files]
+        src = topf
+    else:  # dự phòng: mọi .v/.sv trong gen-collateral trừ harness/testbench
+        files = sorted(glob.glob(f"{d}/gen-collateral/*.v") + glob.glob(f"{d}/gen-collateral/*.sv"))
+        files = [f for f in files if not re.search(r"(TestHarness|SimDRAM|SimSerial|SimJTAG|SimUART|Sim[A-Z]\w*\.|TestDriver)",
+                                                   os.path.basename(f))]
+        src = "gen-collateral (không có top.f)"
+    files = [f for f in files if f.endswith((".v", ".sv")) and os.path.realpath(f) != os.path.realpath(mems)
+             and "mems" not in os.path.basename(f)]
+    missing = [f for f in files if not os.path.exists(f)]
+    return {"dir": d, "source": src, "files": files, "missing": missing,
+            "mems_v": open(mems).read() if os.path.exists(mems) else "",
+            "listing": sh(f"ls {d} | head -40")}
+
+
+def _bb_stubs(mems_v: str) -> tuple[str, list]:
+    """Giữ phần khai báo cổng (ANSI) của mỗi module bộ nhớ, bỏ thân, gắn (* blackbox *)."""
+    out, names = [], []
+    for m in re.finditer(r"\bmodule\s+(\w+)\s*(#\s*\(.*?\)\s*)?\((.*?)\);", mems_v, re.S):
+        names.append(m.group(1))
+        out.append(f"(* blackbox *)\nmodule {m.group(1)}({m.group(3)});\nendmodule\n")
+    return "\n".join(out), names
+
+
+def _parse_sta(txt: str) -> dict:
+    wns = re.search(r"worst slack\s+(-?[\d.]+)", txt)
+    tns = re.search(r"\btns\s+(-?[\d.]+)", txt)
+    clk = re.search(r"MINSOC_CLOCKS (.*)", txt)
+    paths = []
+    for blk in re.split(r"\n(?=Startpoint:)", txt)[1:]:
+        s = re.search(r"Startpoint:\s*(\S+)", blk)
+        e = re.search(r"Endpoint:\s*(\S+)", blk)
+        sl = re.search(r"(-?[\d.]+)\s+slack", blk)
+        dl = re.search(r"(-?[\d.]+)\s+data arrival time", blk)
+        paths.append({"start": s and s.group(1), "end": e and e.group(1),
+                      "slack": sl and float(sl.group(1)), "arrival": dl and float(dl.group(1))})
+    return {"wns": wns and float(wns.group(1)), "tns": tns and float(tns.group(1)),
+            "clocks": clk and clk.group(1), "paths": paths[:10]}
+
+
+@ChiaFunction(resources={"asic": 1}, max_retries=0)
+def asic_synth_sta(run: str, rtl: dict, period_ns: float, sdc: str, sta_tcl: str,
+                   platform: str = "nangate45", top: str = "ChipTop", timeout: int = 4 * 3600) -> dict:
+    t0 = time.time()
+    plat = ASIC_PLATFORMS[platform]
+    pdir = f"{ORFS}/flow/platforms/{platform}"
+    nick = re.sub(r"\W", "_", f"minsoc_{run}")
+    ddir = f"{ORFS}/flow/designs/{platform}/{nick}"
+    os.makedirs(ddir, exist_ok=True)
+    stubs, bb = _bb_stubs(rtl["mems_v"])
+    open(f"{ddir}/mems_bb.v", "w").write(stubs)
+    open(f"{ddir}/constraint.sdc", "w").write(sdc)
+    open(f"{ddir}/sta.tcl", "w").write(sta_tcl)
+    vfiles = " ".join(rtl["files"] + [f"{ddir}/mems_bb.v"])
+    open(f"{ddir}/config.mk", "w").write("\n".join([
+        f"export PLATFORM = {platform}", f"export DESIGN_NAME = {top}", f"export DESIGN_NICKNAME = {nick}",
+        f"export VERILOG_FILES = {vfiles}", f"export SDC_FILE = {ddir}/constraint.sdc",
+        f"export ABC_CLOCK_PERIOD_IN_PS = {int(period_ns * 1000)}", "export SYNTH_HIERARCHICAL = 0",
+        "export CORE_UTILIZATION = 40", ""]))
+    env = f"export MINSOC_PERIOD_NS={period_ns}; source {ORFS}/env.sh >/dev/null"
+    mk = f"make -C {ORFS}/flow DESIGN_CONFIG={ddir}/config.mk"
+    sh(f"{env}; {mk} clean_synth", timeout=600)
+    synth = sh(f"{env}; {mk} synth", timeout=timeout)
+    res = f"{ORFS}/flow/results/{platform}/{nick}/base"
+    rep = f"{ORFS}/flow/reports/{platform}/{nick}/base"
+    logs = f"{ORFS}/flow/logs/{platform}/{nick}/base"
+    net = next((p for p in (f"{res}/1_synth.v", f"{res}/1_2_yosys.v", f"{res}/1_yosys.v") if os.path.exists(p)), None)
+    out = {"ok": False, "platform": platform, "period_ns": period_ns, "design_dir": ddir, "results": res,
+           "n_files": len(rtl["files"]), "blackboxes": bb, "synth_tail": synth[-4000:], "netlist": net,
+           "synth_stat": sh(f"cat {rep}/synth_stat.txt 2>/dev/null | tail -60"),
+           "yosys_errors": sh(f"grep -hiE 'error|blackbox' {logs}/1_*.log 2>/dev/null | head -40")}
+    if not net:
+        out["seconds"] = time.time() - t0
+        return out
+    sta_env = (f"{env}; export MINSOC_TECH_LEF={pdir}/{plat['tech_lef']} MINSOC_SC_LEF={pdir}/{plat['sc_lef']} "
+               f"MINSOC_LIB={pdir}/{plat['lib']} MINSOC_NETLIST={net} MINSOC_STUBS={ddir}/mems_bb.v "
+               f"MINSOC_TOP={top} MINSOC_SDC={ddir}/constraint.sdc")
+    sta = sh(f"{sta_env}; openroad -exit -no_init {ddir}/sta.tcl", timeout=3600)
+    open(f"{ddir}/sta.log", "w").write(sta)
+    area = re.search(r"Chip area[^:]*:\s*([\d.]+)", out["synth_stat"])
+    cells = re.search(r"Number of cells:\s*(\d+)", out["synth_stat"])
+    out.update(_parse_sta(sta), sta_tail=sta[-6000:], area_um2=area and float(area.group(1)),
+               cells=cells and int(cells.group(1)), seconds=time.time() - t0)
+    out["ok"] = out["wns"] is not None
+    return out

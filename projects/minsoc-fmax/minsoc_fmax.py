@@ -5,9 +5,12 @@
   --phase fpga   elaborate MinSocArty100TF<f>Config, Vivado: synth 1 lần + --repeat lần place/route (đo nhiễu),
                  bitstream ở lần đầu. Ghi WNS/TNS/Fmax/LUT/FF/BRAM/DSP, top 10 path, ngưỡng nhận đề xuất.
 
+  --phase asic   (bước A) Yosys ORFS + STA không tải dây trên RTL Verilator của MinSocFmaxConfig, SRAM black-box.
+
   cd ~/CHIA-workflow/projects/minsoc-fmax
   chia job submit --working-dir . -- python minsoc_fmax.py --phase sim  --baseline-only --run m1-sim
   chia job submit --working-dir . -- python minsoc_fmax.py --phase fpga --baseline-only --run m1-fpga10 --period-ns 10
+  chia job submit --working-dir . -- python minsoc_fmax.py --phase asic --baseline-only --run a0-ng45-5ns
   chia job submit --working-dir . -- python minsoc_fmax.py --phase fpga --run m2-f100a --period-ns 10 --rounds 5
 
 Vòng agent (Mốc 2), mỗi lượt: checkpoint fork -> agent Claude Code sửa Chisel (chỉ qua chipyard_bash) -> kiểm phạm vi
@@ -81,10 +84,12 @@ def args_():
     p.add_argument("--model", default="opus")
     p.add_argument("--effort", default="medium", choices=["low", "medium", "high", "xhigh", "max"])
     p.add_argument("--agent-timeout", type=int, default=1800, help="giây cho một lần gọi agent")
+    p.add_argument("--asic-pdk", default="nangate45", choices=sorted(N.ASIC_PLATFORMS))
+    p.add_argument("--asic-period-ns", type=float, default=5.0, help="chu kỳ clock của pha asic (ns)")
     p.add_argument("--fix-tries", type=int, default=2, help="số lần agent sửa lỗi compile trong một lượt")
     a = p.parse_args()
-    if a.phase == "asic":
-        p.error("pha asic chưa làm (đề xuất PDK/flow trước)")
+    if a.phase == "asic" and not a.baseline_only:
+        p.error("pha asic mới có bước A (--baseline-only)")
     if not a.baseline_only and a.phase != "fpga":
         p.error("vòng agent chỉ có ở --phase fpga")
     a.out_dir = os.path.expanduser(a.out_dir)
@@ -237,6 +242,53 @@ def phase_fpga(a, out: Path, st: dict):
     if not v.get("ok"):
         write(out / "vivado_tail.log", v.get("log_tail", ""))
         raise SystemExit(f"Vivado chưa xong, xem {out}/vivado_tail.log và {v.get('run_dir')}/vivado.log")
+
+
+# ---------------------------------------------------------------------------
+# asic, bước A: synth Yosys (ORFS) + STA không tải dây, SRAM black-box. Số liệu lạc quan.
+# ---------------------------------------------------------------------------
+
+def phase_asic(a, out: Path, st: dict):
+    from chia.chipyard.chisel_build_node import BuildTarget, ChiselBuildNode
+    cb = ChiselBuildNode(st["fork"], N.SIM_CONFIG, target=BuildTarget.VERILATOR, make_jobs=a.make_jobs,
+                         timeout_seconds=a.build_timeout, clean=False, bundle_runtime_libs=True, name="minsoc-asic-rtl")
+    art = get(cb.build.chia_remote(cb))
+    if not art.success:
+        write(out / "build.log", (art.stdout or "")[-200000:] + "\n--- stderr\n" + (art.stderr or "")[-100000:])
+        raise SystemExit(f"build {N.SIM_CONFIG} lỗi, xem {out}/build.log")
+    rtl = get(N.asic_rtl_list.chia_remote(N.SIM_CONFIG))
+    write(out / "rtl_files.txt", f"# nguồn: {rtl['source']}\n" + "\n".join(rtl["files"]) + "\n")
+    print(f"RTL: {len(rtl['files'])} file từ {rtl['source']}, thiếu {len(rtl['missing'])}", flush=True)
+    if rtl["missing"] or not rtl["files"]:
+        raise SystemExit(f"danh sách RTL hỏng (xem {out}/rtl_files.txt):\n{rtl['missing'][:10]}\n{rtl['listing']}")
+    if not rtl["mems_v"]:
+        print("CẢNH BÁO: không có *.top.mems.v, SRAM sẽ bị tổng hợp thành flip-flop", flush=True)
+    print(f"asic {a.asic_pdk} {a.asic_period_ns:g} ns: Yosys + STA (có thể vài giờ) ...", flush=True)
+    r = get(N.asic_synth_sta.chia_remote(a.run, rtl, a.asic_period_ns, (HERE / "asic" / "constraint.sdc").read_text(),
+                                         (HERE / "asic" / "sta.tcl").read_text(), platform=a.asic_pdk))
+    write(out / "asic.json", json.dumps(r, indent=2))
+    wns = r.get("wns")
+    fmax = 1000.0 / (a.asic_period_ns - wns) if wns is not None and a.asic_period_ns - wns > 0 else None
+    lines = [f"# {a.run} — ASIC bước A ({a.asic_pdk}, {a.asic_period_ns:g} ns, {N.SIM_CONFIG})", "",
+             f"- fork hash `{st['hash']}`, {r.get('seconds', 0) / 60:.1f} phút, ok={r.get('ok')}, netlist `{r.get('netlist')}`",
+             f"- {r['n_files']} file RTL, {len(r['blackboxes'])} module SRAM black-box: {', '.join(r['blackboxes']) or 'không'}",
+             f"- cell {r.get('cells')}, diện tích {r.get('area_um2')} µm² (chưa tính SRAM)",
+             f"- clock: {r.get('clocks')}",
+             f"- **WNS {wns} ns, TNS {r.get('tns')} ns → Fmax ước lượng {fmax and round(fmax, 1)} MHz** "
+             "(không tải dây, chưa tính path vào/ra SRAM: lạc quan)", "",
+             "| # | slack | arrival | start | end |", "|---|---|---|---|---|"]
+    for i, p in enumerate(r.get("paths", [])):
+        lines.append(f"| {i} | {p['slack']} | {p['arrival']} | `{p['start']}` | `{p['end']}` |")
+    append_csv(out / "results.csv", {"phase": "asic", "name": "baseline", "hash": st["hash"], "pdk": a.asic_pdk,
+                                     "period_ns": a.asic_period_ns, "wns": wns, "tns": r.get("tns"), "fmax_mhz": fmax,
+                                     "cells": r.get("cells"), "area_um2": r.get("area_um2")})
+    if not r.get("ok"):
+        lines += ["", "## LỖI", "```", r.get("yosys_errors", ""), "--- synth tail", r.get("synth_tail", ""),
+                  "--- sta tail", r.get("sta_tail", ""), "```"]
+    write(out / "summary.md", "\n".join(lines) + "\n")
+    print("\n".join(lines), flush=True)
+    if not r.get("ok"):
+        raise SystemExit(f"asic bước A chưa xong, xem {out}/summary.md và {r.get('design_dir')}")
 
 
 # ---------------------------------------------------------------------------
@@ -626,7 +678,7 @@ def main():
     from chia.base.cache import start_cache, stop_cache
     ray.init(address="auto", namespace="minsoc_fmax", ignore_reinit_error=True)
     res = ray.cluster_resources()
-    need = ["chipyard"] + (["verilator_run"] if a.phase == "sim" else ["vivado"])
+    need = ["chipyard"] + {"sim": ["verilator_run"], "fpga": ["vivado"], "asic": ["asic"]}[a.phase]
     if not a.baseline_only:
         need += ["verilator_run", "claude_creds"]
     miss = [r for r in need if res.get(r, 0) < 1]
@@ -644,7 +696,7 @@ def main():
         if not a.baseline_only:
             phase_loop(a, out, st)
         else:
-            (phase_sim if a.phase == "sim" else phase_fpga)(a, out, st)
+            {"sim": phase_sim, "fpga": phase_fpga, "asic": phase_asic}[a.phase](a, out, st)
     finally:
         stop_cache()
     print(f"XONG: {out}", flush=True)

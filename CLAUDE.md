@@ -195,6 +195,8 @@ Không chạy gate song song Vivado (thiếu RAM).
 Thêm `--resume` (chạy tiếp batch đã dừng giữa hai lượt; cần fork sạch), chưa chạy thật.
 Vivado nhanh (11/11/2026, chưa chạy thật): mỗi lượt chạy incremental 1 directive từ .dcp của best, loại sớm sau place
 (biên 1,5 ns); chỉ lượt có triển vọng mới chạy FULL 2 directive và quyết theo số FULL. `--no-incremental` tắt.
+ASIC bước A (11/11/2026, chưa chạy thật): `--phase asic --baseline-only`, Yosys ORFS + STA OpenROAD không tải dây,
+nangate45 5 ns, SRAM black-box; ước lượng lạc quan xem 200 MHz có khả thi trước khi làm P&R + `fakeram45`.
 
 ## Việc tiếp theo (gợi ý)
 

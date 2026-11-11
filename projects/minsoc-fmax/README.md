@@ -15,7 +15,7 @@ Mọi build (sim, Verilog, bitstream) chạy trên fork `~/tools/RISCVTutorial` 
 |---|---|---|---|---|
 | Simulate | `minsoc_fmax.py --phase sim` | Bước 0 OK | Gate pass ở baseline (test fail sẵn ghi rõ, loại khỏi gate), cycle baseline đo thật | Mốc 1 xong: 131/144 ISA pass (13 loại), geomean 23666, ngân sách ≤ 24376 |
 | FPGA | `minsoc_fmax.py --phase fpga --period-ns 10\|6.667\|5` | Sim xong, baseline bitstream 10 ns, nhiễu P&R đo 2 lần | WNS post-route ≥ 0 ở period, gate pass, cycle ≤ +3 %, không vượt tài nguyên xc7a100t | Mốc 1 xong: WNS −9,326 ns ở 10 ns (≈ 51,7 MHz), ngưỡng nhận 0,8 ns |
-| ASIC | `minsoc_fmax.py --phase asic` | Sau FPGA, PDK/corner đã duyệt (mặc định sky130hd tt_025C_1v80, Yosys + OpenROAD) | WNS ≥ 0 ở 5 ns, gate pass | chưa làm |
+| ASIC | `minsoc_fmax.py --phase asic` | Sau FPGA, PDK/corner đã duyệt (mặc định sky130hd tt_025C_1v80, Yosys + OpenROAD) | WNS ≥ 0 ở 5 ns, gate pass | Bước A (synth + STA, nangate45) đã viết, chưa chạy thật |
 
 **Gate** (như soc-fmax): riscv-tests ISA (`rv64*-p-*`) + 8 benchmark (dhrystone, median, multiply, qsort,
 towers, vvadd, mm, spmv), Verilator cả SoC, chạy trên khối `chipyard` (cần môi trường của fork). Test fail sẵn
@@ -186,6 +186,23 @@ xoá khi cần chỗ).
 **Lưu ý:** đang có lượt được nhận thì không chạy lại `install.sh` (nó ghi đè `MinSocFmaxConfig.scala` mà agent đã sửa).
 Muốn bỏ hết kết quả agent: checkout lại nhánh gốc trong fork và từng submodule (`base` / commit cũ trong `fork_heads_start.txt`).
 
+## ASIC bước A: synth + STA ước lượng (chưa chạy thật)
+
+Hỏi nhanh "200 MHz có khả thi không" trước khi đầu tư P&R. PDK **nangate45** (sky130 quá chậm cho 200 MHz).
+
+```bash
+cd ~/CHIA-workflow/projects/minsoc-fmax && chia job submit --working-dir . -- python minsoc_fmax.py --phase asic --baseline-only --run a0-ng45-5ns --asic-period-ns 5
+```
+
+- Cần cluster có khối `asic` (`chia-up-blocks.py --asic`, thêm `--fpga` nếu muốn giữ vivado), fork sạch, không chạy cùng Vivado.
+- Khối chipyard: build Verilator `MinSocFmaxConfig` (`clean=False`, có sẵn thì nhanh), lấy RTL ChipTop từ `<build>.top.f`
+  (dự phòng: `gen-collateral` trừ harness), bỏ `*.top.mems.v`.
+- Khối asic: stub `(* blackbox *)` cho các module SRAM, `make synth` của ORFS (`designs/nangate45/minsoc_<run>/`),
+  rồi `openroad sta.tcl` (`asic/sta.tcl`, `asic/constraint.sdc`: mọi cổng `*clock*` trừ jtag thành một clock, IO delay 20 %).
+- Kết quả `~/minsoc-fmax/<run>/summary.md`: WNS/TNS, Fmax ≈ 1/(T − WNS), 10 path xấu nhất, cell, diện tích.
+- **Lạc quan:** không tải dây (P&R thường xấu thêm 20–40 %), path vào/ra SRAM không tính. Không cache.
+- Bước B (nếu A ổn): map SRAM sang `fakeram45`, P&R đầy đủ.
+
 ## File
 
 | File | Nội dung |
@@ -199,5 +216,6 @@ Muốn bỏ hết kết quả agent: checkout lại nhánh gốc trong fork và 
 | `minsoc_fmax.py` | Driver: `--phase sim\|fpga --baseline-only --run <tên> [--period-ns] [--repeat] [--fpga-mem]`; không `--baseline-only` = vòng agent Mốc 2 |
 | `fpga/minsoc_reset.xdc` | Gán chân `reset` = C2 (nạp sau `shell.xdc`) |
 | `fpga/SimDRAM_fpga.v` | AXI4 → BRAM 128 KiB thay `SimDRAM` khi tổng hợp FPGA |
+| `asic/constraint.sdc`, `asic/sta.tcl` | Pha ASIC bước A: SDC (chu kỳ qua `MINSOC_PERIOD_NS`) và STA OpenROAD |
 | `exp.yaml` | Cache/bypass CHIA cho tag `baseline_*` |
 | `prompts/system.md`, `round.md`, `fix_build.md` | Prompt agent Mốc 2 |
