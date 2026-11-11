@@ -87,6 +87,10 @@ def args_():
     p.add_argument("--asic-pdk", default="sky130hd", choices=sorted(N.ASIC_PLATFORMS))
     p.add_argument("--asic-frontend", default="slang", choices=["slang", "yosys"],
                    help="bộ đọc HDL của Yosys (slang đọc được SV của firtool; yosys là bộ đọc cũ)")
+    p.add_argument("--asic-reuse-synth", default="", metavar="RUN",
+                   help="bỏ synth, chạy STA trên netlist của run RUN (cùng PDK)")
+    p.add_argument("--asic-exclude", default="",
+                   help="mẫu tên cell, cách nhau dấu phẩy (vd '*fpuOpt*'): bỏ path bắt đầu/kết thúc ở đó")
     p.add_argument("--asic-period-ns", type=float, default=5.0, help="chu kỳ clock của pha asic (ns)")
     p.add_argument("--fix-tries", type=int, default=2, help="số lần agent sửa lỗi compile trong một lượt")
     a = p.parse_args()
@@ -268,7 +272,8 @@ def phase_asic(a, out: Path, st: dict):
     print(f"asic {a.asic_pdk} {a.asic_period_ns:g} ns: Yosys + STA (có thể vài giờ) ...", flush=True)
     r = get(N.asic_synth_sta.chia_remote(a.run, rtl, a.asic_period_ns, (HERE / "asic" / "constraint.sdc").read_text(),
                                          (HERE / "asic" / "sta.tcl").read_text(), platform=a.asic_pdk,
-                                         frontend=a.asic_frontend))
+                                         frontend=a.asic_frontend, reuse_from=a.asic_reuse_synth,
+                                         exclude=a.asic_exclude))
     write(out / "asic.json", json.dumps(r, indent=2))
     wns = r.get("wns")
     fmax = 1000.0 / (a.asic_period_ns - wns) if wns is not None and a.asic_period_ns - wns > 0 else None
@@ -278,6 +283,8 @@ def phase_asic(a, out: Path, st: dict):
              f"- file bỏ tristate (z→0): {', '.join(r.get('notri', [])) or 'không'}",
              f"- cell {r.get('cells')}, diện tích {r.get('area_um2')} µm² (chưa tính SRAM)",
              f"- clock: {r.get('clocks')}",
+             f"- dùng lại netlist: {r.get('reuse_from') or 'không'}; bỏ path qua cell: {r.get('exclude') or 'không'} "
+             + "; ".join(r.get("exclude_log", [])),
              f"- WNS trước repair_design (netlist Yosys chưa buffer): {r.get('wns_raw')} ns\n"
              f"- **WNS {wns} ns, TNS {r.get('tns')} ns → Fmax ước lượng {fmax and round(fmax, 1)} MHz** "
              "(không tải dây, chưa tính path vào/ra SRAM: lạc quan)", "",

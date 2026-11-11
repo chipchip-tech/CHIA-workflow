@@ -7,6 +7,14 @@ read_verilog $::env(MINSOC_NETLIST)
 read_verilog $::env(MINSOC_STUBS)
 link_design $::env(MINSOC_TOP)
 read_sdc $::env(MINSOC_SDC)
+# MINSOC_EXCLUDE: mẫu tên cell, cách nhau dấu phẩy (vd *fpuOpt*). Path bắt đầu/kết thúc ở đó bị bỏ khỏi báo cáo.
+if {[info exists ::env(MINSOC_EXCLUDE)] && $::env(MINSOC_EXCLUDE) ne ""} {
+  foreach pat [split $::env(MINSOC_EXCLUDE) ","] {
+    set cs [get_cells -quiet $pat]
+    puts "MINSOC_EXCLUDE $pat: [llength $cs] cell"
+    if {[llength $cs]} { set_false_path -from $cs; set_false_path -to $cs }
+  }
+}
 puts "MINSOC_RAW_WNS [sta::worst_slack -max]"
 # Netlist Yosys chưa chèn buffer (fanout tới 512): sửa fanout/slew trước khi đo, như bước đầu của P&R.
 repair_design

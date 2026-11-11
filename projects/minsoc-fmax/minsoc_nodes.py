@@ -579,14 +579,14 @@ def _parse_sta(txt: str) -> dict:
                       "slack": sl and float(sl.group(1)), "arrival": dl and float(dl.group(1))})
     return {"wns": wns and float(wns.group(1)), "tns": tns and float(tns.group(1)),
             "clocks": clk and clk.group(1),
-            "wns_raw": raw and float(raw.group(1)),
+            "wns_raw": raw and float(raw.group(1)), "exclude_log": re.findall(r"MINSOC_EXCLUDE [^\n]*", txt),
             "paths": sorted(paths, key=lambda p: p["slack"] if p["slack"] is not None else 1e9)[:10]}
 
 
 @ChiaFunction(resources={"asic": 1}, max_retries=0)
 def asic_synth_sta(run: str, rtl: dict, period_ns: float, sdc: str, sta_tcl: str,
                    platform: str = "nangate45", top: str = "ChipTop", timeout: int = 4 * 3600,
-                   frontend: str = "slang") -> dict:
+                   frontend: str = "slang", reuse_from: str = "", exclude: str = "") -> dict:
     t0 = time.time()
     plat = ASIC_PLATFORMS[platform]
     pdir = f"{ORFS}/flow/platforms/{platform}"
@@ -617,14 +617,19 @@ def asic_synth_sta(run: str, rtl: dict, period_ns: float, sdc: str, sta_tcl: str
         + ([f"export SYNTH_HDL_FRONTEND = {frontend}"] if frontend != "yosys" else []) + [""]))
     env = f"export MINSOC_PERIOD_NS={period_ns}; source {ORFS}/env.sh >/dev/null"
     mk = f"make -C {ORFS}/flow DESIGN_CONFIG={ddir}/config.mk"
-    sh(f"{env}; {mk} clean_synth", timeout=600)
-    synth = sh(f"{env}; {mk} synth", timeout=timeout)
-    res = f"{ORFS}/flow/results/{platform}/{nick}/base"
-    rep = f"{ORFS}/flow/reports/{platform}/{nick}/base"
-    logs = f"{ORFS}/flow/logs/{platform}/{nick}/base"
+    if reuse_from:  # chỉ chạy lại STA trên netlist của run khác (không synth)
+        snick = re.sub(r"\W", "_", f"minsoc_{reuse_from}")
+        synth = f"(dùng lại netlist của run {reuse_from})"
+    else:
+        snick = nick
+        sh(f"{env}; {mk} clean_synth", timeout=600)
+        synth = sh(f"{env}; {mk} synth", timeout=timeout)
+    res = f"{ORFS}/flow/results/{platform}/{snick}/base"
+    rep = f"{ORFS}/flow/reports/{platform}/{snick}/base"
+    logs = f"{ORFS}/flow/logs/{platform}/{snick}/base"
     net = next((p for p in (f"{res}/1_synth.v", f"{res}/1_2_yosys.v", f"{res}/1_yosys.v") if os.path.exists(p)), None)
     out = {"ok": False, "platform": platform, "period_ns": period_ns, "design_dir": ddir, "results": res,
-           "n_files": len(rtl["files"]), "blackboxes": bb, "notri": tri, "synth_tail": synth[-4000:], "netlist": net,
+           "n_files": len(rtl["files"]), "blackboxes": bb, "notri": tri, "exclude": exclude, "reuse_from": reuse_from, "synth_tail": synth[-4000:], "netlist": net,
            "synth_stat": sh(f"cat {rep}/synth_stat.txt 2>/dev/null | tail -60"),
            "yosys_errors": sh(f"grep -hiE 'error|blackbox' {logs}/1_*.log 2>/dev/null | head -40")}
     if not net:
@@ -632,11 +637,12 @@ def asic_synth_sta(run: str, rtl: dict, period_ns: float, sdc: str, sta_tcl: str
         return out
     sta_env = (f"{env}; export MINSOC_TECH_LEF={pdir}/{plat['tech_lef']} MINSOC_SC_LEF={pdir}/{plat['sc_lef']} "
                f"MINSOC_LIB={pdir}/{plat['lib']} MINSOC_NETLIST={net} MINSOC_STUBS={ddir}/mems_bb.v "
-               f"MINSOC_TOP={top} MINSOC_SDC={ddir}/constraint.sdc")
+               f"MINSOC_TOP={top} MINSOC_SDC={ddir}/constraint.sdc MINSOC_EXCLUDE='{exclude}'")
     sta = sh(f"{sta_env}; openroad -exit -no_init {ddir}/sta.tcl", timeout=3600)
     open(f"{ddir}/sta.log", "w").write(sta)
     area = re.search(r"Chip area[^:]*:\s*([\d.]+)", out["synth_stat"])
-    cells = re.search(r"Number of cells:\s*(\d+)", out["synth_stat"])
+    cells = (re.search(r"Number of cells:\s*(\d+)", out["synth_stat"])
+             or re.search(r"^\s*(\d+)\s+(?:[\d.]+\s+)?cells\s*$", out["synth_stat"], re.M))
     out.update(_parse_sta(sta), sta_tail=sta[-6000:], area_um2=area and float(area.group(1)),
                cells=cells and int(cells.group(1)), seconds=time.time() - t0)
     out["ok"] = out["wns"] is not None
