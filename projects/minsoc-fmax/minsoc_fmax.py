@@ -91,13 +91,13 @@ def args_():
                    help="bỏ synth, chạy STA trên netlist của run RUN (cùng PDK)")
     p.add_argument("--asic-exclude", default="",
                    help="mẫu tên cell, cách nhau dấu phẩy (vd '*fpuOpt*'): bỏ path bắt đầu/kết thúc ở đó")
-    p.add_argument("--asic-period-ns", type=float, default=5.0, help="chu kỳ clock của pha asic (ns)")
+    p.add_argument("--asic-period-ns", type=float, default=10.0, help="chu kỳ clock của pha asic (ns)")
+    p.add_argument("--asic-accept-ns", type=float, default=0.2,
+                   help="vòng agent ASIC: ngưỡng nhận, WNS STA phải tốt hơn best quá số này")
     p.add_argument("--fix-tries", type=int, default=2, help="số lần agent sửa lỗi compile trong một lượt")
     a = p.parse_args()
-    if a.phase == "asic" and not a.baseline_only:
-        p.error("pha asic mới có bước A (--baseline-only)")
-    if not a.baseline_only and a.phase != "fpga":
-        p.error("vòng agent chỉ có ở --phase fpga")
+    if not a.baseline_only and a.phase == "sim":
+        p.error("vòng agent chỉ có ở --phase fpga và --phase asic")
     a.out_dir = os.path.expanduser(a.out_dir)
     a.cache_dir = os.path.expanduser(a.cache_dir)
     return a
@@ -325,21 +325,24 @@ def vivado_hash() -> tuple[str, str, str]:
     return simdram_v, extra_xdc, vh
 
 
-def evaluate(a, d: Path, st: dict, label: str, gate_cfg: dict, elaborated: bool) -> dict:
-    """Gate (Verilator MinSocFmaxFpgaConfig) rồi Vivado nếu gate pass. Ghi vào thư mục d."""
+def evaluate(a, d: Path, st: dict, label: str, gate_cfg: dict, elaborated: bool,
+             sim_config: str = N.SIM_FPGA_CONFIG, fpga: bool = True) -> dict:
+    """Build Verilator `sim_config` + gate; nếu fpga thì elaborate bản Arty khi chưa có cache. Ghi vào thư mục d."""
     from chia.chipyard.chisel_build_node import BuildTarget, ChiselBuildNode
     ev = {"label": label, "hash": st["hash"], "rev": st["rev"], "gate_ok": False, "problems": [], "wns": None}
     key = f"{st['hash']}_{st['rev']}"
     t0 = time.time()
-    cb = ChiselBuildNode(st["fork"], N.SIM_FPGA_CONFIG, target=BuildTarget.VERILATOR, make_jobs=a.make_jobs,
+    cb = ChiselBuildNode(st["fork"], sim_config, target=BuildTarget.VERILATOR, make_jobs=a.make_jobs,
                          timeout_seconds=a.build_timeout, clean=False, bundle_runtime_libs=True, name="minsoc-m2-sim")
     art = get(cb.build.chia_remote(cb))
     if not art.success:
         write(d / "sim_build.log", (art.stdout or "")[-100000:] + "\n--- stderr\n" + (art.stderr or "")[-50000:])
-        ev["problems"].append(f"build Verilator {N.SIM_FPGA_CONFIG} lỗi (sim_build.log)")
+        ev["problems"].append(f"build Verilator {sim_config} lỗi (sim_build.log)")
+        ev["build_tail"] = ((art.stdout or "")[-6000:] + "\n--- stderr\n" + (art.stderr or "")[-4000:])
         return ev
     print(f"  [{label}] build sim ok ({(time.time() - t0) / 60:.1f} phút), chạy gate ...", flush=True)
-    g = todict(get(N.run_gate.chia_remote(art, gate_cfg["elfs"], repeat_seed=None, _chia_tag=f"m2_gate_{key}")))
+    gtag = f"m2_gate_{key}" if sim_config == N.SIM_FPGA_CONFIG else f"m2_gate_{sim_config}_{key}"
+    g = todict(get(N.run_gate.chia_remote(art, gate_cfg["elfs"], repeat_seed=None, _chia_tag=gtag)))
     write(d / "gate.json", json.dumps({k: v for k, v in g.items() if k != "fail_logs"}, indent=2))
     if g["fail_logs"]:
         write(d / "sim_fail.log", "\n\n".join(f"===== {n}\n{t}" for n, t in g["fail_logs"].items()))
@@ -356,7 +359,7 @@ def evaluate(a, d: Path, st: dict, label: str, gate_cfg: dict, elaborated: bool)
         ev["problems"].append(f"geomean mcycle {gm and round(gm, 1)} > ngân sách {gate_cfg['budget']:.1f}")
     ev["gate_ok"] = not ev["problems"]
     print(f"  [{label}] gate ok={ev['gate_ok']} geomean={gm and round(gm, 1)} {ev['problems']}", flush=True)
-    if not ev["gate_ok"]:
+    if not ev["gate_ok"] or not fpga:
         return ev
     from chia.base.cache import get_active_cache
     if not elaborated and not get(get_active_cache().has.chia_remote(full_tag(a, st))):
@@ -569,7 +572,7 @@ def resume_state(out: Path, st: dict):
     return start, best, rounds
 
 
-def phase_loop(a, out: Path, st: dict):
+def gate_setup(a, out: Path, st: dict) -> dict:
     base = Path(a.out_dir) / a.baseline_run
     if not (base / "known_fail.txt").exists() or not (base / "gate.json").exists():
         raise SystemExit(f"thiếu {base}/known_fail.txt hoặc gate.json (run sim Mốc 1)")
@@ -580,6 +583,12 @@ def phase_loop(a, out: Path, st: dict):
     gate_cfg = {"known": known, "budget": budget, "elfs": get(N.load_test_elfs.chia_remote())}
     print(f"vòng agent: {len(known)} test ISA loại, geomean baseline {base_gm:.1f}, ngân sách {budget:.1f}", flush=True)
     write(out / "fork_heads_start.txt", st["heads"])
+    return gate_cfg
+
+
+def phase_loop(a, out: Path, st: dict):
+    gate_cfg = gate_setup(a, out, st)
+    budget = gate_cfg["budget"]
 
     if a.resume:
         start, best, rounds = resume_state(out, st)
@@ -590,7 +599,7 @@ def phase_loop(a, out: Path, st: dict):
         if not start["gate_ok"] or start["wns"] is None:
             raise SystemExit(f"điểm xuất phát không dùng được: {start['problems']}")
         best, rounds = dict(start, label="r0"), []
-    history = load_history(out)
+    history = [h for h in load_history(out) if h.get("phase") != "asic"]
     llm = make_llm(a)
     write_loop_summary(a, out, start, best, rounds)
     for i in range(len(rounds) + 1, a.rounds + 1):
@@ -633,7 +642,8 @@ def phase_loop(a, out: Path, st: dict):
                     reason = f"lỗi compile sau {a.fix_tries} lần sửa"
                     break
                 print(f"  {label}: lỗi compile, agent sửa lần {k + 1}", flush=True)
-                fp = fill("fix_build.md", ROUND=i, TRY=k + 1, MAX=a.fix_tries, CONFIG=cfg, TAIL=e["tail"], LOG=e["log"])
+                fp = fill("fix_build.md", ROUND=i, TRY=k + 1, MAX=a.fix_tries, CONFIG=cfg,
+                          WHAT="Elaborating (`make verilog` in fpga/)", TAIL=e["tail"], LOG=e["log"])
                 r2 = call_agent(llm, fp, d, f"fix{k + 1}", st["fork"])
                 sc = get(N.fork_scope.chia_remote(ck))
                 if r2 or sc["outside"]:
@@ -679,6 +689,168 @@ def phase_loop(a, out: Path, st: dict):
     write_loop_summary(a, out, start, best, rounds)
     print((out / "summary.md").read_text(), flush=True)
 
+# ---------------------------------------------------------------------------
+# Vòng agent ASIC: sửa RTL -> build Verilator MinSocFmaxConfig + gate -> Yosys + STA (sky130hd, không tải dây)
+# ---------------------------------------------------------------------------
+
+def asic_paths_table(paths: list) -> str:
+    return "\n".join(f"| {p['slack']} | {p['arrival']} | `{p['start']}` | `{p['end']}` |"
+                     for p in paths[:10]) or "| (không có) | | | |"
+
+
+def evaluate_asic(a, d: Path, st: dict, label: str, gate_cfg: dict) -> dict:
+    """Build + gate (MinSocFmaxConfig), rồi synth + STA trên chính RTL vừa build. Ghi vào d."""
+    ev = evaluate(a, d, st, label, gate_cfg, elaborated=True, sim_config=N.SIM_CONFIG, fpga=False)
+    if not ev["gate_ok"]:
+        return ev
+    rtl = get(N.asic_rtl_list.chia_remote(N.SIM_CONFIG))
+    if rtl["missing"] or not rtl["files"]:
+        ev["problems"].append(f"danh sách RTL hỏng: {rtl['missing'][:5]}")
+        return ev
+    t0 = time.time()
+    print(f"  [{label}] Yosys + STA {a.asic_pdk} {a.asic_period_ns:g} ns ...", flush=True)
+    r = get(N.asic_synth_sta.chia_remote(f"{a.run}-{label}", rtl, a.asic_period_ns,
+                                         (HERE / "asic" / "constraint.sdc").read_text(),
+                                         (HERE / "asic" / "sta.tcl").read_text(), platform=a.asic_pdk,
+                                         frontend=a.asic_frontend, exclude=a.asic_exclude))
+    write(d / "sta_report.txt", r.pop("sta_report", ""))
+    write(d / "asic.json", json.dumps(r, indent=2))
+    ev["asic_min"] = round((time.time() - t0) / 60, 1)
+    if not r.get("ok"):
+        ev["problems"].append(f"synth/STA lỗi (xem {r.get('design_dir')})")
+        return ev
+    wns = r["wns"]
+    ev.update(wns=wns, tns=r.get("tns"), wns_raw=r.get("wns_raw"), area_um2=r.get("area_um2"), cells=r.get("cells"),
+              paths=r.get("paths", []), design_dir=r.get("design_dir"),
+              fmax=1000.0 / (a.asic_period_ns - wns) if a.asic_period_ns - wns > 0 else None)
+    print(f"  [{label}] STA: WNS {wns} ns, TNS {ev['tns']} ns, Fmax ≈ {ev['fmax'] and round(ev['fmax'], 1)} MHz, "
+          f"diện tích {ev['area_um2']} µm², {ev['asic_min']} phút", flush=True)
+    return ev
+
+
+def write_asic_summary(a, out: Path, start: dict, best: dict, rounds: list):
+    f = lambda x: x and round(x, 1)                                      # noqa: E731
+    lines = [f"# {a.run} — vòng agent ASIC ({a.asic_pdk}, {a.asic_period_ns:g} ns, {N.SIM_CONFIG})", "",
+             f"- model {a.model}, effort {a.effort}, tối đa {a.rounds} lượt, ngưỡng nhận {a.asic_accept_ns} ns"
+             + (f", bỏ path qua `{a.asic_exclude}`" if a.asic_exclude else ""),
+             f"- điểm xuất phát: WNS {start.get('wns')} ns, TNS {start.get('tns')} ns, Fmax {f(start.get('fmax'))} MHz, "
+             f"diện tích {start.get('area_um2')} µm², geomean {f(start.get('geomean'))}",
+             f"- best hiện tại: **WNS {best.get('wns')} ns, Fmax {f(best.get('fmax'))} MHz** ({best.get('label')}), "
+             f"TNS {best.get('tns')} ns, diện tích {best.get('area_um2')} µm², geomean {f(best.get('geomean'))}",
+             "- STA không tải dây, SRAM black-box: số lạc quan so với sau P&R",
+             "", "| lượt | kết quả | WNS (ns) | TNS (ns) | Fmax (MHz) | geomean | diện tích (µm²) | lý do | phút |",
+             "|---|---|---|---|---|---|---|---|---|"]
+    for r in rounds:
+        lines.append(f"| {r['label']} | {r['verdict']} | {r.get('wns')} | {r.get('tns')} | {f(r.get('fmax'))} | "
+                     f"{f(r.get('geomean'))} | {r.get('area_um2')} | {r['reason']} | {r.get('minutes')} |")
+    if best.get("paths"):
+        lines += ["", f"## Top 10 path của best ({best.get('label')})", "", "| slack | arrival | start | end |",
+                  "|---|---|---|---|", asic_paths_table(best["paths"])]
+    write(out / "summary.md", "\n".join(lines) + "\n")
+
+
+def phase_asic_loop(a, out: Path, st: dict):
+    gate_cfg = gate_setup(a, out, st)
+    if a.resume:
+        start, best, rounds = resume_state(out, st)
+        print(f"resume {a.run}: {len(rounds)} lượt cũ, best {best['label']} WNS {best['wns']} ns", flush=True)
+    else:
+        start = evaluate_asic(a, out / "r0-start", st, "r0", gate_cfg)
+        write(out / "r0-start" / "eval.json", json.dumps(start, indent=2))
+        if not start["gate_ok"] or start.get("wns") is None:
+            raise SystemExit(f"điểm xuất phát không dùng được: {start['problems']}")
+        best, rounds = dict(start, label="r0"), []
+    best_rpt = out / (best["label"] if best["label"] != "r0" else "r0-start") / "sta_report.txt"
+    history = [h for h in load_history(out) if h.get("phase") == "asic"]
+    llm = make_llm_asic(a)
+    write_asic_summary(a, out, start, best, rounds)
+    for i in range(len(rounds) + 1, a.rounds + 1):
+        if best["wns"] >= 0:
+            print(f"đạt WNS ≥ 0 ở {a.asic_period_ns:g} ns, dừng", flush=True)
+            break
+        label = f"r{i}"
+        d = out / label
+        t0 = time.time()
+        print(f"\n=== {label}: best WNS {best['wns']} ns ===", flush=True)
+        ck = get(N.fork_checkpoint.chia_remote())
+        rpt = best_rpt.read_text() if best_rpt.exists() else "(không có)"
+        prompt = fill("asic_round.md", ROUND=i, RUN=a.run, PERIOD=f"{a.asic_period_ns:g}", PDK=a.asic_pdk,
+                      BEST_WNS=best["wns"], BEST_FMAX=best.get("fmax") and round(best["fmax"], 1),
+                      BEST_TNS=best.get("tns"), AREA=best.get("area_um2"), GEOMEAN=round(best["geomean"], 1),
+                      BUDGET=round(gate_cfg["budget"], 1), ACCEPT=a.asic_accept_ns,
+                      EXCLUDE=a.asic_exclude or "(none)", PATHS=asic_paths_table(best.get("paths", [])),
+                      REPORT=rpt[:14000], HISTORY=history_md(history + rounds))
+        rec = {"label": label, "run": a.run, "phase": "asic", "best_before": best["wns"], "verdict": "loại",
+               "reason": "", "files": []}
+        reason = call_agent(llm, prompt, d, "agent", st["fork"])
+        rec["idea"] = (d / "agent_response.md").read_text()[:3000] if (d / "agent_response.md").exists() else ""
+        ev = None
+        if not reason:
+            sc = get(N.fork_scope.chia_remote(ck))
+            rec["files"] = sc["inside"] + sc["outside"]
+            if not sc["changed"]:
+                reason = "agent không sửa gì"
+            elif sc["outside"]:
+                reason = f"sửa ngoài phạm vi: {sc['outside']}"
+        k = 0
+        while not reason:
+            st2 = get(N.fork_state.chia_remote())
+            write(out / "patches" / f"{label}.patch", st2["patch"])
+            ev = evaluate_asic(a, d, st2, label, gate_cfg)
+            if "build_tail" not in ev or k >= a.fix_tries:
+                break
+            k += 1                                   # lỗi compile Chisel: cho agent sửa
+            print(f"  {label}: lỗi build, agent sửa lần {k}", flush=True)
+            fp = fill("fix_build.md", ROUND=i, TRY=k, MAX=a.fix_tries, CONFIG=N.SIM_CONFIG,
+                      WHAT="Building the Verilator simulator of", TAIL=ev["build_tail"],
+                      LOG="(not readable by you; the tail above is all there is)")
+            reason = call_agent(llm, fp, d, f"fix{k}", st["fork"])
+            sc = get(N.fork_scope.chia_remote(ck))
+            rec["files"] = sc["inside"] + sc["outside"]
+            if not reason and sc["outside"]:
+                reason = f"sửa ngoài phạm vi: {sc['outside']}"
+        if not reason:
+            write(d / "eval.json", json.dumps(ev, indent=2))
+            rec.update({k2: ev.get(k2) for k2 in ("wns", "tns", "fmax", "geomean", "area_um2", "cells", "wns_raw")})
+            if ev["problems"] or ev.get("wns") is None:
+                reason = "; ".join(ev["problems"]) or "không có WNS"
+            elif ev["wns"] <= best["wns"] + a.asic_accept_ns:
+                reason = f"WNS {ev['wns']} không tốt hơn {best['wns']} quá {a.asic_accept_ns} ns"
+        if not reason:
+            c = get(N.fork_commit.chia_remote(f"minsoc-fmax {a.run} {label} (asic): WNS {best['wns']} -> {ev['wns']} ns",
+                                              ck))
+            rec.update(verdict="NHẬN", reason=f"WNS +{ev['wns'] - best['wns']:.3f} ns", commits=c)
+            best = dict(ev, label=label)
+            best_rpt = d / "sta_report.txt"
+        else:
+            rv = get(N.fork_revert.chia_remote(ck))
+            write(d / "revert.json", json.dumps(rv, indent=2))
+            rec["reason"] = reason
+            if not rv["ok"]:
+                rounds.append(rec)
+                write(out / "history.json", json.dumps(rounds, indent=2))
+                raise SystemExit(f"{label}: revert fork không sạch ({rv['left']}), dừng. Xem {d}/revert.json")
+        rec["minutes"] = round((time.time() - t0) / 60, 1)
+        rounds.append(rec)
+        print(f"  {label}: {rec['verdict']} — {rec['reason']} ({rec['minutes']} phút)", flush=True)
+        write(out / "history.json", json.dumps(rounds, indent=2))
+        append_csv(out / "results.csv", {"round": label, "verdict": rec["verdict"], "wns": rec.get("wns"),
+                                         "tns": rec.get("tns"), "fmax_mhz": rec.get("fmax"),
+                                         "geomean": rec.get("geomean"), "area_um2": rec.get("area_um2"),
+                                         "reason": rec["reason"]})
+        write_asic_summary(a, out, start, best, rounds)
+        if reason.startswith("LIMIT"):
+            print("hết hạn mức Claude, dừng batch", flush=True)
+            break
+    write_asic_summary(a, out, start, best, rounds)
+    print((out / "summary.md").read_text(), flush=True)
+
+
+def make_llm_asic(a):
+    cls = N.make_llm_class()
+    return cls(model=a.model, system_message=(HERE / "prompts" / "asic_system.md").read_text(),
+               timeout_seconds=a.agent_timeout, retries=1, effort=a.effort)
+
 
 def main():
     a = args_()
@@ -690,7 +862,7 @@ def main():
     from chia.base.cache import start_cache, stop_cache
     ray.init(address="auto", namespace="minsoc_fmax", ignore_reinit_error=True)
     res = ray.cluster_resources()
-    need = ["chipyard"] + {"sim": ["verilator_run"], "fpga": ["vivado"], "asic": ["asic"]}[a.phase]
+    need = ["chipyard"] + {"sim": ["verilator_run"], "fpga": ["vivado"], "asic": ["asic"]}[a.phase]  # noqa: E501
     if not a.baseline_only:
         need += ["verilator_run", "claude_creds"]
     miss = [r for r in need if res.get(r, 0) < 1]
@@ -706,7 +878,7 @@ def main():
     try:
         st = snapshot(out)
         if not a.baseline_only:
-            phase_loop(a, out, st)
+            (phase_asic_loop if a.phase == "asic" else phase_loop)(a, out, st)
         else:
             {"sim": phase_sim, "fpga": phase_fpga, "asic": phase_asic}[a.phase](a, out, st)
     finally:

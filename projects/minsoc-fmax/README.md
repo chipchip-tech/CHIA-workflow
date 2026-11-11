@@ -15,7 +15,7 @@ Mọi build (sim, Verilog, bitstream) chạy trên fork `~/tools/RISCVTutorial` 
 |---|---|---|---|---|
 | Simulate | `minsoc_fmax.py --phase sim` | Bước 0 OK | Gate pass ở baseline (test fail sẵn ghi rõ, loại khỏi gate), cycle baseline đo thật | Mốc 1 xong: 131/144 ISA pass (13 loại), geomean 23666, ngân sách ≤ 24376 |
 | FPGA | `minsoc_fmax.py --phase fpga --period-ns 10\|6.667\|5` | Sim xong, baseline bitstream 10 ns, nhiễu P&R đo 2 lần | WNS post-route ≥ 0 ở period, gate pass, cycle ≤ +3 %, không vượt tài nguyên xc7a100t | Mốc 1 xong: WNS −9,326 ns ở 10 ns (≈ 51,7 MHz), ngưỡng nhận 0,8 ns |
-| ASIC | `minsoc_fmax.py --phase asic` | Sau FPGA, PDK/corner đã duyệt (mặc định sky130hd tt_025C_1v80, Yosys + OpenROAD) | WNS ≥ 0 ở 5 ns, gate pass | Bước A (synth + STA, sky130hd) đã viết, chưa chạy thật |
+| ASIC | `minsoc_fmax.py --phase asic` | Sau FPGA, PDK/corner đã duyệt (mặc định sky130hd tt_025C_1v80, Yosys + OpenROAD) | WNS ≥ 0 ở 10 ns (hạ từ 5 ns), gate pass | Bước A chạy thật: WNS −6,0 ns ở 10 ns (FPU FMA), bỏ FPU −1,73 ns (core); vòng agent ASIC đã viết, chưa chạy thật |
 
 **Gate** (như soc-fmax): riscv-tests ISA (`rv64*-p-*`) + 8 benchmark (dhrystone, median, multiply, qsort,
 towers, vvadd, mm, spmv), Verilator cả SoC, chạy trên khối `chipyard` (cần môi trường của fork). Test fail sẵn
@@ -186,7 +186,7 @@ xoá khi cần chỗ).
 **Lưu ý:** đang có lượt được nhận thì không chạy lại `install.sh` (nó ghi đè `MinSocFmaxConfig.scala` mà agent đã sửa).
 Muốn bỏ hết kết quả agent: checkout lại nhánh gốc trong fork và từng submodule (`base` / commit cũ trong `fork_heads_start.txt`).
 
-## ASIC bước A: synth + STA ước lượng (chưa chạy thật)
+## ASIC bước A: synth + STA ước lượng (chạy thật 11/11/2026)
 
 Hỏi nhanh "200 MHz có khả thi không" trước khi đầu tư P&R. PDK mặc định **sky130hd** (tt_025C_1v80, PDK thật); `--asic-pdk nangate45` vẫn dùng được để so.
 
@@ -204,6 +204,23 @@ Frontend HDL mặc định là slang (`SYNTH_HDL_FRONTEND=slang`): bộ đọc V
 - Kết quả `~/minsoc-fmax/<run>/summary.md`: WNS/TNS, Fmax ≈ 1/(T − WNS), 10 path xấu nhất, cell, diện tích.
 - **Lạc quan:** không tải dây (P&R thường xấu thêm 20–40 %), path vào/ra SRAM không tính. Không cache.
 - Bước B (nếu A ổn): map SRAM sang macro (sky130: `sky130_sram_*` của ORFS; nangate45: `fakeram45`), P&R đầy đủ.
+
+## ASIC: vòng agent (chưa chạy thật)
+
+Mỗi lượt: agent sửa Scala (phạm vi như Mốc 2) → build Verilator `MinSocFmaxConfig` (lỗi compile thì agent sửa,
+tối đa `--fix-tries`) → gate (tag cache `m2_gate_MinSocFmaxConfig_*`) → asic_rtl_list → Yosys + STA trên chính RTL đó
+(`designs/<pdk>/minsoc_<run>_<lượt>/`, ~6 phút) → nhận nếu WNS tốt hơn best quá `--asic-accept-ns` (mặc định 0,2 ns;
+Yosys/STA tất định) → commit lên `minsoc-fmax/agent` của fork, không thì revert. r0 đo lại điểm xuất phát.
+Prompt: `prompts/asic_system.md`, `prompts/asic_round.md` (kèm báo cáo path từng cell của OpenROAD).
+Thay đổi chỉ dành cho ASIC: Field mặc định giữ hành vi cũ, bật trong `MinSocFmaxConfig`, tắt lại trong `WithMinSocFpgaTweaks`.
+Lịch sử ASIC (`phase: asic` trong history.json) tách khỏi lịch sử FPGA.
+
+```bash
+cd ~/CHIA-workflow/projects/minsoc-fmax && chia job submit --working-dir . -- python minsoc_fmax.py --phase asic --run m2a-s130-10a --rounds 5
+```
+
+- Cần cluster có chipyard + verilator + claude + asic (`chia-up-blocks.py --asic`), fork sạch, không chạy cùng Vivado.
+- `--asic-exclude '*fpuOpt*'` để tối ưu phần core riêng; `--resume` như Mốc 2.
 
 ## File
 

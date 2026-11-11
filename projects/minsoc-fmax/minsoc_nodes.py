@@ -643,7 +643,8 @@ def asic_synth_sta(run: str, rtl: dict, period_ns: float, sdc: str, sta_tcl: str
     area = re.search(r"Chip area[^:]*:\s*([\d.]+)", out["synth_stat"])
     cells = (re.search(r"Number of cells:\s*(\d+)", out["synth_stat"])
              or re.search(r"^\s*(\d+)\s+(?:[\d.]+\s+)?cells\s*$", out["synth_stat"], re.M))
-    out.update(_parse_sta(sta), sta_tail=sta[-6000:], area_um2=area and float(area.group(1)),
+    rpt = sta.split("MINSOC_END_SUMMARY", 1)[-1]
+    out.update(_parse_sta(sta), sta_tail=sta[-6000:], sta_report=rpt[:40000], area_um2=area and float(area.group(1)),
                cells=cells and int(cells.group(1)), seconds=time.time() - t0)
     out["ok"] = out["wns"] is not None
     return out

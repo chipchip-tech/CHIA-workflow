@@ -1,6 +1,6 @@
 # Round {{ROUND}}: your change does not compile (attempt {{TRY}} of {{MAX}})
 
-Elaborating `{{CONFIG}}` (`make verilog` in fpga/) failed after your edits. Last lines of the log:
+{{WHAT}} `{{CONFIG}}` failed after your edits. Last lines of the log:
 
 ```
 {{TAIL}}
