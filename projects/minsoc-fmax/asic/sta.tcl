@@ -7,6 +7,9 @@ read_verilog $::env(MINSOC_NETLIST)
 read_verilog $::env(MINSOC_STUBS)
 link_design $::env(MINSOC_TOP)
 read_sdc $::env(MINSOC_SDC)
+puts "MINSOC_RAW_WNS [sta::worst_slack -max]"
+# Netlist Yosys chưa chèn buffer (fanout tới 512): sửa fanout/slew trước khi đo, như bước đầu của P&R.
+repair_design
 puts "MINSOC_BEGIN_SUMMARY"
 report_worst_slack -max -digits 3
 report_tns -digits 3

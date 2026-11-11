@@ -278,6 +278,7 @@ def phase_asic(a, out: Path, st: dict):
              f"- file bỏ tristate (z→0): {', '.join(r.get('notri', [])) or 'không'}",
              f"- cell {r.get('cells')}, diện tích {r.get('area_um2')} µm² (chưa tính SRAM)",
              f"- clock: {r.get('clocks')}",
+             f"- WNS trước repair_design (netlist Yosys chưa buffer): {r.get('wns_raw')} ns\n"
              f"- **WNS {wns} ns, TNS {r.get('tns')} ns → Fmax ước lượng {fmax and round(fmax, 1)} MHz** "
              "(không tải dây, chưa tính path vào/ra SRAM: lạc quan)", "",
              "| # | slack | arrival | start | end |", "|---|---|---|---|---|"]

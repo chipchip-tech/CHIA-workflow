@@ -565,9 +565,10 @@ def _bb_stubs(mems_v: str) -> tuple[str, list]:
 
 
 def _parse_sta(txt: str) -> dict:
-    wns = re.search(r"worst slack\s+(-?[\d.]+)", txt)
-    tns = re.search(r"\btns\s+(-?[\d.]+)", txt)
+    wns = re.search(r"worst slack(?:\s+max)?\s+(-?[\d.]+)", txt)
+    tns = re.search(r"\btns(?:\s+max)?\s+(-?[\d.]+)", txt)
     clk = re.search(r"MINSOC_CLOCKS (.*)", txt)
+    raw = re.search(r"MINSOC_RAW_WNS\s+(-?[\d.eE+-]+)", txt)
     paths = []
     for blk in re.split(r"\n(?=Startpoint:)", txt)[1:]:
         s = re.search(r"Startpoint:\s*(\S+)", blk)
@@ -577,7 +578,9 @@ def _parse_sta(txt: str) -> dict:
         paths.append({"start": s and s.group(1), "end": e and e.group(1),
                       "slack": sl and float(sl.group(1)), "arrival": dl and float(dl.group(1))})
     return {"wns": wns and float(wns.group(1)), "tns": tns and float(tns.group(1)),
-            "clocks": clk and clk.group(1), "paths": paths[:10]}
+            "clocks": clk and clk.group(1),
+            "wns_raw": raw and float(raw.group(1)),
+            "paths": sorted(paths, key=lambda p: p["slack"] if p["slack"] is not None else 1e9)[:10]}
 
 
 @ChiaFunction(resources={"asic": 1}, max_retries=0)
