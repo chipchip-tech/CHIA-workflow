@@ -188,6 +188,11 @@ Lần chạy đầu của `m2-f100a` (10/11/2026) gặp 2 lỗi:
 
 Chạy tay trong container phải `source /home/ray/anaconda3/etc/profile.d/conda.sh` trước `env.sh`. Image không có `unzip`/`jstack`.
 
+**`m2-f100a` xong (chạy thật):** WNS −9,025 → −5,599 ns (64,1 MHz, r4), geomean 23666; path xấu nhất ở MSHR scheduler L2.
+Ngưỡng 0,8 ns loại 2 lượt tốt thật (+0,74, +0,61) nên hạ còn **0,5 ns**. Giữ 2 directive (ExtraTimingOpt thắng 3/5).
+Flow Vivado rút gọn (maxThreads 8, bỏ power_opt, phys_opt trước route Default), chưa chạy thật; batch sau đo lại r0.
+Không chạy gate song song Vivado (thiếu RAM).
+
 ## Việc tiếp theo (gợi ý)
 
 1. Mở project mới theo **Quy ước nhánh**, dùng cluster theo khối (`docs/cluster-blocks.md`), config kế thừa

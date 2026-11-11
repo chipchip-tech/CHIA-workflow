@@ -126,7 +126,17 @@ cd ~/CHIA-workflow/projects/minsoc-fmax && chia job submit --working-dir . -- py
   impl0. Ra WNS/TNS/WHS, Fmax clock SoC, LUT/FF/BRAM/DSP, top 10 path, ngưỡng nhận đề xuất = max(0,05 ns; 2 × chênh WNS).
   Report ở `~/minsoc-fmax/<run>/reports/`, checkpoint ở `<fork>/fpga/generated-src/...<Config>/minsoc-vivado/<run>/obj/`.
 
-## Mốc 2: vòng agent (viết 10/11/2026, chưa chạy thật)
+## Mốc 2: vòng agent
+
+**`m2-f100a` (10 ns, 5 lượt, chạy thật 10/11/2026):** WNS −9,025 → **−5,599 ns (64,1 MHz)**, nhận r1, r4; geomean
+23666 không đổi. Path xấu nhất vẫn ở MSHR scheduler của L2 (`s_pprobe` → MSHR khác, `w_pprobeacklast` → địa chỉ BRAM
+`bankedStore`), 16–19 tầng. r2 (+0,74 ns) và r5 (+0,61 ns) bị ngưỡng 0,8 ns loại. Directive thắng: ExtraTimingOpt 3/5,
+Explore 2/5, chênh 0,1–0,5 ns, nên giữ cả hai. Mỗi lượt 50–60 phút.
+
+**Đổi sau `m2-f100a` (chưa chạy thật):** ngưỡng nhận mặc định 0,5 ns; flow Vivado nhanh hơn (`maxThreads 8`, bỏ
+`power_opt_design`, phys_opt trước route = Default), nên r0 của batch sau đo lại điểm xuất phát; `summary.md` thêm
+cột phút Vivado. Không chạy gate song song với Vivado (23 GB RAM không đủ).
+
 
 Mục tiêu lần lượt 100 → 150 → 200 MHz (`--period-ns 10 | 6.667 | 5`), mỗi batch tối đa 5 lượt, dừng chờ người dùng
 sau mỗi batch. Cần cluster `--fpga` (chipyard, verilator, claude, vivado) và run `m1-sim` (lấy `known_fail.txt`,
@@ -149,7 +159,7 @@ Mỗi lượt (khoảng 60–70 phút):
 5. Build Verilator `MinSocFmaxFpgaConfig` (= `WithMinSocFpgaTweaks ++ MinSocFmaxConfig`, cùng RTL với bản Arty), gate:
    ISA trừ test fail sẵn, 8 benchmark, geomean ≤ 24376.
 6. Vivado: synth + place/route `Explore` và `ExtraTimingOpt`, lấy WNS tốt nhất, không ghi bitstream.
-7. Nhận nếu gate pass và WNS tốt hơn best > 0,8 ns: commit lên nhánh `minsoc-fmax/agent` của fork (từng submodule
+7. Nhận nếu gate pass và WNS tốt hơn best > `--accept-ns` (0,8 ns tới `m2-f100a`, nay 0,5 ns): commit lên nhánh `minsoc-fmax/agent` của fork (từng submodule
    rồi fork gốc). Không thì `fork_revert`.
 
 Lượt `r0` đo điểm xuất phát (commit hiện tại của fork), nên batch sau tiếp từ các lượt đã nhận.

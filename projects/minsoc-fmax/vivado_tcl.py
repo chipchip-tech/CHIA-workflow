@@ -7,6 +7,8 @@ khác ở 4 điểm:
   3. Synth một lần, implement nhiều lần từ `post_synth.dcp` (đo nhiễu P&R): biến thể 0 và 1 cùng directive Explore
      (kiểm tính tất định), biến thể >= 2 đổi directive của place_design.
   4. Không `exit 1` khi WNS < 0; in số đo dạng `@@KEY ...` để Python đọc.
+  5. (11/11/2026, cho nhanh) `general.maxThreads 8`, bỏ `power_opt_design`, phys_opt trước route dùng Default;
+     phys_opt sau route vẫn Explore. Số WNS trước đó không so trực tiếp được với flow này.
 """
 import re
 
@@ -51,6 +53,7 @@ file mkdir $wrkdir
 cd {run_dir}
 {f"set_param board.repoPaths [list {board_repo}]" if board_repo else ""}
 set_param messaging.defaultLimit 1000000
+set_param general.maxThreads 8
 
 # --- prologue (thay prologue.tcl: ép part, BOARD_PART không bắt buộc) ---
 source [file join $boarddir tcl board.tcl]
@@ -103,8 +106,7 @@ foreach dir {{{variants}}} {{
   open_checkpoint $wrkdir/post_synth.dcp
   opt_design -directive Explore
   place_design -directive $dir
-  phys_opt_design -directive Explore
-  power_opt_design
+  phys_opt_design -directive Default
   route_design -directive Explore
   phys_opt_design -directive Explore
   write_checkpoint -force $wrkdir/post_route_$tag.dcp

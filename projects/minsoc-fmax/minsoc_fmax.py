@@ -65,7 +65,7 @@ def args_():
     p.add_argument("--rounds", type=int, default=5, help="số lượt agent tối đa của batch")
     p.add_argument("--baseline-run", default="m1-sim", help="run sim Mốc 1: known_fail.txt và geomean ngân sách")
     p.add_argument("--cycle-budget", type=float, default=None, help="mặc định geomean baseline × 1,03")
-    p.add_argument("--accept-ns", type=float, default=0.8, help="ngưỡng nhận: WNS phải tốt hơn best quá số này")
+    p.add_argument("--accept-ns", type=float, default=0.5, help="ngưỡng nhận: WNS phải tốt hơn best quá số này")
     p.add_argument("--directives", default="Explore,ExtraTimingOpt", help="directive place_design mỗi lượt")
     p.add_argument("--model", default="opus")
     p.add_argument("--effort", default="medium", choices=["low", "medium", "high", "xhigh", "max"])
@@ -387,12 +387,12 @@ def write_loop_summary(a, out: Path, start: dict, best: dict, rounds: list):
              f"geomean {start.get('geomean') and round(start['geomean'], 1)}",
              f"- best hiện tại: **WNS {best.get('wns')} ns, Fmax {best.get('fmax') and round(best['fmax'], 2)} MHz** "
              f"({best.get('label')}), geomean {best.get('geomean') and round(best['geomean'], 1)}",
-             "", "| lượt | kết quả | WNS (ns) | Fmax (MHz) | geomean | LUT | FF | lý do | phút |",
-             "|---|---|---|---|---|---|---|---|---|"]
+             "", "| lượt | kết quả | WNS (ns) | Fmax (MHz) | geomean | LUT | FF | lý do | phút | Vivado (phút) |",
+             "|---|---|---|---|---|---|---|---|---|---|"]
     for r in rounds:
         lines.append(f"| {r['label']} | {r['verdict']} | {r.get('wns')} | {r.get('fmax') and round(r['fmax'], 2)} | "
                      f"{r.get('geomean') and round(r['geomean'], 1)} | {r.get('lut')} | {r.get('ff')} | "
-                     f"{r['reason']} | {r.get('minutes')} |")
+                     f"{r['reason']} | {r.get('minutes')} | {r.get('vivado_min')} |")
     if best.get("paths"):
         lines += ["", f"## Top 10 path của best ({best.get('label')})", "", "| slack | levels | delay | start | end |",
                   "|---|---|---|---|---|", paths_table(best["paths"])]
@@ -490,6 +490,8 @@ def phase_loop(a, out: Path, st: dict):
                 write(out / "history.json", json.dumps(rounds, indent=2))
                 raise SystemExit(f"{label}: revert fork không sạch ({rv['left']}), dừng. Xem {d}/revert.json")
         rec["minutes"] = round((time.time() - t0) / 60, 1)
+        if ev and ev.get("vivado_min") is not None:
+            rec["vivado_min"] = ev["vivado_min"]
         rounds.append(rec)
         print(f"  {label}: {rec['verdict']} — {rec['reason']} ({rec['minutes']} phút)", flush=True)
         write(out / "history.json", json.dumps(rounds, indent=2))
