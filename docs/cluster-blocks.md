@@ -134,3 +134,21 @@ của host (image ORFS mặc định là root), nên kết quả trong `flow/res
 | `settings64.sh: ... /var/home/dingus/tools/Xilinx/.../.settings64-Vitis_for_HLS.sh: No such file` | `settings64.sh` ghi cứng đường dẫn thật lúc cài; Xilinx bị mount ở `/tools/Xilinx` | Mount Xilinx đúng đường dẫn thật (`XILINX_DIR`, qua `realpath`) (đã sửa) |
 | `chia down`: `scoped ray stop in 'chia-asic-...' could not run (is psutil available ...)`, container asic không bị xoá | CHIA dừng Ray bằng `python3` của image (`/opt/orfs-python`, 3.14), không có `psutil` | Dockerfile cài `psutil` vào cả hai Python (đã sửa, kiểm chứng 09/11/2026) |
 | `docker: command not found` | Gõ `docker` khi đang ở trong container | `exit` ra host |
+
+### sbt/coursier treo khi build (khối chipyard)
+
+- **Triệu chứng:** `ChiselBuildNode` đứng ở `make` hàng chục phút, `java` gần 0% CPU, file `.part` trong
+  `~/.cache/coursier` không lớn thêm, trong khi `curl https://repo1.maven.org` vẫn trả 200 ngay.
+- **Nguyên nhân:** coursier không có read timeout; một kết nối TCP tới Maven Central bị chết giữa chừng làm nó
+  chờ mãi. Trước đây cache coursier nằm trong container (không mount) nên mất sau mỗi `chia up`, mỗi lần build
+  đầu phải tải lại hết, dễ dính lỗi này.
+- **Gỡ tạm từ host** (container chạy `--net=host`): tìm socket của java rồi cắt nó, coursier sẽ thử lại:
+  ```bash
+  sudo ss -tnp state established '( dport = :443 )' | grep java
+  sudo ss -K state established dst '[::ffff:104.18.19.12]' dport = :443
+  ```
+  (thay IP bằng IP thấy ở lệnh đầu).
+- **Sửa gốc (chưa kiểm chứng):** template mount `${JVM_CACHE}` (mặc định `~/chia_cache/jvm`, `chia-up-blocks.py`
+  tự tạo) vào `~/.cache/coursier`, `~/.sbt`, `~/.ivy2` của khối chipyard, và đặt `JAVA_TOOL_OPTIONS` với
+  connect timeout 30 s, read timeout 120 s. Cần `chia down` rồi chạy lại `chia-up-blocks.py`; lần build đầu
+  vẫn tải lại một lần.

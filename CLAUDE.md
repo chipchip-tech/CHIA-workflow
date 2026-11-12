@@ -97,6 +97,10 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
    `TutorialStarterConfig` cố ý không có core, build lỗi; thử bằng `RocketConfig`.
    Chipyard 1.10: `WithInclusiveCache` không có tham số `nBanks` (comment trong `TutorialConfigs.scala`
    ghi sai), dùng `WithNBanks(n)`. Thư mục build là `generated-src/chipyard.harness.TestHarness.<Config>`.
+7. **sbt/coursier treo vô hạn khi build** (java 0% CPU, `.part` đứng yên): socket TCP chết tới Maven Central,
+   coursier không có read timeout; cache coursier không mount nên mất sau mỗi `chia up`. Gỡ tạm: `sudo ss -K`
+   socket của java trên host. Sửa gốc (12/11/2026, **chưa kiểm chứng**): mount `JVM_CACHE` + `JAVA_TOOL_OPTIONS`
+   timeout trong khối chipyard (`docs/cluster-blocks.md`).
 
 ## Ghi chú kỹ thuật về CHIA (đã đối chiếu mã nguồn)
 

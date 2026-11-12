@@ -37,6 +37,8 @@ available_node_types:
         compatible_ips: ["${THIS_MACHINE}"]
         worker_setup_commands:
             - "source /home/ray/anaconda3/etc/profile.d/conda.sh && source ${CHIPYARD_FORK}/env.sh && export PATH=$PATH:/home/ray/anaconda3/bin"
+            # Coursier không có read timeout: socket TCP chết tới Maven làm sbt treo vô hạn.
+            - 'export JAVA_TOOL_OPTIONS="-Dsun.net.client.defaultConnectTimeout=30000 -Dsun.net.client.defaultReadTimeout=120000"'
         docker:
             image: "ghcr.io/ucb-bar/chia-chisel-build:latest"
             container_name: "chia-chipyard-${USER}"
@@ -45,6 +47,10 @@ available_node_types:
             run_options:
                 - --shm-size=10.24gb
                 - "-v ${CHIPYARD_FORK}:${CHIPYARD_FORK}:z"
+                # Cache JVM giữ lại giữa các lần chia up (không phải tải lại từ Maven).
+                - "-v ${JVM_CACHE}/coursier:/home/ray/.cache/coursier:z"
+                - "-v ${JVM_CACHE}/sbt:/home/ray/.sbt:z"
+                - "-v ${JVM_CACHE}/ivy2:/home/ray/.ivy2:z"
 
     # --- Khối verilator: chạy mô phỏng (nhận binary từ khối chipyard). ---
     verilator:
