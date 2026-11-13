@@ -239,9 +239,14 @@ xuống bậc kế; không đạt thì chạy thêm batch ở cùng bậc (tối
 fork) rồi dừng. Mỗi batch là run `<run>-p<ns>[-b<k>]` (7.5 → `p7p5`) cạnh nhau trong `~/minsoc-fmax/`, nên lịch sử
 đi theo qua các bậc; bảng tổng ở `<run>/summary.md`, trạng thái `<run>/ladder.json` (chạy lại cùng lệnh thì bỏ bậc
 đã đạt). Lịch sử cho agent nay ghi chu kỳ và 4 họ xấu nhất sau thay đổi của mỗi lượt.
+Batch không nhận lượt nào thì không chạy batch thử lại (cùng điểm xuất phát, chỉ lặp lại).
+
+**Tiêu chí TNS** (sau `m2a-lad-p9`): tổng hợp lại làm slack ở khối không đụng tới nhảy ≈ ±0,3 ns, lớn hơn ngưỡng
+WNS 0,2 ns. Lượt cũng được nhận khi TNS giảm ≥ `--asic-tns-gain` (0.3 = 30%) và WNS tệ đi ≤ `--asic-tns-tol`
+(0,3 ns; 0 tắt).
 
 ```bash
-cd ~/CHIA-workflow/projects/minsoc-fmax && chia job submit --working-dir . -- python minsoc_fmax.py --phase asic --run m2a-lad --asic-ladder 9,8,7,6,5 --rounds 5
+cd ~/CHIA-workflow/projects/minsoc-fmax && chia job submit --working-dir . -- python minsoc_fmax.py --phase asic --run m2a-lad2 --asic-ladder 9,8,7,6,5 --rounds 5
 ```
 
 ## File

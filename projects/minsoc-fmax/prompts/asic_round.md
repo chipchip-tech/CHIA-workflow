@@ -45,6 +45,14 @@ Rounds may come from several batches at different clock periods (`@ N ns`). For 
 Example seen at 7.5 ns: retiming `frontend.fq` / `ShiftQueue` exposed `core.ex_reg_rs_msb_*` (ibuf -> decode ->
 bypass) 1-1.6 ns worse than the old worst path. Check what your change feeds before you submit it.
 
+Synthesis noise: any RTL change makes Yosys/ABC re-optimise the whole netlist, and slack in blocks you did not
+touch moves by about ±0.3 ns. At 9 ns the same patch gave `l2...sinkA.putbuffer` -1.08 in one round and -0.81 in
+another, and `dcache.tlb_superpage_*` showed up as worst. Do not chase a family in a block your change does not
+feed; fix the families your change does affect. A round is also accepted when TNS drops by at least
+{{TNS_GAIN}}% and WNS gets worse by at most {{TNS_TOL}} ns, so a broad fix is kept even if noise moves WNS a bit.
+Approaches that already failed (they lengthened `core.ex_reg_rs_msb_*` by 1.5-2 ns): a ring buffer for `fq`
+(`ShiftQueue` `ring`), duplicated `valid(0)` mux selects (`flowSelCopies`).
+
 {{HISTORY}}
 
 Pick ONE new idea (do not repeat a rejected idea unless you fix the reason it failed). It may touch several

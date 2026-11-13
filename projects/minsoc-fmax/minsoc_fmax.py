@@ -98,6 +98,10 @@ def args_():
                    help="vòng ASIC: cũng nhận nếu điểm họ (tổng slack âm của 8 họ register xấu nhất) tăng ≥ số này (ns)...")
     p.add_argument("--asic-worst-tol", type=float, default=0.05,
                    help="... và WNS không tệ đi quá số này (ns)")
+    p.add_argument("--asic-tns-gain", type=float, default=0.3,
+                   help="vòng ASIC: cũng nhận nếu TNS giảm (về độ lớn) ≥ tỉ lệ này (0.3 = 30%%)...")
+    p.add_argument("--asic-tns-tol", type=float, default=0.3,
+                   help="... và WNS không tệ đi quá số này (ns, cỡ nhiễu tổng hợp Yosys/ABC); 0 tắt tiêu chí TNS")
     p.add_argument("--asic-gate", choices=["end", "each"], default="end",
                    help="end: lượt chỉ build + synth, gate chạy một lần cuối batch (hỏng thì lùi về lượt NHẬN trước); "
                         "each: gate mỗi lượt")
@@ -840,7 +844,7 @@ def phase_asic_loop(a, out: Path, st: dict):
         prompt = fill("asic_round.md", ROUND=i, RUN=a.run, PERIOD=f"{a.asic_period_ns:g}", PDK=a.asic_pdk,
                       BEST_WNS=best["wns"], BEST_FMAX=best.get("fmax") and round(best["fmax"], 1),
                       BEST_TNS=best.get("tns"), AREA=best.get("area_um2"), GEOMEAN=round(start["geomean"], 1),
-                      BUDGET=round(gate_cfg["budget"], 1), ACCEPT=a.asic_accept_ns,
+                      BUDGET=round(gate_cfg["budget"], 1), ACCEPT=a.asic_accept_ns, TNS_GAIN=round(a.asic_tns_gain * 100), TNS_TOL=a.asic_tns_tol,
                       FAM_GAIN=a.asic_family_gain, WORST_TOL=a.asic_worst_tol, BEST_FAM=best.get("family_score"),
                       FAMILIES=(best_rpt.parent / "families.txt").read_text() if (best_rpt.parent / "families.txt").exists()
                       else "(not available)",
@@ -890,16 +894,24 @@ def phase_asic_loop(a, out: Path, st: dict):
             fam_ok = (ev.get("family_score") is not None and best.get("family_score") is not None
                       and ev["family_score"] >= best["family_score"] + a.asic_family_gain
                       and ev["wns"] >= best["wns"] - a.asic_worst_tol) if ev.get("wns") is not None else False
+            # TNS: tổng hợp lại làm slack ở khối không đụng tới nhảy ~±0.3 ns (m2a-lad-p9: L2 putbuffer, TLB), nên
+            # lượt sửa thật (TNS -862 -> -266) có thể bị loại chỉ vì WNS. Nhận khi TNS giảm mạnh và WNS trong biên nhiễu.
+            tns_ok = (a.asic_tns_tol > 0 and ev.get("wns") is not None and ev.get("tns") is not None
+                      and best.get("tns") is not None and best["tns"] < 0
+                      and ev["tns"] >= best["tns"] * (1 - a.asic_tns_gain)
+                      and ev["wns"] >= best["wns"] - a.asic_tns_tol)
             if ev["problems"] or ev.get("wns") is None:
                 reason = "; ".join(ev["problems"]) or "không có WNS"
-            elif ev["wns"] <= best["wns"] + a.asic_accept_ns and not fam_ok:
+            elif ev["wns"] <= best["wns"] + a.asic_accept_ns and not fam_ok and not tns_ok:
                 reason = (f"WNS {ev['wns']} không tốt hơn {best['wns']} quá {a.asic_accept_ns} ns, điểm họ "
-                          f"{ev.get('family_score')} (best {best.get('family_score')}) không đủ")
+                          f"{ev.get('family_score')} (best {best.get('family_score')}) không đủ, TNS {ev.get('tns')} "
+                          f"(best {best.get('tns')}) không đủ")
         if not reason:
             c = get(N.fork_commit.chia_remote(f"minsoc-fmax {a.run} {label} (asic): WNS {best['wns']} -> {ev['wns']} ns",
                                               ck))
             why = (f"WNS +{ev['wns'] - best['wns']:.3f} ns" if ev["wns"] > best["wns"] + a.asic_accept_ns else
-                   f"điểm họ {best.get('family_score')} → {ev['family_score']} ns (WNS {ev['wns'] - best['wns']:+.3f})")
+                   f"TNS {best.get('tns')} → {ev['tns']} ns (WNS {ev['wns'] - best['wns']:+.3f})" if tns_ok
+                   and not fam_ok else f"điểm họ {best.get('family_score')} → {ev['family_score']} ns (WNS {ev['wns'] - best['wns']:+.3f})")
             rec.update(verdict="NHẬN", reason=why, commits=c, heads=get(N.fork_checkpoint.chia_remote())["heads"])
             best = dict(ev, label=label)
             best_rpt = d / "sta_report.txt"
@@ -965,6 +977,9 @@ def phase_asic_ladder(a, out: Path, st: dict):
                                    "fmax": best.get("fmax"), "passed": passed})
             write(lf, json.dumps(state, indent=2))
             if passed:
+                break
+            if best.get("label") == "r0":   # cả batch không nhận lượt nào: batch nữa cùng điểm xuất phát chỉ lặp lại
+                print(f"thang: batch {b.run} không nhận lượt nào, không chạy batch thử lại", flush=True)
                 break
         if not passed:
             print(f"thang dừng ở {per:g} ns: chưa đạt WNS ≥ 0 sau {a.ladder_tries} batch", flush=True)
