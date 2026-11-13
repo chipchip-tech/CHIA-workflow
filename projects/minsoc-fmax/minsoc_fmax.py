@@ -98,6 +98,11 @@ def args_():
                    help="vòng ASIC: cũng nhận nếu điểm họ (tổng slack âm của 8 họ register xấu nhất) tăng ≥ số này (ns)...")
     p.add_argument("--asic-worst-tol", type=float, default=0.05,
                    help="... và WNS không tệ đi quá số này (ns)")
+    p.add_argument("--asic-hier", action=argparse.BooleanOptionalAction, default=True,
+                   help="synth phân cấp (SYNTH_HIERARCHICAL=1): sửa một khối không làm netlist khối khác đổi theo; "
+                        "--no-asic-hier quay lại bản phẳng (số tuyệt đối cao hơn nhưng nhiễu ±0,3 ns)")
+    p.add_argument("--asic-ab", action=argparse.BooleanOptionalAction, default=True,
+                   help="cho agent ASIC công cụ A/B (ab_tool.py: make verilog + synth/STA từng module)")
     p.add_argument("--asic-tns-gain", type=float, default=0.3,
                    help="vòng ASIC: cũng nhận nếu TNS giảm (về độ lớn) ≥ tỉ lệ này (0.3 = 30%%)...")
     p.add_argument("--asic-tns-tol", type=float, default=0.3,
@@ -291,7 +296,7 @@ def phase_asic(a, out: Path, st: dict):
     r = get(N.asic_synth_sta.chia_remote(a.run, rtl, a.asic_period_ns, (HERE / "asic" / "constraint.sdc").read_text(),
                                          (HERE / "asic" / "sta.tcl").read_text(), platform=a.asic_pdk,
                                          frontend=a.asic_frontend, reuse_from=a.asic_reuse_synth,
-                                         exclude=a.asic_exclude))
+                                         exclude=a.asic_exclude, hier=a.asic_hier))
     write(out / "asic.json", json.dumps(r, indent=2))
     wns = r.get("wns")
     fmax = 1000.0 / (a.asic_period_ns - wns) if wns is not None and a.asic_period_ns - wns > 0 else None
@@ -502,20 +507,23 @@ def make_llm(a):
                timeout_seconds=a.agent_timeout, retries=1, effort=a.effort)
 
 
-def call_agent(llm, prompt: str, d: Path, prefix: str, fork: str) -> str:
-    """Một lần gọi agent với tool chipyard_bash. Trả về "" hoặc lý do lỗi."""
+def call_agent(llm, prompt: str, d: Path, prefix: str, fork: str, extra_tools=None) -> str:
+    """Một lần gọi agent với tool chipyard_bash (+ extra_tools(), vd A/B ASIC). Trả về "" hoặc lý do lỗi.
+    chipyard_bash giữ 0,5 slot chipyard để công cụ A/B (0,5) chạy cùng máy."""
     from chia.base.tools.BashTool import BashTool
     get(N.read_text_claude.chia_remote(N.LLM_PARTIAL_FILE, True))
     write(d / f"{prefix}_prompt.md", prompt)
-    tool = BashTool("chipyard_bash", fork, timeout_seconds=120, task_options={"resources": {"chipyard": 1}})
+    tool = BashTool("chipyard_bash", fork, timeout_seconds=120, task_options={"resources": {"chipyard": 0.5}})
+    tools = [tool] + (extra_tools() if extra_tools else [])
     resp, reason = None, ""
     try:
-        resp = get(llm.prompt.chia_remote(llm, prompt, tools=[tool]))
+        resp = get(llm.prompt.chia_remote(llm, prompt, tools=tools))
     except Exception as e:                                           # noqa: BLE001
         write(d / f"{prefix}_error.txt", traceback.format_exc())
         reason = f"LLM lỗi: {type(e).__name__}: {e}"[:500]
     finally:
-        tool.stop()                      # trả slot chipyard trước khi build
+        for t in tools:
+            t.stop()                     # trả slot chipyard trước khi build
     if resp is not None:
         write(d / f"{prefix}_response.md", resp.result or "")
         write(d / f"{prefix}_transcript.txt", resp.stream_result or "")
@@ -543,6 +551,8 @@ def history_md(history: list) -> str:
         per = f" @ {h['period']:g} ns" if h.get("period") else ""
         fam = h.get("top_families")
         fam = f"- worst families after the change:\n\n```\n{fam}\n```\n" if fam else ""
+        if h.get("ab"):
+            fam += "- A/B the agent ran: " + "; ".join(h["ab"][:8]) + "\n"
         out.append(f"### {h.get('run', '')} {h['label']}{per}: {h['verdict']}\n"
                    f"- WNS {h.get('wns')} ns (best before: {h.get('best_before')} ns), "
                    f"geomean {h.get('geomean') and round(h['geomean'], 1)}\n- reason: {h['reason']}\n"
@@ -719,6 +729,54 @@ def phase_loop(a, out: Path, st: dict):
 # Vòng agent ASIC: sửa RTL -> build Verilator MinSocFmaxConfig + gate -> Yosys + STA (sky130hd, không tải dây)
 # ---------------------------------------------------------------------------
 
+def prepare_ab(a, d: Path, ck: dict, best: dict, label: str, memo: dict):
+    """Chép RTL của best cho công cụ A/B (make verilog nếu fork đã đổi), dọn A/B cũ; trả hàm tạo tool
+    (tạo lúc gọi agent để actor chỉ sống trong phiên agent). Lỗi chuẩn bị -> agent chạy không có A/B."""
+    from ab_tool import AsicABTool
+    t0 = time.time()
+    pr = get(N.ab_prepare_parent.chia_remote(N.SIM_CONFIG, ck["heads"]))
+    get(N.asic_ab_cleanup.chia_remote(a.asic_pdk))
+    get(N.ab_read_log.chia_remote(True))
+    write(d / "ab_prepare.json", json.dumps(pr, indent=2))
+    print(f"  [{label}] A/B: RTL parent {'có sẵn' if pr.get('cached') else 'make verilog'} "
+          f"({round(time.time() - t0)} s, ok={pr['ok']})", flush=True)
+    if not pr["ok"]:
+        return None
+    sdc, tcl = (HERE / "asic" / "constraint.sdc").read_text(), (HERE / "asic" / "sta.tcl").read_text()
+    return lambda: [AsicABTool("asic_ab", N.SIM_CONFIG, a.asic_period_ns, sdc, tcl, a.asic_pdk, a.asic_frontend,
+                               a.asic_hier, f"best {best['label']}", f"{a.run} {label}", memo,
+                               task_options={"resources": {"chipyard": 0.5}})]
+
+
+def load_ab_memo(out: Path) -> dict:
+    """A/B đã đo ở mọi batch (~/minsoc-fmax/*/ab_memo.json): khoá Verilog -> kết quả."""
+    memo = {}
+    for p in sorted(out.parent.glob("*/ab_memo.json"), key=lambda x: x.stat().st_mtime):
+        memo.update(json.loads(p.read_text()))
+    return memo
+
+
+def collect_ab(out: Path, d: Path, memo: dict) -> list:
+    """Đọc nhật ký A/B của lượt, ghi ab_log.jsonl, cập nhật memo; trả dòng tóm tắt cho lịch sử."""
+    txt = get(N.ab_read_log.chia_remote(True))
+    write(d / "ab_log.jsonl", txt)
+    lines = []
+    for ln in txt.splitlines():
+        try:
+            e = json.loads(ln)
+        except ValueError:
+            continue
+        if e.get("event") != "ab":
+            continue
+        if e.get("key") and e.get("text") and not e.get("memo"):
+            memo[e["key"]] = {"text": e["text"], "label": e.get("label", ""), "delta_ns": e.get("delta_ns")}
+        dl = e.get("delta_ns")
+        lines.append(f"{e.get('module')} {'(memo) ' if e.get('memo') else ''}"
+                     + (f"dWNS {dl:+.3f}" if isinstance(dl, (int, float)) else e.get("error", "no result")[:80]))
+    write(out / "ab_memo.json", json.dumps({k: v for k, v in memo.items()}, indent=1))
+    return lines
+
+
 def asic_paths_table(paths: list) -> str:
     return "\n".join(f"| {p['slack']} | {p['arrival']} | `{p['start']}` | `{p['end']}` |"
                      for p in paths[:10]) or "| (không có) | | | |"
@@ -738,7 +796,7 @@ def evaluate_asic(a, d: Path, st: dict, label: str, gate_cfg: dict, gate: bool =
     r = get(N.asic_synth_sta.chia_remote(f"{a.run}-{label}", rtl, a.asic_period_ns,
                                          (HERE / "asic" / "constraint.sdc").read_text(),
                                          (HERE / "asic" / "sta.tcl").read_text(), platform=a.asic_pdk,
-                                         frontend=a.asic_frontend, exclude=a.asic_exclude))
+                                         frontend=a.asic_frontend, exclude=a.asic_exclude, hier=a.asic_hier))
     write(d / "sta_report.txt", r.pop("sta_report", ""))
     write(d / "families.txt", r.get("families") or "")
     write(d / "asic.json", json.dumps(r, indent=2))
@@ -830,6 +888,7 @@ def phase_asic_loop(a, out: Path, st: dict):
     history = [h for h in load_history(out) if h.get("phase") == "asic"]
     each = a.asic_gate == "each"
     llm = make_llm_asic(a)
+    memo = load_ab_memo(out) if a.asic_ab else {}
     write_asic_summary(a, out, start, best, rounds)
     for i in range(len(rounds) + 1, a.rounds + 1):
         if best["wns"] >= 0:
@@ -840,6 +899,7 @@ def phase_asic_loop(a, out: Path, st: dict):
         t0 = time.time()
         print(f"\n=== {label}: best WNS {best['wns']} ns ===", flush=True)
         ck = get(N.fork_checkpoint.chia_remote())
+        ab_tools = prepare_ab(a, d, ck, best, label, memo) if a.asic_ab else None
         rpt = best_rpt.read_text() if best_rpt.exists() else "(không có)"
         prompt = fill("asic_round.md", ROUND=i, RUN=a.run, PERIOD=f"{a.asic_period_ns:g}", PDK=a.asic_pdk,
                       BEST_WNS=best["wns"], BEST_FMAX=best.get("fmax") and round(best["fmax"], 1),
@@ -855,10 +915,12 @@ def phase_asic_loop(a, out: Path, st: dict):
                                  "that the change is exactly equivalent (or that added latency is handled everywhere)."),
                       EXCLUDE=a.asic_exclude or "(none)", PATHS=asic_paths_table(best.get("paths", [])),
                       REPORT=rpt[:14000], HISTORY=history_md(history + rounds))
-        rec = {"label": label, "run": a.run, "phase": "asic", "period": a.asic_period_ns,
+        rec = {"label": label, "run": a.run, "phase": "asic", "period": a.asic_period_ns, "hier": a.asic_hier,
                "best_before": best["wns"], "verdict": "loại",
                "reason": "", "files": []}
-        reason = call_agent(llm, prompt, d, "agent", st["fork"])
+        reason = call_agent(llm, prompt, d, "agent", st["fork"], ab_tools)
+        if a.asic_ab:
+            rec["ab"] = collect_ab(out, d, memo)
         rec["idea"] = (d / "agent_response.md").read_text()[:3000] if (d / "agent_response.md").exists() else ""
         ev = None
         if not reason:

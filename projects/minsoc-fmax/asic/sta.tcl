@@ -10,7 +10,7 @@ read_sdc $::env(MINSOC_SDC)
 # MINSOC_EXCLUDE: mẫu tên cell, cách nhau dấu phẩy (vd *fpuOpt*). Path bắt đầu/kết thúc ở đó bị bỏ khỏi báo cáo.
 if {[info exists ::env(MINSOC_EXCLUDE)] && $::env(MINSOC_EXCLUDE) ne ""} {
   foreach pat [split $::env(MINSOC_EXCLUDE) ","] {
-    set cs [get_cells -quiet $pat]
+    set cs [get_cells -hierarchical -quiet $pat]
     puts "MINSOC_EXCLUDE $pat: [llength $cs] cell"
     if {[llength $cs]} { set_false_path -from $cs; set_false_path -to $cs }
   }

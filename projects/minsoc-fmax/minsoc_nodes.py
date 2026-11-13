@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import glob
 import hashlib
+import json
 import os
 import re
 import shlex
@@ -617,7 +618,8 @@ _END_LINE_RE = re.compile(r"\s*(\S+)\s.*?(-?\d+\.\d+)\s*(?:\(VIOLATED\)|\(MET\))
 def family_key(pin: str) -> str:
     """Họ register của một endpoint (theo soc-fmax): bỏ chân, chỉ số bit thành [*], bỏ hậu tố kiểu cell Yosys.
     core.ex_reg_rs_msb_1[3]$_DFFE_PP_/D -> core.ex_reg_rs_msb_1[*]"""
-    k = pin.rsplit("/", 1)[0] if "/" in pin.rsplit(".", 1)[-1] else pin
+    k = pin.rsplit("/", 1)[0] if "/" in pin else pin      # bỏ chân (/D, /Q)
+    k = k.replace("/", ".")                               # netlist phân cấp: a/b/reg -> a.b.reg như bản phẳng
     k = re.sub(r"\$_\w+$", "", k)
     return re.sub(r"\[\d+\]", "[*]", k)
 
@@ -669,24 +671,56 @@ def _family_paths(rpt: str, n_fam: int = 8, per_path: int = 6000, total: int = 4
     return out[:total]
 
 
+def _kogge_args(hier: bool) -> str:
+    """Kogge-Stone cho $lcu (bộ cộng): ORFS mới tự thêm -extra-map lcu_kogge_stone.v trong synth.tcl. Bản cũ thì
+    trả về SYNTH_ARGS thêm map của Yosys (+/choices/kogge-stone.v); "" khi ORFS đã có sẵn."""
+    if "kogge" in sh(f"grep -il kogge {ORFS}/flow/scripts/synth*.tcl 2>/dev/null").lower():
+        return ""
+    return ("" if hier else "-flatten ") + "-extra-map +/choices/kogge-stone.v"
+
+
 @ChiaFunction(resources={"asic": 1}, max_retries=0)
 def asic_synth_sta(run: str, rtl: dict, period_ns: float, sdc: str, sta_tcl: str,
                    platform: str = "nangate45", top: str = "ChipTop", timeout: int = 4 * 3600,
-                   frontend: str = "slang", reuse_from: str = "", exclude: str = "") -> dict:
+                   frontend: str = "slang", reuse_from: str = "", exclude: str = "", hier: bool = False) -> dict:
+    return _synth_sta(f"minsoc_{run}", rtl["files"], rtl["mems_v"], period_ns, sdc, sta_tcl, platform, top,
+                      timeout, frontend, reuse_from and f"minsoc_{reuse_from}", exclude, hier)
+
+
+@ChiaFunction(resources={"asic": 0.5}, max_retries=0)
+def asic_module_sta(key: str, modules: dict, mems_v: str, top: str, period_ns: float, sdc: str, sta_tcl: str,
+                    platform: str = "sky130hd", frontend: str = "slang", hier: bool = False,
+                    timeout: int = 1800) -> dict:
+    """A/B của agent (ab_tool): synth + STA một module (đã gom đủ module con) ở thiết kế ORFS riêng
+    minsoc_ab_<key>. Cổng vào/ra delay 0 nên chỉ path bên trong module được tính."""
+    nick = re.sub(r"\W", "_", f"minsoc_ab_{key}")
+    ddir = f"{ORFS}/flow/designs/{platform}/{nick}"
+    os.makedirs(ddir, exist_ok=True)
+    src = f"{ddir}/ab_rtl.sv"
+    open(src, "w").write("\n\n".join(modules[m] for m in sorted(modules)))
+    r = _synth_sta(nick, [src], mems_v, period_ns, sdc, sta_tcl, platform, top, timeout, frontend, "", "", hier,
+                   io_frac=0.0, keep_endpoints=True)
+    r.pop("synth_tail", None)
+    return r
+
+
+def _synth_sta(nick: str, rtl_files: list, mems_v: str, period_ns: float, sdc: str, sta_tcl: str,
+               platform: str, top: str, timeout: int, frontend: str, reuse_nick: str, exclude: str,
+               hier: bool, io_frac: float = 0.2, keep_endpoints: bool = False) -> dict:
     t0 = time.time()
     plat = ASIC_PLATFORMS[platform]
     pdir = f"{ORFS}/flow/platforms/{platform}"
-    nick = re.sub(r"\W", "_", f"minsoc_{run}")
+    nick = re.sub(r"\W", "_", nick)
     ddir = f"{ORFS}/flow/designs/{platform}/{nick}"
     os.makedirs(ddir, exist_ok=True)
-    stubs, bb = _bb_stubs(rtl["mems_v"])
+    stubs, bb = _bb_stubs(mems_v)
     open(f"{ddir}/mems_bb.v", "w").write(stubs)
     open(f"{ddir}/constraint.sdc", "w").write(sdc)
     open(f"{ddir}/sta.tcl", "w").write(sta_tcl)
     # IOCell của Chipyard dùng tristate (oe ? o : 1'bz): sky130hd không có cell TBUF -> check -assert lỗi.
     # Bước A không cần pad thật: chép file có 'bz ra ddir, thay z bằng 0 (thành buffer thường).
     files, tri = [], []
-    for f in rtl["files"]:
+    for f in rtl_files:
         txt = open(f).read()
         if re.search(r"'b[zZ]", txt):
             nf = f"{ddir}/notri_{os.path.basename(f)}"
@@ -695,17 +729,21 @@ def asic_synth_sta(run: str, rtl: dict, period_ns: float, sdc: str, sta_tcl: str
         else:
             files.append(f)
     vfiles = " ".join(files + [f"{ddir}/mems_bb.v"])
+    # hier: Yosys giữ ranh giới module (ABC chạy theo từng module), nên sửa một khối không làm netlist của khối
+    # khác đổi theo (bản phẳng: nhiễu ±0,3 ns ở khối không đụng tới, m2a-lad-p9).
+    kogge = _kogge_args(hier)
     open(f"{ddir}/config.mk", "w").write("\n".join([
         f"export PLATFORM = {platform}", f"export DESIGN_NAME = {top}", f"export DESIGN_NICKNAME = {nick}",
         f"export VERILOG_FILES = {vfiles}", f"export SDC_FILE = {ddir}/constraint.sdc",
-        f"export ABC_CLOCK_PERIOD_IN_PS = {int(period_ns * 1000)}", "export SYNTH_HIERARCHICAL = 0",
+        f"export ABC_CLOCK_PERIOD_IN_PS = {int(period_ns * 1000)}", f"export SYNTH_HIERARCHICAL = {int(hier)}",
         "export CORE_UTILIZATION = 40"]
+        + ([f"export SYNTH_ARGS = {kogge}"] if kogge else [])
         + ([f"export SYNTH_HDL_FRONTEND = {frontend}"] if frontend != "yosys" else []) + [""]))
-    env = f"export MINSOC_PERIOD_NS={period_ns}; source {ORFS}/env.sh >/dev/null"
+    env = (f"export MINSOC_PERIOD_NS={period_ns} MINSOC_IO_FRAC={io_frac}; source {ORFS}/env.sh >/dev/null")
     mk = f"make -C {ORFS}/flow DESIGN_CONFIG={ddir}/config.mk"
-    if reuse_from:  # chỉ chạy lại STA trên netlist của run khác (không synth)
-        snick = re.sub(r"\W", "_", f"minsoc_{reuse_from}")
-        synth = f"(dùng lại netlist của run {reuse_from})"
+    if reuse_nick:  # chỉ chạy lại STA trên netlist của run khác (không synth)
+        snick = re.sub(r"\W", "_", reuse_nick)
+        synth = f"(dùng lại netlist của {reuse_nick})"
     else:
         snick = nick
         sh(f"{env}; {mk} clean_synth", timeout=600)
@@ -715,7 +753,7 @@ def asic_synth_sta(run: str, rtl: dict, period_ns: float, sdc: str, sta_tcl: str
     logs = f"{ORFS}/flow/logs/{platform}/{snick}/base"
     net = next((p for p in (f"{res}/1_synth.v", f"{res}/1_2_yosys.v", f"{res}/1_yosys.v") if os.path.exists(p)), None)
     out = {"ok": False, "platform": platform, "period_ns": period_ns, "design_dir": ddir, "results": res,
-           "n_files": len(rtl["files"]), "blackboxes": bb, "notri": tri, "exclude": exclude, "reuse_from": reuse_from, "synth_tail": synth[-4000:], "netlist": net,
+           "hier": hier, "kogge_fallback": kogge, "n_files": len(rtl_files), "blackboxes": bb, "notri": tri, "exclude": exclude, "reuse_from": reuse_nick, "synth_tail": synth[-4000:], "netlist": net,
            "synth_stat": sh(f"cat {rep}/synth_stat.txt 2>/dev/null | tail -60"),
            "yosys_errors": sh(f"grep -hiE 'error|blackbox' {logs}/1_*.log 2>/dev/null | head -40")}
     if not net:
@@ -737,5 +775,97 @@ def asic_synth_sta(run: str, rtl: dict, period_ns: float, sdc: str, sta_tcl: str
                sta_report=_family_paths(rpt) if ends else rpt[:40000],
                families=endpoint_families(ends) if ends else "", family_score=family_score(ends) if ends else None,
                cells=cells and int(cells.group(1)), seconds=time.time() - t0)
+    if keep_endpoints:
+        out["endpoints"] = ends
     out["ok"] = out["wns"] is not None
     return out
+
+
+# ---------------------------------------------------------------------------
+# A/B cho agent ASIC (ab_tool.py, theo synth_ab của rocket-fmax): RTL của best ("parent") chép ra AB_DIR/parent
+# trước mỗi lượt; agent tự `make verilog` (child) rồi synth + STA từng module (asic_module_sta).
+# AB_DIR nằm trong fork (khối asic cũng mount fork); file không phải .scala nên fork_scope bỏ qua.
+# ---------------------------------------------------------------------------
+_MOD_RE = re.compile(r"^\s*module\s+(\w+)\b.*?^\s*endmodule\b[^\n]*", re.S | re.M)
+_INST_RE = re.compile(r"^\s*(\w+)\s+(?:#\s*\(.*?\)\s*)?(\w+)\s*\(", re.S | re.M)
+_LOC_RE = re.compile(r"\s*//\s*@\[[^\]]*\]")       # locator của firtool đổi khi dòng Scala dịch chuyển
+_DROP_RE = re.compile(r"(TestHarness|TestDriver|SimDRAM|SimSerial|SimJTAG|SimUART|SimTSI|plusarg|EICG_wrapper_dpi)", re.I)
+
+
+def ab_dir(cy: str) -> str:
+    return f"{cy}/sims/verilator/minsoc_ab"
+
+
+def read_rtl_modules(gen_dir: str) -> tuple[dict, str]:
+    """({module: text}, mems_v) của mọi .v/.sv trong gen_dir (bỏ file bộ nhớ hành vi, DPI, harness)."""
+    mods, mems = {}, ""
+    for root, _d, names in os.walk(gen_dir):
+        for n in sorted(names):
+            if not n.endswith((".v", ".sv")):
+                continue
+            txt = open(os.path.join(root, n), errors="replace").read()
+            if "mems" in n:                  # chỉ *.top.mems.v (model.mems.v khai báo lại cùng module)
+                if n.endswith("top.mems.v"):
+                    mems += txt + "\n"
+                continue
+            if 'import "DPI-C"' in txt or _DROP_RE.search(n):
+                continue
+            for m in _MOD_RE.finditer(txt):
+                mods[m.group(1)] = m.group(0)
+    return mods, mems
+
+
+def module_closure(mods: dict, top: str) -> dict:
+    """{module: text} của top và mọi module con (module không có trong mods = black-box SRAM, bỏ qua)."""
+    out, todo = {}, [top]
+    while todo:
+        m = todo.pop()
+        if m in out or m not in mods:
+            continue
+        out[m] = mods[m]
+        todo += [i.group(1) for i in _INST_RE.finditer(mods[m]) if i.group(1) in mods and i.group(1) not in out]
+    return out
+
+
+def strip_loc(text: str) -> str:
+    return _LOC_RE.sub("", text)
+
+
+@ChiaFunction(resources={"chipyard": 1}, max_retries=0)
+def ab_prepare_parent(config: str, heads: dict, jobs: int = 16) -> dict:
+    """Chép RTL của best (fork sạch, đúng `heads`) ra AB_DIR/parent. Bỏ qua nếu bản chép đã ứng với `heads`;
+    không thì `make verilog` (sau lượt bị loại, thư mục build còn RTL của lượt đó)."""
+    cy = fork_dir()
+    d = ab_dir(cy)
+    mark = f"{d}/parent.heads.json"
+    key = json.dumps(heads, sort_keys=True)
+    if os.path.exists(mark) and open(mark).read() == key and os.path.isdir(f"{d}/parent"):
+        return {"ok": True, "cached": True}
+    t0 = time.time()
+    log = sh(f"cd {cy}/sims/verilator && make verilog CONFIG={config} -j{jobs}", timeout=3600)
+    gen = f"{verilator_build_dir(cy, config)}/gen-collateral"
+    if "[rc=" in log[-20:] or not os.path.isdir(gen):
+        return {"ok": False, "error": log[-3000:]}
+    sh(f"rm -rf {d}/parent && mkdir -p {d}/parent && cp -r {gen}/. {d}/parent/", check=True)
+    open(mark, "w").write(key)
+    return {"ok": True, "cached": False, "seconds": round(time.time() - t0)}
+
+
+@ChiaFunction(resources={"chipyard": 0.5}, max_retries=0)
+def ab_read_log(remove: bool = True) -> str:
+    """Nhật ký A/B của lượt vừa xong (jsonl), rồi xoá để lượt sau bắt đầu sạch."""
+    p = f"{ab_dir(fork_dir())}/experiments.jsonl"
+    if not os.path.exists(p):
+        return ""
+    txt = open(p).read()
+    if remove:
+        os.remove(p)
+    return txt
+
+
+@ChiaFunction(resources={"asic": 0.5}, max_retries=0)
+def asic_ab_cleanup(platform: str = "sky130hd") -> str:
+    """Xoá thiết kế ORFS minsoc_ab_* của các lượt trước (mỗi A/B một thư mục)."""
+    return sh(f"rm -rf {ORFS}/flow/designs/{platform}/minsoc_ab_* {ORFS}/flow/results/{platform}/minsoc_ab_* "
+              f"{ORFS}/flow/logs/{platform}/minsoc_ab_* {ORFS}/flow/reports/{platform}/minsoc_ab_* "
+              f"{ORFS}/flow/objects/{platform}/minsoc_ab_*; echo cleaned")

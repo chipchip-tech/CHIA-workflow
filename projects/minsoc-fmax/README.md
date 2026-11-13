@@ -241,6 +241,18 @@ fork) rồi dừng. Mỗi batch là run `<run>-p<ns>[-b<k>]` (7.5 → `p7p5`) c�
 đã đạt). Lịch sử cho agent nay ghi chu kỳ và 4 họ xấu nhất sau thay đổi của mỗi lượt.
 Batch không nhận lượt nào thì không chạy batch thử lại (cùng điểm xuất phát, chỉ lặp lại).
 
+**Học từ rocket-fmax / soc-fmax** (13/11/2026, chưa chạy thật):
+- `--asic-hier` (mặc định bật): synth phân cấp `SYNTH_HIERARCHICAL=1`, ABC chạy theo từng module nên sửa một khối không
+  làm netlist khối khác đổi (bản phẳng nhiễu ±0,3 ns). Số tuyệt đối thường kém bản phẳng một chút (rocket-fmax: 92 → 85 MHz),
+  nên điểm xuất phát mới không so trực tiếp với các batch phẳng. `--no-asic-hier` quay lại.
+- Kogge-Stone cho bộ cộng (`$lcu`): ORFS mới tự dùng `lcu_kogge_stone.v`; bản không có thì thêm
+  `SYNTH_ARGS=-extra-map +/choices/kogge-stone.v` (`asic.json`: `kogge_fallback`).
+- `--asic-ab` (mặc định bật): agent có công cụ `asic_ab` (`ab_tool.py`, theo `synth_ab` của rocket-fmax): `make verilog`
+  bản đang sửa, synth + STA một module (kèm module con, cổng delay 0) của child cạnh parent (best), báo slack theo họ hai
+  bên. RTL parent chép ở `<fork>/sims/verilator/minsoc_ab/parent` đầu mỗi lượt (`make verilog` nếu fork đổi). Nhật ký
+  `<lượt>/ab_log.jsonl`; kết quả nhớ ở `ab_memo.json` (không đo lại cùng Verilog, qua mọi batch). `chipyard_bash` và
+  `asic_ab` mỗi cái 0,5 slot chipyard; mỗi A/B 0,5 slot asic.
+
 **Tiêu chí TNS** (sau `m2a-lad-p9`): tổng hợp lại làm slack ở khối không đụng tới nhảy ≈ ±0,3 ns, lớn hơn ngưỡng
 WNS 0,2 ns. Lượt cũng được nhận khi TNS giảm ≥ `--asic-tns-gain` (0.3 = 30%) và WNS tệ đi ≤ `--asic-tns-tol`
 (0,3 ns; 0 tắt).
