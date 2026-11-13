@@ -71,6 +71,8 @@ def args_():
     p.add_argument("--rounds", type=int, default=5, help="số lượt agent tối đa của batch")
     p.add_argument("--resume", action="store_true",
                    help="chạy tiếp batch --run đã dừng: đọc history.json, bỏ r0, đánh số tiếp (fork phải sạch)")
+    p.add_argument("--fork-autoclean", action=argparse.BooleanOptionalAction, default=True,
+                   help="fork đang sửa lúc khởi động (job dừng giữa lượt): lưu stale_fork_*.patch rồi hoàn tác")
     p.add_argument("--baseline-run", default="m1-sim", help="run sim Mốc 1: known_fail.txt và geomean ngân sách")
     p.add_argument("--cycle-budget", type=float, default=None, help="mặc định geomean baseline × 1,03")
     p.add_argument("--accept-ns", type=float, default=0.5, help="ngưỡng nhận: WNS phải tốt hơn best quá số này")
@@ -149,15 +151,22 @@ def append_csv(path: Path, row: dict):
         w.writerow(row)
 
 
-def snapshot(out: Path) -> dict:
+def snapshot(out: Path, autoclean: bool = True) -> dict:
     st = get(N.fork_state.chia_remote())
     write(out / "fork_state.txt", f"fork {st['fork']}\nhash {st['hash']}\n{st['heads']}\ndirty {st['dirty']}\n")
     print(f"fork {st['fork']} hash={st['hash']} dirty={st['dirty']}", flush=True)
     if st["own_missing"]:
         raise SystemExit(f"thiếu Config trong fork: {st['own_missing']} (chạy install.sh)")
+    if st["dirty"] and autoclean:
+        # thường do job bị dừng giữa lượt agent: bản vá chưa được nhận (lượt nhận đã commit vào fork)
+        stale = out / f"stale_fork_{time.strftime('%Y%m%d-%H%M%S')}.patch"
+        cl = get(N.fork_clean.chia_remote())
+        write(stale, cl["patch"])
+        print(f"fork đang sửa {st['dirty']}: đã hoàn tác (bản vá lưu ở {stale})\n{cl['log']}", flush=True)
+        return snapshot(out, autoclean=False)
     if st["dirty"]:
         write(out / "fork.patch", st["patch"])
-        raise SystemExit(f"baseline cần fork sạch, đang sửa: {st['dirty']} (xem {out}/fork.patch)")
+        raise SystemExit(f"cần fork sạch, đang sửa: {st['dirty']} (xem {out}/fork.patch)")
     return st
 
 
@@ -1033,7 +1042,7 @@ def phase_asic_ladder(a, out: Path, st: dict):
             o.mkdir(parents=True, exist_ok=True)
             write(o / "args.json", json.dumps(vars(b), indent=2))
             print(f"\n##### thang: {per:g} ns, batch {k + 1}/{a.ladder_tries} -> {o}", flush=True)
-            best = phase_asic_loop(b, o, snapshot(o))
+            best = phase_asic_loop(b, o, snapshot(o, a.fork_autoclean))
             passed = best.get("wns") is not None and best["wns"] >= 0
             state["steps"].append({"period": per, "run": b.run, "best": best.get("label"), "wns": best.get("wns"),
                                    "fmax": best.get("fmax"), "passed": passed})
@@ -1084,7 +1093,7 @@ def main():
         bypass.set_provider(fn, N.cache_provider)
         bypass.set_cond(fn, N.cache_hit_cond)
     try:
-        st = snapshot(out)
+        st = snapshot(out, a.fork_autoclean)
         if not a.baseline_only:
             if a.asic_ladder:
                 phase_asic_ladder(a, out, st)

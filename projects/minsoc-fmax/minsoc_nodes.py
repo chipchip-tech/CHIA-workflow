@@ -95,6 +95,26 @@ def fork_state() -> dict:
             "own_missing": [k for k, v in own.items() if v is None]}
 
 
+@ChiaFunction(resources={"chipyard": 1}, max_retries=0)
+def fork_clean() -> dict:
+    """Job bị dừng giữa lượt để lại bản vá chưa nhận: lưu diff (file đã track + .scala mới trong submodule),
+    rồi `git reset --hard HEAD` từng repo và xoá .scala mới trong submodule. Không đụng file build chưa track."""
+    cy, parts, log = fork_dir(), [], []
+    for d in ("",) + SUBMODULES:
+        path = os.path.join(cy, d) if d else cy
+        diff = sh("git diff --binary --ignore-submodules=all HEAD", cwd=path)
+        if diff.strip():
+            parts.append(f"### {d or '.'}\n{diff}")
+            log.append(sh("git reset -q --hard HEAD", cwd=path, check=True) or f"reset {d or '.'}")
+        if d:
+            for f in _untracked_scala(path):
+                if os.path.basename(f) not in OWN_FILES:
+                    parts.append(f"### {d} untracked {f}\n" + open(os.path.join(path, f), errors="replace").read())
+                    os.remove(os.path.join(path, f))
+                    log.append(f"xoá {d}/{f}")
+    return {"patch": "\n".join(parts), "log": "\n".join(x for x in log if x.strip())}
+
+
 @ChiaFunction(resources={"chipyard": 1})
 def load_test_elfs() -> dict:
     """riscv-tests của fork: mọi rv64*-p-* (không .dump) + 8 benchmark, dạng bytes."""

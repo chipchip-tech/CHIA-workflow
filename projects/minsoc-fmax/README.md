@@ -147,7 +147,7 @@ cột phút Vivado. Không chạy gate song song với Vivado (23 GB RAM không 
 `--no-incremental` quay về flow cũ. Đổi `vivado_tcl.py` làm cache Vivado cũ không trúng nữa (gate vẫn trúng).
 
 **Chạy tiếp batch đã dừng (`--resume`, chưa chạy thật):** chỉ `chia job stop` sau khi log in `rN: NHẬN …` hoặc
-`rN: loại …` (dừng giữa lượt thì fork bẩn, `--resume` từ chối). Submit lại đúng lệnh cũ, thêm `--resume`: bỏ r0, đọc
+`rN: loại …`. Dừng giữa lượt thì fork còn bản vá chưa nhận: lúc khởi động, mọi lệnh tự lưu nó vào `<run>/stale_fork_*.patch` rồi `git reset --hard HEAD` fork + submodule (`--no-fork-autoclean` để tắt; chưa chạy thật). Submit lại đúng lệnh cũ, thêm `--resume`: bỏ r0, đọc
 `history.json`, best = lượt NHẬN cuối, đánh số tiếp từ r(N+1); `--rounds` vẫn là tổng số lượt của batch.
 
 
