@@ -148,7 +148,7 @@ của host (image ORFS mặc định là root), nên kết quả trong `flow/res
   sudo ss -K state established dst '[::ffff:104.18.19.12]' dport = :443
   ```
   (thay IP bằng IP thấy ở lệnh đầu).
-- **Sửa gốc (chưa kiểm chứng):** template mount `${JVM_CACHE}` (mặc định `~/chia_cache/jvm`, `chia-up-blocks.py`
+- **Sửa gốc (đã kiểm chứng 13/11/2026: cache coursier 234 MB sau lần build đầu, không treo):** template mount `${JVM_CACHE}` (mặc định `~/chia_cache/jvm`, `chia-up-blocks.py`
   tự tạo) vào `~/.cache/coursier`, `~/.sbt`, `~/.ivy2` của khối chipyard, và đặt `JAVA_TOOL_OPTIONS` với
   connect timeout 30 s, read timeout 120 s. Cần `chia down` rồi chạy lại `chia-up-blocks.py`; lần build đầu
   vẫn tải lại một lần.
