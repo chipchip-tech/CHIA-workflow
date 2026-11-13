@@ -234,6 +234,16 @@ cd ~/CHIA-workflow/projects/minsoc-fmax && chia job submit --working-dir . -- py
 - Cần cluster có chipyard + verilator + claude + asic (`chia-up-blocks.py --asic`), fork sạch, không chạy cùng Vivado.
 - `--asic-exclude '*fpuOpt*'` để tối ưu phần core riêng; `--resume` như Mốc 2.
 
+**Thang chu kỳ** (`--asic-ladder`, chưa chạy thật): chạy batch ở từng bậc, đạt WNS ≥ 0 (gate cuối batch qua) thì
+xuống bậc kế; không đạt thì chạy thêm batch ở cùng bậc (tối đa `--ladder-tries`, mặc định 2, chạy tiếp từ best của
+fork) rồi dừng. Mỗi batch là run `<run>-p<ns>[-b<k>]` (7.5 → `p7p5`) cạnh nhau trong `~/minsoc-fmax/`, nên lịch sử
+đi theo qua các bậc; bảng tổng ở `<run>/summary.md`, trạng thái `<run>/ladder.json` (chạy lại cùng lệnh thì bỏ bậc
+đã đạt). Lịch sử cho agent nay ghi chu kỳ và 4 họ xấu nhất sau thay đổi của mỗi lượt.
+
+```bash
+cd ~/CHIA-workflow/projects/minsoc-fmax && chia job submit --working-dir . -- python minsoc_fmax.py --phase asic --run m2a-lad --asic-ladder 9,8,7,6,5 --rounds 5
+```
+
 ## File
 
 | File | Nội dung |

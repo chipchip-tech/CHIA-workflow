@@ -101,8 +101,15 @@ def args_():
     p.add_argument("--asic-gate", choices=["end", "each"], default="end",
                    help="end: lượt chỉ build + synth, gate chạy một lần cuối batch (hỏng thì lùi về lượt NHẬN trước); "
                         "each: gate mỗi lượt")
+    p.add_argument("--asic-ladder", default="", metavar="NS,NS,...",
+                   help="vòng ASIC theo bậc: chạy batch ở từng chu kỳ (vd '9,8,7,6,5'); đạt WNS ≥ 0 (và gate OK) "
+                        "thì xuống bậc kế. Mỗi batch là run <run>-p<ns>[-b<k>], cạnh nhau trong --out-dir")
+    p.add_argument("--ladder-tries", type=int, default=2,
+                   help="số batch tối đa ở một bậc (batch sau chạy tiếp từ best của fork) trước khi dừng thang")
     p.add_argument("--fix-tries", type=int, default=2, help="số lần agent sửa lỗi compile trong một lượt")
     a = p.parse_args()
+    if a.asic_ladder and (a.phase != "asic" or a.baseline_only or a.resume):
+        p.error("--asic-ladder chỉ dùng với --phase asic (vòng agent), không kèm --baseline-only/--resume")
     if not a.baseline_only and a.phase == "sim":
         p.error("vòng agent chỉ có ở --phase fpga và --phase asic")
     a.out_dir = os.path.expanduser(a.out_dir)
@@ -529,9 +536,13 @@ def history_md(history: list) -> str:
         return "(none yet)"
     out = []
     for h in history:
-        out.append(f"### {h['label']}: {h['verdict']}\n- WNS {h.get('wns')} ns (best before: {h.get('best_before')} ns), "
+        per = f" @ {h['period']:g} ns" if h.get("period") else ""
+        fam = h.get("top_families")
+        fam = f"- worst families after the change:\n\n```\n{fam}\n```\n" if fam else ""
+        out.append(f"### {h.get('run', '')} {h['label']}{per}: {h['verdict']}\n"
+                   f"- WNS {h.get('wns')} ns (best before: {h.get('best_before')} ns), "
                    f"geomean {h.get('geomean') and round(h['geomean'], 1)}\n- reason: {h['reason']}\n"
-                   f"- files: {', '.join(h.get('files', [])) or '-'}\n- agent report:\n\n" +
+                   f"- files: {', '.join(h.get('files', [])) or '-'}\n" + fam + "- agent report:\n\n" +
                    "\n".join("  > " + x for x in (h.get("idea") or "").strip().splitlines()[:20]))
     return "\n\n".join(out)
 
@@ -840,7 +851,8 @@ def phase_asic_loop(a, out: Path, st: dict):
                                  "that the change is exactly equivalent (or that added latency is handled everywhere)."),
                       EXCLUDE=a.asic_exclude or "(none)", PATHS=asic_paths_table(best.get("paths", [])),
                       REPORT=rpt[:14000], HISTORY=history_md(history + rounds))
-        rec = {"label": label, "run": a.run, "phase": "asic", "best_before": best["wns"], "verdict": "loại",
+        rec = {"label": label, "run": a.run, "phase": "asic", "period": a.asic_period_ns,
+               "best_before": best["wns"], "verdict": "loại",
                "reason": "", "files": []}
         reason = call_agent(llm, prompt, d, "agent", st["fork"])
         rec["idea"] = (d / "agent_response.md").read_text()[:3000] if (d / "agent_response.md").exists() else ""
@@ -873,6 +885,8 @@ def phase_asic_loop(a, out: Path, st: dict):
             write(d / "eval.json", json.dumps(ev, indent=2))
             rec.update({k2: ev.get(k2) for k2 in ("wns", "tns", "fmax", "geomean", "area_um2", "cells", "wns_raw",
                                                   "family_score")})
+            if (d / "families.txt").exists():   # họ xấu nhất sau thay đổi: agent sau thấy path nào bị lộ/làm dài
+                rec["top_families"] = "\n".join((d / "families.txt").read_text().splitlines()[:5])
             fam_ok = (ev.get("family_score") is not None and best.get("family_score") is not None
                       and ev["family_score"] >= best["family_score"] + a.asic_family_gain
                       and ev["wns"] >= best["wns"] - a.asic_worst_tol) if ev.get("wns") is not None else False
@@ -918,6 +932,49 @@ def phase_asic_loop(a, out: Path, st: dict):
         write(out / "final_gate.json", json.dumps({"best": best["label"], "log": final}, indent=2))
     write_asic_summary(a, out, start, best, rounds, final)
     print((out / "summary.md").read_text(), flush=True)
+    return best
+
+
+def phase_asic_ladder(a, out: Path, st: dict):
+    """--asic-ladder: batch ở từng chu kỳ, xuống bậc khi best WNS ≥ 0 (gate cuối batch đã qua). Mỗi batch là một
+    run riêng <run>-p<ns>[-b<k>] cạnh nhau, nên lịch sử (load_history) đi theo qua các bậc. Trạng thái ở
+    <run>/ladder.json: chạy lại cùng lệnh thì bỏ qua bậc đã đạt."""
+    import copy
+    steps = [float(x) for x in a.asic_ladder.split(",") if x.strip()]
+    lf = out / "ladder.json"
+    state = json.loads(lf.read_text()) if lf.exists() else {"steps": []}
+    done = {s["period"] for s in state["steps"] if s["passed"]}
+    lines = [f"# {a.run} — thang chu kỳ ASIC ({a.asic_pdk}): {', '.join(f'{x:g}' for x in steps)} ns", "",
+             "| bậc (ns) | batch | best | WNS (ns) | Fmax (MHz) | đạt |", "|---|---|---|---|---|---|"]
+    for per in steps:
+        if per in done:
+            continue
+        tried = [s for s in state["steps"] if s["period"] == per]
+        passed = False
+        for k in range(len(tried), a.ladder_tries):
+            b = copy.copy(a)
+            b.asic_period_ns = per
+            b.run = f"{a.run}-p{per:g}".replace(".", "p") + (f"-b{k + 1}" if k else "")
+            o = Path(a.out_dir) / b.run
+            o.mkdir(parents=True, exist_ok=True)
+            write(o / "args.json", json.dumps(vars(b), indent=2))
+            print(f"\n##### thang: {per:g} ns, batch {k + 1}/{a.ladder_tries} -> {o}", flush=True)
+            best = phase_asic_loop(b, o, snapshot(o))
+            passed = best.get("wns") is not None and best["wns"] >= 0
+            state["steps"].append({"period": per, "run": b.run, "best": best.get("label"), "wns": best.get("wns"),
+                                   "fmax": best.get("fmax"), "passed": passed})
+            write(lf, json.dumps(state, indent=2))
+            if passed:
+                break
+        if not passed:
+            print(f"thang dừng ở {per:g} ns: chưa đạt WNS ≥ 0 sau {a.ladder_tries} batch", flush=True)
+            break
+    for s in state["steps"]:
+        f = s.get("fmax")
+        lines.append(f"| {s['period']:g} | {s['run']} | {s['best']} | {s['wns']} | {f and round(f, 1)} | "
+                     f"{'có' if s['passed'] else 'không'} |")
+    write(out / "summary.md", "\n".join(lines) + "\n")
+    print((out / "summary.md").read_text(), flush=True)
 
 
 def make_llm_asic(a):
@@ -952,7 +1009,10 @@ def main():
     try:
         st = snapshot(out)
         if not a.baseline_only:
-            (phase_asic_loop if a.phase == "asic" else phase_loop)(a, out, st)
+            if a.asic_ladder:
+                phase_asic_ladder(a, out, st)
+            else:
+                (phase_asic_loop if a.phase == "asic" else phase_loop)(a, out, st)
         else:
             {"sim": phase_sim, "fpga": phase_fpga, "asic": phase_asic}[a.phase](a, out, st)
     finally:

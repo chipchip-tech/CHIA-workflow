@@ -40,6 +40,11 @@ above the new worst slack is shortened, so:
 
 ## Earlier ASIC rounds of this project
 
+Rounds may come from several batches at different clock periods (`@ N ns`). For rejected rounds, read
+"worst families after the change": a change that shortens one path often lengthens a path downstream of it.
+Example seen at 7.5 ns: retiming `frontend.fq` / `ShiftQueue` exposed `core.ex_reg_rs_msb_*` (ibuf -> decode ->
+bypass) 1-1.6 ns worse than the old worst path. Check what your change feeds before you submit it.
+
 {{HISTORY}}
 
 Pick ONE new idea (do not repeat a rejected idea unless you fix the reason it failed). It may touch several
