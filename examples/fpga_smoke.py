@@ -8,7 +8,7 @@ Mặc định: SUB_PROJECT=arty100t, CONFIG=RocketArty100TConfig (config có s�
 Digilent arty-a7-100 trong Vivado. Chạy từ thư mục chứa file này:
   chia job submit --working-dir . -- python fpga_smoke.py [--config CFG] [--clean]
 --clean: xoá thư mục build của config và .classpath_cache/chipyard_fpga.jar, tức chạy lại cả sbt, elaborate,
-         synth, place, route (khoảng 1 giờ).
+         synth, place, route (khoảng 11 phút trên máy 20 CPU, 14/11/2026).
 
 Xong khi in `KẾT QUẢ: OK`: make thoát 0, có file .bit mới, đọc được WNS/WHS từ report/timing.txt.
 """

@@ -16,7 +16,7 @@
 # script dừng, in số bước và lệnh chạy lại; KHÔNG tự bỏ bước nào.
 # Thư mục đã có thì không clone, không checkout (giữ sửa tay), chỉ cảnh báo nếu không đứng trên tag.
 #
-# Đã chạy thật trên Chipyard 1.15.0 (14/11/2026, bỏ bước 8–9); --privileged cho bước 9 chưa chạy thật.
+# Đã chạy thật trên Chipyard 1.15.0 (14/11/2026): đủ 11 bước, bước 9 với --privileged.
 set -euo pipefail
 
 IMAGE="ghcr.io/ucb-bar/chia-chisel-build:latest"

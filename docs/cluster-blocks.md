@@ -146,7 +146,11 @@ cd ~/CHIA-workflow/examples && chia job submit --working-dir . -- python fpga_sm
 
 `examples/fpga_smoke.py` chạy `make SUB_PROJECT=arty100t bitstream` trên worker `vivado`, `--clean` xoá thư mục
 build và `.classpath_cache/chipyard_fpga.jar` để chạy lại từ sbt. Xong khi in `KẾT QUẢ: OK` (make thoát 0, có
-`.bit` mới, đọc được WNS/WHS). Log đầy đủ ở `fpga/build-arty100t-<CONFIG>-smoke.log`. Chưa chạy thật (14/11/2026).
+`.bit` mới, đọc được WNS/WHS). Log đầy đủ ở `fpga/build-arty100t-<CONFIG>-smoke.log`.
+
+**Đã chạy thật 14/11/2026** (cluster `chia-up-blocks.py --fpga`, job `--clean`): `rc: 0`, 11,1 phút, ra
+`Arty100THarness.bit` 3 825 916 byte, WNS 0,129 ns, WHS −0,063 ns (4 endpoint, như lần chạy tay), `KẾT QUẢ: OK`;
+`chia down` gỡ sạch 4 container và head.
 
 Nếu Vivado hỏng sau place, chạy tiếp từ checkpoint thay vì làm lại từ đầu (route, bitstream, report):
 

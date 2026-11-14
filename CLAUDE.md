@@ -91,15 +91,15 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 (bước 0–8): `scripts/setup-chipyard.sh --verify` (`VERIFY_OK`, bỏ bước 8–9 của `build-setup.sh`),
 `install-chipyard-config.sh` + `MinimalSoCConfig` bản 1.15.0, ORFS, cluster theo khối đủ 5 khối (`KẾT QUẢ: OK`).
 Sau đó: bước 9 FireMarshal (`--privileged`), flow `fpga/` Arty A7-100T ra bitstream (container tay cùng image/mount
-với khối vivado, `--net=host`). Chưa có trên 1.15.0: flow `fpga/` gửi qua job CHIA, các project cũ.
+với khối vivado, `--net=host`), rồi qua job CHIA: `examples/fpga_smoke.py --clean` trên khối `vivado` ra `rc: 0`,
+11,1 phút, `.bit` 3 825 916 byte, WNS 0,129 / WHS −0,063 ns, `KẾT QUẢ: OK`; `chia down` sạch. Chưa có trên 1.15.0:
+các project cũ.
 
 **Chưa chạy thử** (viết từ docs và mã nguồn CHIA):
 - `configs/cluster-lan.yaml`, `prepare-remote-worker.sh`, `check-remote-worker.sh`.
 - `examples/rtl_agent_loop.py`: mới qua `py_compile`, API đã đối chiếu với mã nguồn CHIA 2.0.1.
 - Phần linger trong `check-bazzite-env.sh` (thêm sau lần chạy script).
 - Tailscale/`tailnet:`, phương án Podman rootless.
-- `examples/fpga_smoke.py`: flow `fpga/` gửi qua job CHIA trên khối `vivado` (đã chạy tay trong cùng image,
-  14/11/2026; trong sandbox mới thử với make/vivado giả). Khối vivado vừa thêm cache JVM + `JAVA_TOOL_OPTIONS`.
 
 ## Các lỗi đã gặp trên Bazzite và cách sửa
 
@@ -217,10 +217,10 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
 ## Việc tiếp theo (gợi ý)
 
 1. (Xong 14/11/2026) `docs/reinstall.md` chạy hết trên Chipyard 1.15.0.
-2. (Xong 14/11/2026) FireMarshal bước 9 (`--privileged`), flow `fpga/` ra bitstream Arty A7-100T.
+2. (Xong 14/11/2026) FireMarshal bước 9 (`--privileged`), flow `fpga/` ra bitstream Arty A7-100T (tay và qua job CHIA).
 3. Mở project mới theo **Quy ước nhánh**, dùng cluster theo khối (`docs/cluster-blocks.md`), config kế thừa
    `chipyard.MinimalSoCConfig` (nền mặc định cho mọi project).
 4. Chuyển `project/ascon-secureboot`, `project/rocket-fmax` sang Chipyard 1.15.0 khi quay lại.
-6. Chạy thử `examples/rtl_agent_loop.py` (đang trỏ `/home/ray/chipyard` của image; muốn dùng Chipyard trên host thì
+5. Chạy thử `examples/rtl_agent_loop.py` (đang trỏ `/home/ray/chipyard` của image; muốn dùng Chipyard trên host thì
    đổi sang `~/tools/chipyard` và resource `chipyard` của cluster theo khối).
-7. Khi có máy thứ hai: làm theo `docs/usage-remote.md`, kiểm chứng `cluster-lan.yaml`.
+6. Khi có máy thứ hai: làm theo `docs/usage-remote.md`, kiểm chứng `cluster-lan.yaml`.

@@ -5,7 +5,7 @@
 #   chipyard   chipyard        bật        đã chạy thật trên Chipyard 1.15.0 (blocks_smoke.py --clean, 14/11/2026)
 #   verilator  verilator_run   bật        đã chạy thật
 #   claude     claude_creds    bật        đã chạy thật (project rocket-fmax)
-#   vivado     vivado          tắt        --fpga; vivado -version trên 1.15.0 đã chạy thật; examples/fpga_smoke.py chưa
+#   vivado     vivado          tắt        --fpga; đã chạy thật trên 1.15.0 (examples/fpga_smoke.py --clean, 14/11/2026)
 #   asic       asic            tắt        đã chạy thật    (--asic)
 #
 # Biến môi trường (chia-up-blocks.py đặt giá trị mặc định nếu thiếu):
