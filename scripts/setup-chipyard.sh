@@ -92,6 +92,33 @@ if [ "$DRY" = 0 ]; then
         exit 1
     fi
 fi
+# Bước 2 (init-submodules --full, không tắt được Gemmini) clone gemmini-rocc-tests đệ quy, mà submodule
+# rocc-software của nó trỏ tới github.com/ibm/rocc-software đã bị xoá (gặp 14/11/2026: "could not read
+# Username", bước 2 hỏng). Upstream (gemmini-rocc-tests PR #54, 10/11/2026) chuyển sang bản sao
+# ucb-bar/rocc-software, nhưng bản sao chỉ có một commit mới, không có commit 1.15.0 ghim. Nên dựng sẵn
+# gemmini + gemmini-rocc-tests trên host, đặt rocc-software ở commit của bản sao và cho
+# `submodule.rocc-software.update none` để bước 2 bỏ qua nó. Mã nguồn giống nhau (bản sao khôi phục từ ibm).
+ROCC_URL="https://github.com/ucb-bar/rocc-software.git"
+ROCC_REV="9492c0abd0ca04abb9cddf3737ba68232326fdae"
+fix_rocc_software() {
+    local t="$CY/generators/gemmini/software/gemmini-rocc-tests"
+    echo "== Vá rocc-software của Gemmini (ibm/rocc-software đã bị xoá) -> $ROCC_URL"
+    run git -C "$CY" submodule update --init generators/gemmini
+    run git -C "$CY/generators/gemmini" submodule update --init software/gemmini-rocc-tests
+    run git -C "$t" config submodule.rocc-software.url "$ROCC_URL"
+    run git -C "$t" config submodule.rocc-software.update none
+    if [ "$DRY" = 1 ] || ! { [ -e "$t/rocc-software/.git" ] &&
+            git -C "$t/rocc-software" rev-parse -q --verify "$ROCC_REV^{commit}" >/dev/null; }; then
+        run rm -rf "$t/rocc-software"
+        run git clone -q "$ROCC_URL" "$t/rocc-software"
+        run git -C "$t/rocc-software" checkout -q "$ROCC_REV"
+    fi
+}
+case " ${EXTRA[*]} " in
+    *" -s 2 "*|*" --skip 2 "*|*" --skip-submodules "*) ;;
+    *) fix_rocc_software ;;
+esac
+
 run mkdir -p "$JVM/coursier" "$JVM/sbt" "$JVM/ivy2"
 # Xoá log lần trước: nếu docker hỏng trước khi tee chạy, log cũ sẽ bị chẩn đoán nhầm (hoặc có sẵn
 # "Setup complete!" làm báo thành công giả).

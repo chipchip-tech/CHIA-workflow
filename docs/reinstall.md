@@ -194,6 +194,12 @@ Script đã đặt conda thử lại 10 lần; vẫn hỏng thì kiểm mạng (
 rồi chạy đúng hai lệnh script in ra (`rm -rf .conda-lock-env .conda-env` rồi chạy lại). Cache gói conda nằm trong container
 tạm nên lần chạy lại tải lại từ đầu.
 
+**Bước 2 hỏng ở `rocc-software`** (`could not read Username for 'https://github.com'` khi clone
+`https://github.com/ibm/rocc-software`, gặp 14/11/2026): repo IBM đã bị xoá, Gemmini (bước 2 luôn chạy `--full`) vẫn
+trỏ tới nó. Từ commit vá này, script tự dựng sẵn Gemmini trên host và trỏ `rocc-software` sang bản sao
+`ucb-bar/rocc-software` trước khi chạy bước 2; chỉ cần chạy lại đúng lệnh script in ra (`-- -s 1`). Dòng
+`submodule_name: unbound variable` sau đó là lỗi phụ của script Chipyard, bỏ qua.
+
 Hỏng ở bước khác (1–5, 10, 11) thì không bỏ qua: gửi log để sửa; script in lệnh chạy tiếp từ bước hỏng
 (hỏng ở bước 1 thì phải xoá `.conda-lock-env`, `.conda-env` trước, script in sẵn lệnh).
 

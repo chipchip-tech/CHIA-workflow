@@ -53,7 +53,12 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   `setup-chipyard.sh` thêm `CONDA_REMOTE_MAX_RETRIES=10` và backoff, chạy lại sau khi xoá `.conda-lock-env`, `.conda-env`.
   Lần 2: phát hiện **hai container build-setup chạy cùng lúc** trên `~/tools/chipyard` (một lần chạy trước còn sót ở
   terminal khác, không phải tmux), tải chỉ ~10 MB/phút chung; đã dừng cả hai. `setup-chipyard.sh` giờ gắn nhãn
-  `chia.setup-chipyard=<dir>` cho container và từ chối chạy khi đã có container mang nhãn đó. Lần 3: đang chạy.
+  `chia.setup-chipyard=<dir>` cho container và từ chối chạy khi đã có container mang nhãn đó. Lần 3: **bước 1 xong**,
+  hỏng ở bước 2: submodule `rocc-software` của `gemmini-rocc-tests` trỏ `github.com/ibm/rocc-software` đã bị xoá
+  (bước 2 luôn `--full`, không tắt được Gemmini). Bản sao `ucb-bar/rocc-software` chỉ có 1 commit mới (`9492c0a`),
+  không có commit ghim `fddb795`. `setup-chipyard.sh` giờ dựng sẵn gemmini + gemmini-rocc-tests trên host, clone bản
+  sao vào `rocc-software` và đặt `submodule.rocc-software.update none` (đã thử trong sandbox: `git submodule update
+  --init --recursive software/gemmini-rocc-tests` qua, RC=0). Lần 4 (`-- -s 1`): chưa chạy.
 
 ## Đã kiểm chứng và chưa kiểm chứng
 

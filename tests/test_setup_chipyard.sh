@@ -104,7 +104,8 @@ t_existing_dir_other_ref() {
     make_cy "$d"; export FAKE_DESCRIBE="1.10.0-5-gdeadbee"
     out="$(bash "$SCRIPT" "$d" 2>&1)"
     has "$out" "CẢNH BÁO" || { bad existing_dir_other_ref "không cảnh báo: $out"; return; }
-    grep -qE '^git .*(clone|checkout)' "$CALLS" && { bad existing_dir_other_ref "đã clone/checkout: $(cat "$CALLS")"; return; }
+    # Chỉ xét repo Chipyard; clone/checkout rocc-software (vá Gemmini) là việc riêng.
+    grep -E '^git .*(clone|checkout)' "$CALLS" | grep -qv rocc-software && { bad existing_dir_other_ref "đã clone/checkout: $(cat "$CALLS")"; return; }
     ok existing_dir_other_ref
 }
 
@@ -215,7 +216,23 @@ t_refuse_concurrent() {
     ok refuse_concurrent
 }
 
-for t in t_refuse_concurrent t_rerun_after_success t_verify_failure t_stale_log_removed t_dry_run_clone t_realpath_mount t_no_skip_default t_existing_dir_other_ref t_failure_report t_failure_step1 t_skip1_sources_env t_jvm_cache_mount t_conda_retries; do
+# 14/11/2026: ibm/rocc-software (submodule của gemmini-rocc-tests) bị xoá, bước 2 hỏng. Trước docker run phải
+# dựng sẵn Gemmini và trỏ rocc-software sang bản sao ucb-bar, đặt update=none; bỏ bước 2 thì không đụng.
+t_rocc_software() {
+    new_env; local d="$T/cy" t
+    make_cy "$d"; t="$d/generators/gemmini/software/gemmini-rocc-tests"
+    bash "$SCRIPT" "$d" > /dev/null 2>&1
+    grep -qF "git -C $t config submodule.rocc-software.update none" "$CALLS" || { bad rocc_software "thiếu update=none: $(cat "$CALLS")"; return; }
+    grep -qF "git clone -q https://github.com/ucb-bar/rocc-software.git $t/rocc-software" "$CALLS" || { bad rocc_software "thiếu clone bản sao"; return; }
+    grep -qF "git -C $t/rocc-software checkout -q 9492c0a" "$CALLS" || { bad rocc_software "thiếu checkout commit bản sao"; return; }
+    awk '/rocc-software.update none/{f=1} /^docker run/{exit !f}' "$CALLS" || { bad rocc_software "vá sau docker run"; return; }
+    : > "$CALLS"
+    bash "$SCRIPT" "$d" -- -s 1 -s 2 > /dev/null 2>&1
+    grep -q gemmini "$CALLS" && { bad rocc_software "bỏ bước 2 mà vẫn đụng gemmini"; return; }
+    ok rocc_software
+}
+
+for t in t_rocc_software t_refuse_concurrent t_rerun_after_success t_verify_failure t_stale_log_removed t_dry_run_clone t_realpath_mount t_no_skip_default t_existing_dir_other_ref t_failure_report t_failure_step1 t_skip1_sources_env t_jvm_cache_mount t_conda_retries; do
     "$t"
 done
 echo "== $PASS pass, $FAIL fail"
