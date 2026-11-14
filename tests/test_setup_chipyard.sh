@@ -151,6 +151,17 @@ t_jvm_cache_mount() {
     ok jvm_cache_mount
 }
 
+# Bước 1 tải hàng trăm gói conda; mạng chập chờn (HTTP 000 CONNECTION FAILED) không được làm hỏng cả bước.
+t_conda_retries() {
+    new_env; local d="$T/cy" dl
+    make_cy "$d"
+    bash "$SCRIPT" "$d" > /dev/null 2>&1
+    dl="$(grep '^docker run' "$CALLS")"
+    has "$dl" "CONDA_REMOTE_MAX_RETRIES=" || { bad conda_retries "thiếu CONDA_REMOTE_MAX_RETRIES: $dl"; return; }
+    has "$dl" "CONDA_REMOTE_BACKOFF_FACTOR=" || { bad conda_retries "thiếu backoff: $dl"; return; }
+    ok conda_retries
+}
+
 # Chạy lại khi env đã dựng xong: bước 1 báo "already exist". Không được khuyên xoá env đang dùng được.
 t_rerun_after_success() {
     new_env; local d="$T/cy" err
@@ -183,7 +194,7 @@ t_stale_log_removed() {
     ok stale_log_removed
 }
 
-for t in t_rerun_after_success t_verify_failure t_stale_log_removed t_dry_run_clone t_realpath_mount t_no_skip_default t_existing_dir_other_ref t_failure_report t_failure_step1 t_skip1_sources_env t_jvm_cache_mount; do
+for t in t_rerun_after_success t_verify_failure t_stale_log_removed t_dry_run_clone t_realpath_mount t_no_skip_default t_existing_dir_other_ref t_failure_report t_failure_step1 t_skip1_sources_env t_jvm_cache_mount t_conda_retries; do
     "$t"
 done
 echo "== $PASS pass, $FAIL fail"

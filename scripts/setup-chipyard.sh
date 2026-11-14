@@ -75,6 +75,8 @@ fi
 
 # Cache JVM chung với khối chipyard (bước 5/7 tiền biên dịch Scala qua sbt; coursier không có read
 # timeout nên socket chết tới Maven làm treo vô hạn, xem docs/cluster-blocks.md).
+# Conda (bước 1) tải hàng trăm gói; mặc định chỉ thử lại 3 lần nên mạng chập chờn làm hỏng cả bước
+# (gặp 14/11/2026: HTTP 000 CONNECTION FAILED tới conda.anaconda.org). Tăng số lần thử và giãn cách.
 run mkdir -p "$JVM/coursier" "$JVM/sbt" "$JVM/ivy2"
 # Xoá log lần trước: nếu docker hỏng trước khi tee chạy, log cũ sẽ bị chẩn đoán nhầm (hoặc có sẵn
 # "Setup complete!" làm báo thành công giả).
@@ -84,6 +86,7 @@ run docker run --rm --shm-size=10.24gb \
     -v "$CY:$CY:z" -w "$CY" \
     -v "$JVM/coursier:/home/ray/.cache/coursier:z" -v "$JVM/sbt:/home/ray/.sbt:z" -v "$JVM/ivy2:/home/ray/.ivy2:z" \
     -e "JAVA_TOOL_OPTIONS=-Dsun.net.client.defaultConnectTimeout=30000 -Dsun.net.client.defaultReadTimeout=120000" \
+    -e CONDA_REMOTE_MAX_RETRIES=10 -e CONDA_REMOTE_BACKOFF_FACTOR=3 -e CONDA_REMOTE_READ_TIMEOUT_SECS=120 \
     "$IMAGE" bash -c "$INNER" || rc=$?
 
 # Lệnh chạy lại in ra giữ nguyên --verify/--tag của lần này.

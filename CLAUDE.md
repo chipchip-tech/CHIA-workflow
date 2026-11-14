@@ -49,6 +49,8 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   `minsoc-vivado` 2.3 GB) và `~/archive/ORFS-minsoc-20261114/` (design/results/reports/logs `minsoc_*`, 2.8 GB).
   `~/CHIA-workflow` cũ ở `~/archive/CHIA-workflow-20261114`, clone mới ở commit `2b1f1d8`. `chia_env` mới: Python
   3.10.19, Ray 2.54.0, `chialoops` 2.0.1, `check-bazzite-env.sh` pass. IP LAN lúc này `192.168.107.40`.
+  Bước 5 lần 1: hỏng ở bước 1 của `build-setup.sh` vì mạng (`HTTP 000 CONNECTION FAILED` tới `conda.anaconda.org`);
+  `setup-chipyard.sh` thêm `CONDA_REMOTE_MAX_RETRIES=10` và backoff, chạy lại sau khi xoá `.conda-lock-env`, `.conda-env`.
 
 ## Đã kiểm chứng và chưa kiểm chứng
 
