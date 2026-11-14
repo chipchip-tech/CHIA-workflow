@@ -104,8 +104,32 @@ t_failure_report() {
     [ $rc -ne 0 ] || { bad failure_report "thoát 0 khi hỏng"; return; }
     has "$err" "bước 8" || { bad failure_report "thiếu 'bước 8': $err"; return; }
     has "$err" "Setting up FireMarshal" || { bad failure_report "thiếu tên bước: $err"; return; }
-    has "$err" "-s 8" || { bad failure_report "thiếu gợi ý -s 8: $err"; return; }
+    has "$err" "-- -s 1 -s 2 -s 3 -s 4 -s 5 -s 6 -s 7 -s 8 -s 9" || { bad failure_report "gợi ý chạy lại phải bỏ bước 1–7 đã xong và cặp 8–9: $err"; return; }
     ok failure_report
+}
+
+# Hỏng ở bước 1: build-setup 1.15.0 từ chối chạy lại khi .conda-env/.conda-lock-env còn; phải bảo xoá.
+t_failure_step1() {
+    new_env; local d="$T/cy" err
+    make_cy "$d"; export FAKE_FAIL_STEP=1 FAKE_FAIL_DESC="Conda environment setup"
+    err="$(bash "$SCRIPT" "$d" 2>&1 >/dev/null)"
+    has "$err" ".conda-lock-env" || { bad failure_step1 "không bảo xoá .conda-lock-env: $err"; return; }
+    has "$err" ".conda-env" || { bad failure_step1 "không bảo xoá .conda-env: $err"; return; }
+    ok failure_step1
+}
+
+# Bỏ bước 1 thì build-setup cần $RISCV và conda env đã kích hoạt: phải source env.sh trước.
+t_skip1_sources_env() {
+    new_env; local d="$T/cy" dl
+    make_cy "$d"
+    bash "$SCRIPT" "$d" -- -s 1 -s 2 > /dev/null 2>&1
+    dl="$(grep '^docker run' "$CALLS")"
+    grep -qE 'source env.sh .*build-setup.sh riscv-tools -s 1 -s 2' <<<"$dl" || { bad skip1_sources_env "không source env.sh trước build-setup: $dl"; return; }
+    : > "$CALLS"; rm -f "$d/setup.log"
+    bash "$SCRIPT" "$d" > /dev/null 2>&1
+    dl="$(grep '^docker run' "$CALLS")"
+    grep -qE 'source env.sh .*build-setup.sh' <<<"$dl" && { bad skip1_sources_env "source env.sh khi chạy bước 1: $dl"; return; }
+    ok skip1_sources_env
 }
 
 t_jvm_cache_mount() {
@@ -121,7 +145,7 @@ t_jvm_cache_mount() {
     ok jvm_cache_mount
 }
 
-for t in t_dry_run_clone t_realpath_mount t_no_skip_default t_existing_dir_other_ref t_failure_report t_jvm_cache_mount; do
+for t in t_dry_run_clone t_realpath_mount t_no_skip_default t_existing_dir_other_ref t_failure_report t_failure_step1 t_skip1_sources_env t_jvm_cache_mount; do
     "$t"
 done
 echo "== $PASS pass, $FAIL fail"

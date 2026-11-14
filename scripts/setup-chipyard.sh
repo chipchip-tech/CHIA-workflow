@@ -54,10 +54,14 @@ echo "== Log: $CY/setup.log"
 
 # Trong container: nạp conda base rồi chạy build-setup. Chipyard 1.15.0 tự tạo env conda-lock riêng
 # (.conda-lock-env), không cần cài conda-lock hay cờ -f như fork 1.10.
+# Bỏ bước 1 (chạy lại sau khi hỏng giữa chừng) thì build-setup.sh cần conda env của Chipyard đã kích hoạt
+# và $RISCV (bước 3), nên phải source env.sh do lần chạy trước sinh ra.
+SRC_ENV=""
+case " ${EXTRA[*]} " in *" -s 1 "*|*" --skip-conda "*) SRC_ENV="source env.sh && " ;; esac
 INNER='set -eo pipefail
 source /home/ray/anaconda3/etc/profile.d/conda.sh && conda activate base
 cd "'"$CY"'"
-./build-setup.sh riscv-tools'"${EXTRA[*]:+ ${EXTRA[*]}}"' 2>&1 | tee setup.log
+'"$SRC_ENV"'./build-setup.sh riscv-tools'"${EXTRA[*]:+ ${EXTRA[*]}}"' 2>&1 | tee setup.log
 grep -q "Setup complete!" setup.log'
 
 if [ "$VERIFY" = 1 ]; then
@@ -84,17 +88,28 @@ if [ $rc -ne 0 ]; then
     desc="$(sed -E 's/.*STEP [0-9]+: (.*) =+ *$/\1/' <<<"$last")"
     {
         echo "LỖI: build-setup.sh hỏng (mã $rc) ở bước ${n:-?}: ${desc:-không rõ}. Log: $CY/setup.log"
+        # Cờ thêm không phải -s giữ nguyên; các bước trước bước hỏng đã xong nên bỏ qua khi chạy lại
+        # (bước 1 của 1.15.0 từ chối chạy khi .conda-env đã có).
+        keep=() i=0
+        while [ $i -lt ${#EXTRA[@]} ]; do
+            if [ "${EXTRA[$i]}" = "-s" ]; then i=$((i+2)); else keep+=("${EXTRA[$i]}"); i=$((i+1)); fi
+        done
+        done_steps() { local k; for ((k=1; k<$1; k++)); do printf -- ' -s %d' "$k"; done; }
         case "$n" in
-            6|7) skip="-s 6 -s 7" ;;   # 7 cần 6 (FireSim)
-            8|9) skip="-s 8 -s 9" ;;   # 9 cần 8 (FireMarshal)
-            *) skip="" ;;
+            1)
+                echo "Bước 1 hỏng thì build-setup.sh không chạy lại được khi env còn sót. Sửa lỗi, xoá rồi chạy lại:"
+                echo "  rm -rf $CY/.conda-lock-env $CY/.conda-env"
+                echo "  scripts/setup-chipyard.sh $CY${keep[*]:+ -- ${keep[*]}}" ;;
+            6|7|8|9)
+                [ "$n" -le 7 ] && first=6 || first=8   # 7 cần 6 (FireSim), 9 cần 8 (FireMarshal)
+                echo "Nếu quyết định bỏ bước $first–$((first+1)) (ghi lỗi vào docs trước), chạy lại:"
+                echo "  scripts/setup-chipyard.sh $CY --${keep[*]:+ ${keep[*]}}$(done_steps "$first") -s $first -s $((first+1))" ;;
+            ''|*[!0-9]*)
+                echo "Không xác định được bước hỏng; đọc log." ;;
+            *)
+                echo "Bước $n là bước bắt buộc; đọc log và sửa lỗi, rồi chạy tiếp từ bước $n:"
+                echo "  scripts/setup-chipyard.sh $CY --${keep[*]:+ ${keep[*]}}$(done_steps "$n")" ;;
         esac
-        if [ -n "$skip" ]; then
-            echo "Nếu quyết định bỏ bước này (ghi lỗi vào docs trước), chạy lại:"
-            echo "  scripts/setup-chipyard.sh $CY --${EXTRA[*]:+ ${EXTRA[*]}} $skip"
-        else
-            echo "Bước ${n:-?} là bước bắt buộc; đọc log và sửa lỗi trước khi chạy lại."
-        fi
     } >&2
     exit $rc
 fi

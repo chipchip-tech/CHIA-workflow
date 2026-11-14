@@ -151,14 +151,16 @@ chạy `build-setup.sh` **đủ 11 bước** trong container `chia-chisel-build`
 Thoát tmux mà vẫn để chạy: `Ctrl+B` rồi `D`; vào lại: `tmux attach -t chipyard`.
 
 **Nếu dừng ở bước 6–9** (FireSim/FireMarshal; có thể cần `sudo` hoặc `/dev/kvm` mà container không có):
-script in số bước, tên bước và lệnh chạy lại có `-s`. Gửi đuôi `setup.log` để ghi lỗi vào docs, rồi chạy
-đúng lệnh script in ra (thư mục đã có nên không clone lại), ví dụ:
+script in số bước, tên bước và lệnh chạy lại. Lệnh đó bỏ luôn các bước đã xong (bước 1 của 1.15.0 không chạy
+lại được khi `.conda-env` đã có) và tự `source env.sh`. Gửi đuôi `setup.log` để ghi lỗi vào docs, rồi chạy
+đúng lệnh script in ra, thêm `--verify` (thư mục đã có nên không clone lại), ví dụ hỏng ở bước 8:
 
 ```bash
-cd ~/CHIA-workflow && scripts/setup-chipyard.sh --verify ~/tools/chipyard -- -s 8 -s 9
+cd ~/CHIA-workflow && scripts/setup-chipyard.sh --verify ~/tools/chipyard -- -s 1 -s 2 -s 3 -s 4 -s 5 -s 6 -s 7 -s 8 -s 9
 ```
 
-Hỏng ở bước khác (1–5, 10, 11) thì không bỏ qua: gửi log để sửa.
+Hỏng ở bước khác (1–5, 10, 11) thì không bỏ qua: gửi log để sửa; script in lệnh chạy tiếp từ bước hỏng
+(hỏng ở bước 1 thì phải xoá `.conda-lock-env`, `.conda-env` trước, script in sẵn lệnh).
 
 **Xong khi:** thấy `VERIFY_OK` và `== Xong`.
 **Gửi lại:** `tail -30 ~/tools/chipyard/setup.log`, `git -C ~/tools/chipyard log -1 --oneline`, dòng `VERIFY_OK`,
