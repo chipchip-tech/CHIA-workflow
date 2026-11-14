@@ -189,6 +189,26 @@ lại được khi `.conda-env` đã có) và tự `source env.sh`. Gửi đuôi
 cd ~/CHIA-workflow && scripts/setup-chipyard.sh --verify ~/tools/chipyard -- -s 1 -s 2 -s 3 -s 4 -s 5 -s 6 -s 7 -s 8 -s 9
 ```
 
+**Bước 9 hỏng ở `sudo mount -o loop`** (gặp 14/11/2026, lần chạy thứ 7): FireMarshal tải được ảnh buildroot dựng sẵn
+(`br.9d7c.img`) nhưng phải mount loop ảnh `br-base.img` để chép file vào, việc này cần root và thiết bị loop mà
+container tạm không có (`Command '/usr/bin/sudo mount -o loop .../br-base.img .../disk-mount' returned non-zero exit
+status 1`). Theo thiết kế không mở thêm quyền container, nên bỏ bước 8–9 bằng đúng lệnh ở trên (bước 8 đã xong vẫn
+giữ nguyên, `-s 8` chỉ để không chạy lại). Hệ quả: chưa dựng được workload Linux của FireMarshal; việc này để riêng.
+
+**Dừng giữa bước 6 rồi chạy tiếp** (gặp 14/11/2026): `docker stop` lúc bước 6 đang tải submodule FireSim để lại hai
+kiểu hỏng mà `git submodule status` không thấy. (1) Submodule tải dở: lần sau báo `fatal: Unable to find current
+revision in submodule path '<p>'`; xoá git dir `.git/modules/sims/firesim/modules/<p>` và thư mục `sims/firesim/<p>`,
+rồi chạy lại. (2) Submodule đã clone xong nhưng chưa checkout (HEAD đúng commit, thư mục chỉ có `.git`): bước 7 hỏng
+kiểu `object cde is not a member of package org.chipsalliance`. Dò rồi gỡ từng đường dẫn in ra:
+
+```bash
+cd ~/tools/chipyard/sims/firesim && git submodule foreach --recursive --quiet '[ -n "$(ls -A | grep -vx .git)" ] || echo "RỖNG: $displaypath"'
+```
+
+```bash
+cd ~/tools/chipyard/sims/firesim && p=sim/cde && git -C "$p" reset -q --hard HEAD && git -C "$p" submodule update --init --recursive
+```
+
 **Lỗi mạng ở bước 1** (`CondaHTTPError: HTTP 000 CONNECTION FAILED`, gặp 14/11/2026): không phải lỗi Chipyard.
 Script đã đặt conda thử lại 10 lần; vẫn hỏng thì kiểm mạng (`curl -sI https://conda.anaconda.org/conda-forge/ | head -1`),
 rồi chạy đúng hai lệnh script in ra (`rm -rf .conda-lock-env .conda-env` rồi chạy lại). Cache gói conda nằm trong container
