@@ -188,8 +188,8 @@ cd ~/CHIA-workflow && scripts/setup-chipyard.sh --verify ~/tools/chipyard -- -s 
 
 **Lỗi mạng ở bước 1** (`CondaHTTPError: HTTP 000 CONNECTION FAILED`, gặp 14/11/2026): không phải lỗi Chipyard.
 Script đã đặt conda thử lại 10 lần; vẫn hỏng thì kiểm mạng (`curl -sI https://conda.anaconda.org/conda-forge/ | head -1`),
-rồi chạy đúng hai lệnh script in ra (`rm -rf .conda-lock-env .conda-env` rồi chạy lại). Gói đã tải nằm trong cache
-`pkgs` của conda nên lần sau nhanh hơn.
+rồi chạy đúng hai lệnh script in ra (`rm -rf .conda-lock-env .conda-env` rồi chạy lại). Cache gói conda nằm trong container
+tạm nên lần chạy lại tải lại từ đầu.
 
 Hỏng ở bước khác (1–5, 10, 11) thì không bỏ qua: gửi log để sửa; script in lệnh chạy tiếp từ bước hỏng
 (hỏng ở bước 1 thì phải xoá `.conda-lock-env`, `.conda-env` trước, script in sẵn lệnh).
