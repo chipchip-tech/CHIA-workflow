@@ -23,9 +23,8 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   `loginctl enable-linger`.
 - Miniforge ở `~/miniforge3`. Env `chia_env`: Python 3.10.19, Ray 2.54.0,
   `chialoops` 2.0.1 (cài từ PyPI).
-- pip từng lấy `anyio`/`httpx`/`httpcore`/`h11` từ `~/.local` (user site). Đã khuyên chạy
-  `conda env config vars set PYTHONNOUSERSITE=1 -n chia_env` rồi `pip install chialoops`
-  lại. **Chưa xác nhận người dùng đã làm hay chưa.**
+- pip từng lấy `anyio`/`httpx`/`httpcore`/`h11` từ `~/.local` (user site). `chia_env` tạo lại 14/11/2026 với
+  `PYTHONNOUSERSITE=1` (đã xác nhận: `site.ENABLE_USER_SITE` = `False`).
 - Sau khi cài lại (08/11/2026): `~/CHIA-workflow` là bản `git clone` thật (nhánh `setup`), cập nhật
   bằng `git pull`. `chialoops` cài từ PyPI, không còn `~/work/chia`. Người dùng **không `git push`
   được** (GitHub đăng nhập bằng Google): muốn đưa file từ máy họ lên repo thì dùng GitHub web,
@@ -44,7 +43,12 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   `docs/reinstall.md` (giữ Vivado, `~/.claude`, Miniforge, image `ghcr.io/ucb-bar/chia-*`), `build-setup.sh` chạy
   **đủ 11 bước**; bước 6–9 (FireSim/FireMarshal) hỏng trong container thì ghi lỗi, chạy lại bỏ các bước đó, không
   mở thêm quyền container. Thiết kế: `docs/superpowers/specs/2026-11-14-chipyard-upstream-design.md`.
-  **Người dùng chưa chạy `docs/reinstall.md`.** Cho tới khi có log, máy họ vẫn có thể còn bố cục cũ (`RISCVTutorial`).
+  **Tiến độ `docs/reinstall.md` (14/11/2026): xong bước 0–4.** Fork, ORFS, `~/chia_cache`, `chia-orfs`, `chia_env` cũ
+  đã xoá; `~/tools` chỉ còn `Xilinx`. Trước khi xoá đã lưu kết quả `minsoc-fmax` vào `~/archive/RISCVTutorial-20261114/`
+  (bundle + patch: repo gốc 16, `rocket-chip` 11, `sifive-cache` 8 commit; `submodule-heads.txt`; checkpoint Vivado
+  `minsoc-vivado` 2.3 GB) và `~/archive/ORFS-minsoc-20261114/` (design/results/reports/logs `minsoc_*`, 2.8 GB).
+  `~/CHIA-workflow` cũ ở `~/archive/CHIA-workflow-20261114`, clone mới ở commit `2b1f1d8`. `chia_env` mới: Python
+  3.10.19, Ray 2.54.0, `chialoops` 2.0.1, `check-bazzite-env.sh` pass. IP LAN lúc này `192.168.107.40`.
 
 ## Đã kiểm chứng và chưa kiểm chứng
 
