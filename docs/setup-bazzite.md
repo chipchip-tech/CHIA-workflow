@@ -227,7 +227,8 @@ verilator, opencode) và hai bản sửa riêng cho Bazzite:
 ```bash
 loginctl enable-linger $USER                                  # một lần
 git clone -b setup https://github.com/chipchip-tech/CHIA-workflow.git ~/CHIA-workflow
-cp -r ~/work/chia/examples/hello-world ~/chia-hello-world
+git clone --depth 1 https://github.com/ucb-bar/chia.git /tmp/chia-src   # chỉ để lấy examples
+cp -r /tmp/chia-src/examples/hello-world ~/chia-hello-world
 cd ~/chia-hello-world
 conda activate chia_env
 export THIS_MACHINE=$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')
@@ -294,6 +295,10 @@ kiểm tra bằng `docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.0
 ---
 
 ## 7. (Tuỳ chọn) Cài Chipyard native trong distrobox
+
+> Cách chính để có Chipyard cho CHIA là `scripts/setup-chipyard.sh` (Chipyard gốc 1.15.0 ở `~/tools/chipyard`,
+> dựng trong container, xem [reinstall.md](reinstall.md) và [cluster-blocks.md](cluster-blocks.md)). Mục này chỉ
+> dành cho ai muốn Chipyard chạy thẳng trong distrobox, không qua CHIA.
 
 Chipyard chính thức được test trên Ubuntu/x86 Linux và cần nhiều gói `-dev` mà
 Bazzite không cho cài trực tiếp. Hãy dùng **distrobox** với **Ubuntu 22.04**,

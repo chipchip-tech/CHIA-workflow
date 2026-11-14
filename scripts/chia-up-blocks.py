@@ -23,10 +23,11 @@ import yaml
 REPO = Path(__file__).resolve().parent.parent
 TEMPLATE = REPO / "configs" / "cluster-blocks.template.yaml"
 DEFAULTS = {
-    "CHIPYARD_FORK": str(Path.home() / "tools" / "RISCVTutorial"),
+    "CHIPYARD_FORK": str(Path.home() / "tools" / "chipyard"),
     "ORFS_DIR": str(Path.home() / "tools" / "OpenROAD-flow-scripts"),
     "XILINX_DIR": str(Path.home() / "tools" / "Xilinx"),
     "VIVADO_VERSION": "2025.1",
+    "JVM_CACHE": str(Path.home() / "chia_cache" / "jvm"),
 }
 
 
@@ -55,10 +56,13 @@ def main() -> None:
 
     for k, v in DEFAULTS.items():
         os.environ.setdefault(k, v)
-    # Bazzite: /home là symlink tới /var/home. setup-chipyard-fork.sh dựng fork theo đường dẫn
+    # Bazzite: /home là symlink tới /var/home. setup-chipyard.sh dựng Chipyard theo đường dẫn
     # thật (/var/home/...), và env.sh/conda env ghi cứng đường dẫn đó, nên mount cũng phải dùng nó.
-    for k in ("CHIPYARD_FORK", "ORFS_DIR", "XILINX_DIR"):
+    for k in ("CHIPYARD_FORK", "ORFS_DIR", "XILINX_DIR", "JVM_CACHE"):
         os.environ[k] = os.path.realpath(os.environ[k])
+    # Tạo trước thư mục cache, nếu không docker tạo chúng với chủ root và container không ghi được.
+    for sub in ("coursier", "sbt", "ivy2"):
+        (Path(os.environ["JVM_CACHE"]) / sub).mkdir(parents=True, exist_ok=True)
     if not os.environ.get("THIS_MACHINE"):
         os.environ["THIS_MACHINE"] = detect_ip() or fail("không dò được IP, hãy export THIS_MACHINE")
 
@@ -66,7 +70,7 @@ def main() -> None:
     if not fork.is_absolute():
         fail(f"CHIPYARD_FORK phải là đường dẫn tuyệt đối: {fork}")
     if not (fork / "env.sh").is_file():
-        fail(f"{fork}/env.sh không có: fork chưa dựng xong (scripts/setup-chipyard-fork.sh)")
+        fail(f"{fork}/env.sh không có: Chipyard chưa dựng xong (scripts/setup-chipyard.sh)")
 
     enabled = {"chipyard": True, "verilator": True, "claude": not args.no_claude,
                "vivado": args.fpga, "asic": args.asic}
@@ -89,11 +93,12 @@ def main() -> None:
 
     header = (f"# SINH TỰ ĐỘNG bởi scripts/chia-up-blocks.py từ {TEMPLATE.name}. Đừng sửa tay.\n"
               f"# Khối bật: {', '.join(n for n, on in enabled.items() if on)}\n"
-              f"# CHIPYARD_FORK={fork}  ORFS_DIR={os.environ['ORFS_DIR']}  VIVADO_VERSION={os.environ['VIVADO_VERSION']}\n")
+              f"# CHIPYARD_FORK={fork}  ORFS_DIR={os.environ['ORFS_DIR']}  VIVADO_VERSION={os.environ['VIVADO_VERSION']}"
+              f"  JVM_CACHE={os.environ['JVM_CACHE']}\n")
     body = yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True, width=1000)
     # CHIA không thay ${VAR} trong worker_setup_commands (chỉ trong run_options), nên tự thay
     # các biến của template ở đây. ${THIS_MACHINE}, ${USER} để CHIA thay như các config khác.
-    for k in ("CHIPYARD_FORK", "ORFS_DIR", "XILINX_DIR", "VIVADO_VERSION"):
+    for k in ("CHIPYARD_FORK", "ORFS_DIR", "XILINX_DIR", "VIVADO_VERSION", "JVM_CACHE"):
         body = body.replace("${" + k + "}", os.environ[k])
     out = Path(args.out)
     out.write_text(header + body)
