@@ -191,6 +191,18 @@ t_verify_failure() {
     ok verify_failure
 }
 
+# 14/11/2026: build-setup của FireSim (bước 6) cũng in "Setup complete!", rồi bước 7 hỏng. Không được
+# coi là build-setup.sh đã xong (lần đó script báo nhầm "verify hỏng" và còn chạy verify).
+t_firesim_setup_complete() {
+    new_env; local d="$T/cy" err rc
+    make_cy "$d"; export FAKE_FAIL_STEP=7 FAKE_FAIL_DESC="Pre-compiling Firesim Scala sources" FAKE_FAIL_TEXT="Setup complete!"
+    err="$(bash "$SCRIPT" --verify "$d" -- -s 1 2>&1 >/dev/null)"; rc=$?
+    [ $rc -ne 0 ] || { bad firesim_setup_complete "thoát 0"; return; }
+    has "$err" "build-verify.log" && { bad firesim_setup_complete "báo nhầm verify hỏng: $err"; return; }
+    has "$err" "bước 7" || { bad firesim_setup_complete "không báo bước 7: $err"; return; }
+    ok firesim_setup_complete
+}
+
 # setup.log của lần trước phải bị xoá trước khi chạy, nếu không có thể báo nhầm bước hay báo thành công giả.
 t_stale_log_removed() {
     new_env; local d="$T/cy"
@@ -232,7 +244,7 @@ t_rocc_software() {
     ok rocc_software
 }
 
-for t in t_rocc_software t_refuse_concurrent t_rerun_after_success t_verify_failure t_stale_log_removed t_dry_run_clone t_realpath_mount t_no_skip_default t_existing_dir_other_ref t_failure_report t_failure_step1 t_skip1_sources_env t_jvm_cache_mount t_conda_retries; do
+for t in t_rocc_software t_refuse_concurrent t_rerun_after_success t_verify_failure t_firesim_setup_complete t_stale_log_removed t_dry_run_clone t_realpath_mount t_no_skip_default t_existing_dir_other_ref t_failure_report t_failure_step1 t_skip1_sources_env t_jvm_cache_mount t_conda_retries; do
     "$t"
 done
 echo "== $PASS pass, $FAIL fail"

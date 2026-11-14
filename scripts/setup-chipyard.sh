@@ -59,11 +59,15 @@ echo "== Log: $CY/setup.log"
 SRC_ENV=""
 case " ${EXTRA[*]} " in *" -s 1 "*|*" --skip 1 "*|*" --skip-conda "*) SRC_ENV="source env.sh || exit 1
 " ;; esac
+# build-setup.sh xong khi "Setup complete!" đứng sau dòng BEGINNING STEP cuối. Chỉ grep thì sai: build-setup
+# của FireSim (bước 6) cũng in "Setup complete!" (gặp 14/11/2026: bước 7 hỏng mà verify vẫn chạy, báo nhầm),
+# và build-setup.sh của Chipyard thoát 0 cả khi hỏng (`{ ... } | tee` không có pipefail).
+SETUP_DONE='awk '"'"'/BEGINNING STEP/{d=0} /^Setup complete!$/{d=1} END{exit !d}'"'"' setup.log'
 INNER='set -eo pipefail
 source /home/ray/anaconda3/etc/profile.d/conda.sh && conda activate base
 cd "'"$CY"'"
 '"$SRC_ENV"'./build-setup.sh riscv-tools'"${EXTRA[*]:+ ${EXTRA[*]}}"' 2>&1 | tee setup.log
-grep -q "Setup complete!" setup.log'
+'"$SETUP_DONE"
 
 if [ "$VERIFY" = 1 ]; then
     INNER="$INNER"'
@@ -137,7 +141,7 @@ SELF="scripts/setup-chipyard.sh"
 [ "$TAG" = "1.15.0" ] || SELF="$SELF --tag $TAG"
 SELF="$SELF $CY"
 
-if [ $rc -ne 0 ] && grep -q "Setup complete!" "$CY/setup.log" 2>/dev/null; then
+if [ $rc -ne 0 ] && [ -f "$CY/setup.log" ] && (cd "$CY" && eval "$SETUP_DONE"); then
     {
         echo "LỖI: build-setup.sh đã xong (Setup complete!) nhưng bước kiểm tra --verify hỏng (mã $rc)."
         echo "Log build Verilator: $CY/sims/verilator/build-verify.log (lỗi chạy rv64ui-p-simple in ở trên)."
