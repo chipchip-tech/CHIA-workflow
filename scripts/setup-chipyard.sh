@@ -77,12 +77,27 @@ fi
 # timeout nên socket chết tới Maven làm treo vô hạn, xem docs/cluster-blocks.md).
 # Conda (bước 1) tải hàng trăm gói; mặc định chỉ thử lại 3 lần nên mạng chập chờn làm hỏng cả bước
 # (gặp 14/11/2026: HTTP 000 CONNECTION FAILED tới conda.anaconda.org). Tăng số lần thử và giãn cách.
+# Chặn chạy trùng: 14/11/2026 hai container build-setup cùng chạy trên một thư mục (lần trước còn sót ở
+# terminal khác), tranh nhau ghi .conda-env và chia băng thông; lần sau còn xoá setup.log của lần trước.
+# Container được gắn nhãn theo đường dẫn Chipyard để nhận ra.
+LABEL="chia.setup-chipyard=$CY"
+if [ "$DRY" = 0 ]; then
+    busy="$(docker ps -q --filter "label=$LABEL")"
+    if [ -n "$busy" ]; then
+        {
+            echo "LỖI: đã có container đang dựng $CY: $(tr '\n' ' ' <<<"$busy")"
+            echo "Để nó chạy xong (xem $CY/setup.log), hoặc dừng hẳn rồi mới chạy lại:"
+            echo "  docker stop $(tr '\n' ' ' <<<"$busy")"
+        } >&2
+        exit 1
+    fi
+fi
 run mkdir -p "$JVM/coursier" "$JVM/sbt" "$JVM/ivy2"
 # Xoá log lần trước: nếu docker hỏng trước khi tee chạy, log cũ sẽ bị chẩn đoán nhầm (hoặc có sẵn
 # "Setup complete!" làm báo thành công giả).
 run rm -f "$CY/setup.log"
 rc=0
-run docker run --rm --shm-size=10.24gb \
+run docker run --rm --shm-size=10.24gb --label "$LABEL" \
     -v "$CY:$CY:z" -w "$CY" \
     -v "$JVM/coursier:/home/ray/.cache/coursier:z" -v "$JVM/sbt:/home/ray/.sbt:z" -v "$JVM/ivy2:/home/ray/.ivy2:z" \
     -e "JAVA_TOOL_OPTIONS=-Dsun.net.client.defaultConnectTimeout=30000 -Dsun.net.client.defaultReadTimeout=120000" \

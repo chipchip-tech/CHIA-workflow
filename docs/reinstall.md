@@ -166,7 +166,12 @@ python -V; ray --version; python -c "import site; print(site.ENABLE_USER_SITE)";
 ## 5. Dựng Chipyard 1.15.0 (nhiều giờ)
 
 Chạy thẳng trong terminal trên máy và để máy chạy (đừng cho máy ngủ, đừng đóng terminal). Chỉ cần `tmux` khi chạy
-qua SSH hoặc terminal có thể bị đóng.
+qua SSH hoặc terminal có thể bị đóng. Chỉ chạy **một** lần một lúc: script từ chối chạy nếu đã có container đang dựng
+cùng thư mục (in ID để `docker stop`). Container của bản script cũ (trước 14/11/2026) không có nhãn nên không bị phát
+hiện; kiểm tra bằng `docker ps --filter ancestor=ghcr.io/ucb-bar/chia-chisel-build:latest`.
+
+Dòng `Storing main conda environment in .../.conda-env` đứng im hàng chục phút là bình thường (đang tải vài GB
+riscv-tools, không in tiến độ). Xem còn tải không: cột NET I/O của `docker stats --no-stream` phải tăng dần.
 
 ```bash
 cd ~/CHIA-workflow && scripts/setup-chipyard.sh --verify

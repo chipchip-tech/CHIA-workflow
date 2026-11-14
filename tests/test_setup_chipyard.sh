@@ -16,6 +16,11 @@ make_fakes() {
     cat > "$bin/docker" <<'EOF'
 #!/usr/bin/env bash
 echo "docker $(tr "\n" " " <<<"$*")" >> "$CALLS"
+# docker ps: giả lập container build đang chạy (FAKE_RUNNING=ID), chỉ khi filter đúng nhãn.
+if [ "$1" = ps ]; then
+    case "$*" in *"label=chia.setup-chipyard="*) [ -n "${FAKE_RUNNING:-}" ] && echo "$FAKE_RUNNING" ;; esac
+    exit 0
+fi
 w=""; prev=""
 for a in "$@"; do [ "$prev" = "-w" ] && w="$a"; prev="$a"; done
 [ -e "$w/setup.log" ] && echo "STALE_LOG_PRESENT" >> "$CALLS"
@@ -48,7 +53,7 @@ new_env() {
     T="$(mktemp -d)"; export CALLS="$T/calls"; : > "$CALLS"
     make_fakes "$T/bin"; export PATH="$T/bin:$ORIG_PATH"
     export HOME="$T/home"; mkdir -p "$HOME"
-    unset CHIPYARD_FORK JVM_CACHE FAKE_FAIL_STEP FAKE_FAIL_DESC FAKE_FAIL_TEXT FAKE_DESCRIBE FAKE_VERIFY_FAIL
+    unset FAKE_RUNNING CHIPYARD_FORK JVM_CACHE FAKE_FAIL_STEP FAKE_FAIL_DESC FAKE_FAIL_TEXT FAKE_DESCRIBE FAKE_VERIFY_FAIL
 }
 make_cy() { mkdir -p "$1"; : > "$1/build-setup.sh"; chmod +x "$1/build-setup.sh"; }
 
@@ -194,7 +199,23 @@ t_stale_log_removed() {
     ok stale_log_removed
 }
 
-for t in t_rerun_after_success t_verify_failure t_stale_log_removed t_dry_run_clone t_realpath_mount t_no_skip_default t_existing_dir_other_ref t_failure_report t_failure_step1 t_skip1_sources_env t_jvm_cache_mount t_conda_retries; do
+# 14/11/2026: hai container build-setup cùng chạy trên một thư mục (lần trước còn sót ở terminal khác).
+# Phải từ chối chạy, không xoá setup.log của lần đang chạy, và gắn nhãn để lần sau nhận ra.
+t_refuse_concurrent() {
+    new_env; local d="$T/cy" err rc
+    make_cy "$d"; echo "log đang ghi" > "$d/setup.log"; export FAKE_RUNNING=8ce6de8ea068
+    err="$(bash "$SCRIPT" "$d" 2>&1 >/dev/null)"; rc=$?
+    [ $rc -ne 0 ] || { bad refuse_concurrent "thoát 0 khi đã có container chạy"; return; }
+    grep -q '^docker run' "$CALLS" && { bad refuse_concurrent "vẫn docker run: $(cat "$CALLS")"; return; }
+    [ -s "$d/setup.log" ] || { bad refuse_concurrent "đã xoá setup.log của lần đang chạy"; return; }
+    has "$err" "8ce6de8ea068" || { bad refuse_concurrent "không in ID container: $err"; return; }
+    unset FAKE_RUNNING; : > "$CALLS"
+    bash "$SCRIPT" "$d" > /dev/null 2>&1
+    grep '^docker run' "$CALLS" | grep -qF -- "--label chia.setup-chipyard=$d" || { bad refuse_concurrent "docker run thiếu nhãn: $(cat "$CALLS")"; return; }
+    ok refuse_concurrent
+}
+
+for t in t_refuse_concurrent t_rerun_after_success t_verify_failure t_stale_log_removed t_dry_run_clone t_realpath_mount t_no_skip_default t_existing_dir_other_ref t_failure_report t_failure_step1 t_skip1_sources_env t_jvm_cache_mount t_conda_retries; do
     "$t"
 done
 echo "== $PASS pass, $FAIL fail"

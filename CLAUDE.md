@@ -51,6 +51,9 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   3.10.19, Ray 2.54.0, `chialoops` 2.0.1, `check-bazzite-env.sh` pass. IP LAN lúc này `192.168.107.40`.
   Bước 5 lần 1: hỏng ở bước 1 của `build-setup.sh` vì mạng (`HTTP 000 CONNECTION FAILED` tới `conda.anaconda.org`);
   `setup-chipyard.sh` thêm `CONDA_REMOTE_MAX_RETRIES=10` và backoff, chạy lại sau khi xoá `.conda-lock-env`, `.conda-env`.
+  Lần 2: phát hiện **hai container build-setup chạy cùng lúc** trên `~/tools/chipyard` (một lần chạy trước còn sót ở
+  terminal khác, không phải tmux), tải chỉ ~10 MB/phút chung; đã dừng cả hai. `setup-chipyard.sh` giờ gắn nhãn
+  `chia.setup-chipyard=<dir>` cho container và từ chối chạy khi đã có container mang nhãn đó. Lần 3: đang chạy.
 
 ## Đã kiểm chứng và chưa kiểm chứng
 
