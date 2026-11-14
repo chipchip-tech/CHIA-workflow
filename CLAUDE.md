@@ -36,9 +36,15 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   `~/CHIA-workflow` cũ chuyển vào `~/archive/`) để cài lại từ đầu và kiểm chứng tài liệu. Giữ
   `~/tools/Xilinx`, `~/.claude`, Miniforge và thiết lập hệ thống (docker, sshd, linger, `.bashrc`).
   Cache của `rocket-fmax` đã mất.
-- Bố cục mới: mọi công cụ trong `~/tools`: `RISCVTutorial/` (fork Chipyard 1.10.0, nhánh `base`),
-  `OpenROAD-flow-scripts/` (chép từ image `chia-orfs`), `Xilinx/2025.1/`. Sửa tay trên host,
+- Bố cục: mọi công cụ trong `~/tools`: `chipyard/` (Chipyard gốc `ucb-bar/chipyard`, ghim tag **1.15.0**, nhánh
+  cục bộ `local-1.15.0`), `OpenROAD-flow-scripts/` (chép từ image `chia-orfs`), `Xilinx/2025.1/`. Sửa tay trên host,
   build trong container (`docs/cluster-blocks.md`).
+- **14/11/2026: quyết định bỏ fork RISCVTutorial (Chipyard 1.10.0), chuyển sang Chipyard gốc 1.15.0** để đồng bộ
+  với bản gốc, rồi giữ cố định ở bản đó (đồng bộ tiếp là việc riêng). Dựng lại toàn bộ CHIA từ đầu theo
+  `docs/reinstall.md` (giữ Vivado, `~/.claude`, Miniforge, image `ghcr.io/ucb-bar/chia-*`), `build-setup.sh` chạy
+  **đủ 11 bước**; bước 6–9 (FireSim/FireMarshal) hỏng trong container thì ghi lỗi, chạy lại bỏ các bước đó, không
+  mở thêm quyền container. Thiết kế: `docs/superpowers/specs/2026-11-14-chipyard-upstream-design.md`.
+  **Người dùng chưa chạy `docs/reinstall.md`.** Cho tới khi có log, máy họ vẫn có thể còn bố cục cũ (`RISCVTutorial`).
 
 ## Đã kiểm chứng và chưa kiểm chứng
 
@@ -67,6 +73,12 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   `/opt/orfs-python` (3.14), không có `psutil`. Dockerfile đã cài `psutil`; kiểm chứng 09/11/2026:
   `ok=True`, container bị xoá sạch.
 
+**Chưa chạy thử trên Chipyard 1.15.0** (14/11/2026, các mục "đã chạy thật" có fork ở trên là với 1.10.0):
+- `scripts/setup-chipyard.sh` (đổi tên từ `setup-chipyard-fork.sh`), `docs/reinstall.md`, khối `chipyard`/`vivado`
+  trên 1.15.0, `MinimalSoCConfig` bản 1.15.0. Trong sandbox mới kiểm: test bash của hai script
+  (`tests/test_setup_chipyard.sh`, `tests/test_install_chipyard_config.sh`) và `install-chipyard-config.sh` in
+  `MIXIN_OK` trên cây 1.15.0 thật (shallow).
+
 **Chưa chạy thử** (viết từ docs và mã nguồn CHIA):
 - `configs/cluster-lan.yaml`, `prepare-remote-worker.sh`, `check-remote-worker.sh`.
 - `examples/rtl_agent_loop.py`: mới qua `py_compile`, API đã đối chiếu với mã nguồn CHIA 2.0.1.
@@ -90,7 +102,8 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 5. Thêm `--node-ip-address=<IP>` và `--disable-usage-stats` vào lệnh khởi động Ray head
    để khỏi phụ thuộc IP tự dò và câu hỏi tương tác.
 
-6. **Fork Chipyard 1.10 trong image CHIA**: thiếu `conda-lock` (cài `conda-lock==1.4.0`);
+6. **Fork Chipyard 1.10 trong image CHIA** (riêng 1.10; Chipyard gốc 1.15.0 tự tạo env conda-lock và đứng
+   trên tag release nên không cần `conda-lock==1.4.0` hay `-f`): thiếu `conda-lock` (cài `conda-lock==1.4.0`);
    `build-setup.sh` hỏi `y/n` mãi khi không có bàn phím vì fork không đứng trên tag release (dùng
    `-f`); `env.sh` của fork gọi `conda activate` nên phải `source .../anaconda3/etc/profile.d/conda.sh`
    trước. `/home` là symlink tới `/var/home`: fork ghi cứng đường dẫn thật, mount phải dùng `realpath`.
@@ -112,7 +125,13 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 - `ChiselBuildNode.build` khi lỗi **không raise** mà trả `BuildArtifact(success=False)`.
 - `BashTool(name, work_dir, timeout_seconds=120, task_options=...)`. Tool đang chạy giữ
   resource cho tới khi gọi `.stop()`.
-- Image Chipyard của CHIA dùng nhánh `chia_artifact` của `ucb-bar/chipyard`, Ubuntu 22.04.
+- Image Chipyard của CHIA dùng nhánh `chia_artifact` của `ucb-bar/chipyard` (= 1.14.0 + vá CHIA), Ubuntu 22.04.
+- Chipyard 1.15.0 so với 1.10.0 (đối chiếu mã nguồn 14/11/2026): `WithNBigCores` chuyển sang package
+  `freechips.rocketchip.rocket` (tham số giữ nguyên), `RocketConfig` dùng `WithNHugeCores`; `AbstractConfig` thêm
+  scratchpad 64 KiB (bỏ bằng `testchipip.soc.WithNoScratchpads`); `tests/` build bằng CMake
+  (`tests/build/hello.riscv`); `build-setup.sh` có bước 10 cài CIRCT, bước 1 thoát nếu `.conda-env` đã có (chạy
+  lại phải `-s 1` và `source env.sh`; `setup-chipyard.sh` in sẵn lệnh), env conda-lock không ghim Python (lỗi
+  `sre_parse` có thể quay lại, xem `docs/setup-bazzite.md` mục 7).
 - Worker docker: CHIA gộp `worker_env_commands`, `setup_commands`, `worker_setup_commands` và
   `worker_start_ray_commands` thành MỘT script chạy qua `docker exec -i ... bash --login`
   (`chia/cluster/node_setup.py`). Biến môi trường đặt ở `worker_setup_commands` đi vào Ray worker;
@@ -174,13 +193,19 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   push luôn lên nhánh đích.
 - Project hiện có: `project/ascon-secureboot` (RoCC Ascon-Hash256, secure boot; xong M1–M4),
   `project/rocket-fmax` (tối ưu Fmax RocketTile; chi tiết trong `CLAUDE.md` của nhánh đó).
+  **Cả hai viết cho Chipyard 1.10.0** (fork RISCVTutorial): sau khi chuyển sang 1.15.0 mã Scala của chúng có thể
+  không build được (mixin đổi package, scratchpad). Chưa sửa; khi quay lại project nào thì `git merge origin/setup`
+  và chuyển nó sang 1.15.0 trước.
 
 ## Việc tiếp theo (gợi ý)
 
-1. Mở project mới theo **Quy ước nhánh**, dùng cluster theo khối (`docs/cluster-blocks.md`), config kế thừa
+1. **Người dùng chạy `docs/reinstall.md`** (bước 0–8), gửi log từng bước. Cập nhật docs và file này theo kết
+   quả: chuyển mục sang "đã kiểm chứng trên 1.15.0", ghi lỗi mới (nhất là bước 6–9 của `build-setup.sh`).
+2. Nếu bước 6–9 phải bỏ: việc riêng để làm FireSim/FireMarshal chạy được (dựa trên log thật).
+3. Mở project mới theo **Quy ước nhánh**, dùng cluster theo khối (`docs/cluster-blocks.md`), config kế thừa
    `chipyard.MinimalSoCConfig` (nền mặc định cho mọi project).
-2. Lần đầu dùng khối vivado thật: chạy flow `fpga/` của Chipyard ra bitstream, ghi lỗi vào docs.
-3. Chạy thử `examples/rtl_agent_loop.py` (đang trỏ `/home/ray/chipyard` của image; muốn dùng fork thì
-   đổi sang đường dẫn fork và resource `chipyard` của cluster theo khối).
-4. Xác nhận `PYTHONNOUSERSITE=1` cho `chia_env`.
-5. Khi có máy thứ hai: làm theo `docs/usage-remote.md`, kiểm chứng `cluster-lan.yaml`.
+4. Chuyển `project/ascon-secureboot`, `project/rocket-fmax` sang Chipyard 1.15.0 khi quay lại.
+5. Lần đầu dùng khối vivado thật: chạy flow `fpga/` của Chipyard ra bitstream, ghi lỗi vào docs.
+6. Chạy thử `examples/rtl_agent_loop.py` (đang trỏ `/home/ray/chipyard` của image; muốn dùng Chipyard trên host thì
+   đổi sang `~/tools/chipyard` và resource `chipyard` của cluster theo khối).
+7. Khi có máy thứ hai: làm theo `docs/usage-remote.md`, kiểm chứng `cluster-lan.yaml`.

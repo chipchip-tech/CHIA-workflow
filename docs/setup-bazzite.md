@@ -295,6 +295,10 @@ kiểm tra bằng `docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.0
 
 ## 7. (Tuỳ chọn) Cài Chipyard native trong distrobox
 
+> Cách chính để có Chipyard cho CHIA là `scripts/setup-chipyard.sh` (Chipyard gốc 1.15.0 ở `~/tools/chipyard`,
+> dựng trong container, xem [reinstall.md](reinstall.md) và [cluster-blocks.md](cluster-blocks.md)). Mục này chỉ
+> dành cho ai muốn Chipyard chạy thẳng trong distrobox, không qua CHIA.
+
 Chipyard chính thức được test trên Ubuntu/x86 Linux và cần nhiều gói `-dev` mà
 Bazzite không cho cài trực tiếp. Hãy dùng **distrobox** với **Ubuntu 22.04**,
 trùng với base image của CHIA. Đặt `--home` riêng để conda của Chipyard không
