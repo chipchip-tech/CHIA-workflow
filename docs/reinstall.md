@@ -2,10 +2,10 @@
 
 Gỡ fork RISCVTutorial (Chipyard 1.10.0) và mọi thứ CHIA đã dựng, rồi dựng lại với Chipyard gốc
 `ucb-bar/chipyard` ghim tag **1.15.0** ở `~/tools/chipyard`, chạy đủ 11 bước của `build-setup.sh`.
-Thiết kế: [superpowers/specs/2026-11-14-chipyard-upstream-design.md](superpowers/specs/2026-11-14-chipyard-upstream-design.md).
 
-**Trạng thái: chưa chạy thật** (viết 14/11/2026). Làm lần lượt từng bước, gửi lại phần "Gửi lại" của mỗi
-bước trước khi sang bước sau. Bước 2 xoá thật, không hoàn tác được.
+**Trạng thái: đã chạy thật hết bước 0–8 (14/11/2026)**, kể cả bước 9 FireMarshal của `build-setup.sh` (với
+`--privileged`, xem bước 5). Các lỗi gặp khi chạy và cách gỡ ghi ngay trong từng bước. Làm lần lượt từng bước, gửi lại
+phần "Gửi lại" của mỗi bước trước khi sang bước sau. Bước 2 xoá thật, không hoàn tác được.
 
 | Xoá | Giữ |
 |---|---|

@@ -4,9 +4,10 @@ SoC gốc cho mọi project, chạy trên Chipyard gốc **1.15.0** ở `~/tools
 `scripts/setup-chipyard.sh`, xem [reinstall.md](reinstall.md)).
 Lý do và các quyết định: [minimal-soc-config-spec.md](minimal-soc-config-spec.md).
 
-**Trạng thái: chưa kiểm chứng trên 1.15.0.** Trong sandbox (14/11/2026) mới kiểm được: mọi mixin có thật
-trong cây 1.15.0 (`install-chipyard-config.sh` in `MIXIN_OK`), tham số `WithNBigCores` giống 1.10.0,
-`hello.riscv` nạp vào DRAM (`htif.ld`) nên không cần scratchpad. Chưa build/chạy.
+**Trạng thái: đã kiểm chứng trên 1.15.0 (14/11/2026, bước 6 của [reinstall.md](reinstall.md)):** cài (`MIXIN_OK`),
+build Verilator, `rv64ui-p-simple` và `hello.riscv` (`Hello world from core 0, a rocket`) `EXIT=0`, L2
+`cache-size = <131072>`, không có module GPIO/SPI/I2C/PWM/scratchpad. `hello.riscv` nạp vào DRAM (`htif.ld`) nên
+không cần scratchpad.
 
 Trên fork 1.10.0 (09/11/2026, đã gỡ): cài (`MIXIN_OK`), build Verilator, `rv64ui-p-simple` (`EXIT=0`),
 `hello.riscv` in `Hello world from core 0, a rocket` (`EXIT=0`), L2 `cache-size = <131072>` (L1 I/D mỗi cái

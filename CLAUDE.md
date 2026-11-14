@@ -38,27 +38,19 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 - Bố cục: mọi công cụ trong `~/tools`: `chipyard/` (Chipyard gốc `ucb-bar/chipyard`, ghim tag **1.15.0**, nhánh
   cục bộ `local-1.15.0`), `OpenROAD-flow-scripts/` (chép từ image `chia-orfs`), `Xilinx/2025.1/`. Sửa tay trên host,
   build trong container (`docs/cluster-blocks.md`).
-- **14/11/2026: quyết định bỏ fork RISCVTutorial (Chipyard 1.10.0), chuyển sang Chipyard gốc 1.15.0** để đồng bộ
-  với bản gốc, rồi giữ cố định ở bản đó (đồng bộ tiếp là việc riêng). Dựng lại toàn bộ CHIA từ đầu theo
-  `docs/reinstall.md` (giữ Vivado, `~/.claude`, Miniforge, image `ghcr.io/ucb-bar/chia-*`), `build-setup.sh` chạy
-  **đủ 11 bước**; bước 6–9 (FireSim/FireMarshal) hỏng trong container thì ghi lỗi, chạy lại bỏ các bước đó, không
-  mở thêm quyền container. Thiết kế: `docs/superpowers/specs/2026-11-14-chipyard-upstream-design.md`.
-  **`docs/reinstall.md` XONG cả 8 bước (14/11/2026).** Fork, ORFS, `~/chia_cache`, `chia-orfs`, `chia_env` cũ
-  đã xoá; `~/tools` chỉ còn `Xilinx`. Trước khi xoá đã lưu kết quả `minsoc-fmax` vào `~/archive/RISCVTutorial-20261114/`
-  (bundle + patch: repo gốc 16, `rocket-chip` 11, `sifive-cache` 8 commit; `submodule-heads.txt`; checkpoint Vivado
-  `minsoc-vivado` 2.3 GB) và `~/archive/ORFS-minsoc-20261114/` (design/results/reports/logs `minsoc_*`, 2.8 GB).
-  `~/CHIA-workflow` cũ ở `~/archive/CHIA-workflow-20261114`, clone mới ở commit `2b1f1d8`. `chia_env` mới: Python
-  3.10.19, Ray 2.54.0, `chialoops` 2.0.1, `check-bazzite-env.sh` pass. IP LAN lúc này `192.168.107.40`.
-  Bước 5 lần 1: hỏng ở bước 1 của `build-setup.sh` vì mạng (`HTTP 000 CONNECTION FAILED` tới `conda.anaconda.org`);
-  `setup-chipyard.sh` thêm `CONDA_REMOTE_MAX_RETRIES=10` và backoff, chạy lại sau khi xoá `.conda-lock-env`, `.conda-env`.
-  Lần 2: phát hiện **hai container build-setup chạy cùng lúc** trên `~/tools/chipyard` (một lần chạy trước còn sót ở
-  terminal khác, không phải tmux), tải chỉ ~10 MB/phút chung; đã dừng cả hai. `setup-chipyard.sh` giờ gắn nhãn
-  `chia.setup-chipyard=<dir>` cho container và từ chối chạy khi đã có container mang nhãn đó. Lần 3: **bước 1 xong**,
-  hỏng ở bước 2: submodule `rocc-software` của `gemmini-rocc-tests` trỏ `github.com/ibm/rocc-software` đã bị xoá
-  (bước 2 luôn `--full`, không tắt được Gemmini). Bản sao `ucb-bar/rocc-software` chỉ có 1 commit mới (`9492c0a`),
-  không có commit ghim `fddb795`. `setup-chipyard.sh` giờ dựng sẵn gemmini + gemmini-rocc-tests trên host, clone bản
-  sao vào `rocc-software` và đặt `submodule.rocc-software.update none` (đã thử trong sandbox: `git submodule update
-  --init --recursive software/gemmini-rocc-tests` qua, RC=0). Lần 4 (`-- -s 1`): vá rocc-software chạy được trên máy thật, **xong bước 2–5**; người dùng chủ động dừng giữa bước 6 (tải submodule FireSim) bằng `docker stop` theo nhãn, log lưu ở `~/tools/chipyard/setup-lan4.log`. Lần 5 (`-- -s 1 -s 2 -s 3 -s 4 -s 5`): bước 6 tải tiếp các submodule FireSim còn thiếu, rồi hỏng `fatal: Unable to find current revision in submodule path 'platforms/f1/aws-fpga'` (mã 128): submodule đang tải dở lúc dừng ở lần 4. Cách gỡ: xoá git dir `.git/modules/sims/firesim/modules/platforms/f1/aws-fpga` và thư mục làm việc của nó, chạy lại lệnh lần 5. Lần 6 (cùng lệnh): **bước 6 qua** (cách gỡ chạy được), hỏng ở bước 7 (biên dịch Scala của FireSim): `diplomacy` báo `object cde is not a member of package org.chipsalliance`, và `cde` không hề được biên dịch, vì thư mục làm việc của `sims/firesim/sim/cde` thiếu file. **Đã xác nhận:** dừng ở lần 4 ngắt `git submodule update` sau pha clone, trước pha checkout, nên submodule có HEAD đúng commit ghim mà thư mục làm việc trống. `git submodule status` chỉ so HEAD nên không phát hiện, chạy lại cũng bỏ qua. Bị như vậy: `sim/cde` (16 file), `platforms/f2/aws-fpga-firesim-f2` (987 file, chưa init 2 submodule con), NiteFury (178), garnet-firesim (150). Gỡ bằng `git -C <p> reset -q --hard HEAD && git -C <p> submodule update --init --recursive`; dò bằng `git submodule foreach --recursive --quiet '[ -n "$(ls -A | grep -vx .git)" ] || echo "RỖNG: $displaypath"'`. Lần này còn lộ lỗi của `setup-chipyard.sh`: build-setup của FireSim cũng in `Setup complete!`, nên script tưởng build-setup.sh đã xong, vẫn chạy verify và báo nhầm "verify hỏng". Đã sửa: chỉ coi là xong khi `Setup complete!` đứng sau dòng `BEGINNING STEP` cuối (test `t_firesim_setup_complete`). Lần 7 (`-- -s 1 … -s 6`, sau khi gỡ): **bước 7 và 8 qua**, hỏng ở bước 9: FireMarshal dùng ảnh buildroot dựng sẵn nhưng `sudo mount -o loop br-base.img` hỏng (container không có root/thiết bị loop). Theo thiết kế bỏ bước 8–9 (ghi trong `docs/reinstall.md`, kèm cách gỡ khi dừng giữa bước 6); Lần 8 (`-- -s 1 … -s 9`): bước 10–11 qua, verify build Verilator `RocketConfig` + `rv64ui-p-simple` ra **`VERIFY_OK`** → **xong bước 5 của `reinstall.md`** (bước 8–9 của `build-setup.sh` bị bỏ, FireMarshal chưa dựng workload). Bước 6 (`MinimalSoCConfig` trên 1.15.0): build Verilator qua, `rv64ui-p-simple` và `hello.riscv` (`Hello world from core 0, a rocket`) `EXIT=0`, L2 `cache-size = <131072>`, đếm GPIO/SPI/I2C/PWM/scratchpad = 0. Bước 7: build lại `chia-orfs` (281 s), `setup-orfs.sh --verify` chép 1.44 GB, `nangate45/gcd` ra `6_final.gds` và `VERIFY_OK`. Bước 8 (IP LAN lúc này `192.168.1.7`): `chia-up-blocks.py --fpga --asic` lên đủ 5 khối, `blocks_smoke.py --clean` ra `[chipyard] env` `RISCV=/var/home/dingus/tools/chipyard/.conda-env/riscv-tools`, build `RocketConfig` (clean) `SUCCESS=True`, `vivado v2025.1`, asic Yosys 0.68, `KẾT QUẢ: OK`; `chia down` gỡ sạch 5 container + head (`ok=True`). **Sau reinstall (14/11/2026):** bước 9 FireMarshal chạy được với `setup-chipyard.sh --privileged` (lần đầu `failed to setup loop device`: `/dev/loop0` tạo sau khi container khởi động; script giờ `mknod` sẵn loop0–7), `br-base` + `bare-base` `SUCCESS`, `Setup complete!` → **đủ 11 bước `build-setup.sh`**. Flow `fpga/` Arty A7-100T (`RocketArty100TConfig`) ra `Arty100THarness.bit`, WNS +0,129 ns, WHS −0,063 ns ở 4 endpoint (config upstream); cần board file Digilent và `--net=host` (thiếu thì Vivado sập ở kiểm license qua libudev sau `Routing Is Done`), xem `docs/cluster-blocks.md` mục 4.
+- **14/11/2026: bỏ fork RISCVTutorial (Chipyard 1.10.0), chuyển sang Chipyard gốc 1.15.0** và giữ cố định ở bản đó
+  (đồng bộ tiếp là việc riêng). Dựng lại toàn bộ CHIA từ đầu theo `docs/reinstall.md`: **xong cả 8 bước**, IP LAN lúc
+  đó `192.168.1.7`. `build-setup.sh` chạy **đủ 11 bước** (bước 9 FireMarshal cần `setup-chipyard.sh --privileged`).
+  Mất 8 lần chạy bước 5; lỗi và cách gỡ ghi trong bước 5 của `reinstall.md`: mạng conda, hai container dựng cùng lúc
+  (script giờ gắn nhãn và từ chối chạy trùng), `ibm/rocc-software` bị xoá (script trỏ sang bản sao `ucb-bar`), dừng
+  giữa bước 6 để lại submodule FireSim tải dở hoặc chưa checkout (`git submodule status` không thấy), FireSim cũng in
+  `Setup complete!` (script chỉ tin dòng đứng sau `BEGINNING STEP` cuối), FireMarshal `mount -o loop` cần
+  `--privileged` + `mknod` loop0–7.
+- Trước khi xoá fork đã lưu: `~/archive/RISCVTutorial-20261114/` (bundle + patch `minsoc-fmax`: repo gốc 16,
+  `rocket-chip` 11, `sifive-cache` 8 commit; `submodule-heads.txt`; checkpoint Vivado `minsoc-vivado` 2.3 GB),
+  `~/archive/ORFS-minsoc-20261114/` (`minsoc_*`, 2.8 GB), `~/CHIA-workflow` cũ ở `~/archive/CHIA-workflow-20261114`.
+- Flow `fpga/` Arty A7-100T cần board file Digilent trong Vivado và `--net=host` (thiếu thì Vivado 2025.1 sập ở kiểm
+  license qua libudev sau `Routing Is Done`; container của CHIA luôn có), xem `docs/cluster-blocks.md` mục 4.
 
 ## Đã kiểm chứng và chưa kiểm chứng
 
@@ -88,7 +80,7 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   `ok=True`, container bị xoá sạch.
 
 **Đã chạy thật trên Chipyard 1.15.0** (14/11/2026; các mục có fork ở trên là với 1.10.0): toàn bộ `docs/reinstall.md`
-(bước 0–8): `scripts/setup-chipyard.sh --verify` (`VERIFY_OK`, bỏ bước 8–9 của `build-setup.sh`),
+(bước 0–8): `scripts/setup-chipyard.sh --verify` (`VERIFY_OK`; bước 8–9 của `build-setup.sh` chạy riêng sau với `--privileged`),
 `install-chipyard-config.sh` + `MinimalSoCConfig` bản 1.15.0, ORFS, cluster theo khối đủ 5 khối (`KẾT QUẢ: OK`).
 Sau đó: bước 9 FireMarshal (`--privileged`), flow `fpga/` Arty A7-100T ra bitstream (container tay cùng image/mount
 với khối vivado, `--net=host`), rồi qua job CHIA: `examples/fpga_smoke.py --clean` trên khối `vivado` ra `rc: 0`,

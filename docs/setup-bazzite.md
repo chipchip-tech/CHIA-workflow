@@ -227,7 +227,8 @@ verilator, opencode) và hai bản sửa riêng cho Bazzite:
 ```bash
 loginctl enable-linger $USER                                  # một lần
 git clone -b setup https://github.com/chipchip-tech/CHIA-workflow.git ~/CHIA-workflow
-cp -r ~/work/chia/examples/hello-world ~/chia-hello-world
+git clone --depth 1 https://github.com/ucb-bar/chia.git /tmp/chia-src   # chỉ để lấy examples
+cp -r /tmp/chia-src/examples/hello-world ~/chia-hello-world
 cd ~/chia-hello-world
 conda activate chia_env
 export THIS_MACHINE=$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')

@@ -3,7 +3,7 @@
 - Ngày: 09/11/2026
 - Nhánh: `setup` (dùng chung cho mọi project)
 - Trạng thái: **đã triển khai và kiểm chứng trên fork 1.10.0 (09/11/2026)**, đủ 5 tiêu chí ở mục 5.
-  **14/11/2026: chuyển sang Chipyard gốc 1.15.0, chưa kiểm chứng** (xem mục 0). Hướng dẫn: `docs/chipyard-minimal-soc.md`.
+  **14/11/2026: chuyển sang Chipyard gốc 1.15.0, đã kiểm chứng lại đủ tiêu chí mục 5 cộng không có scratchpad** (xem mục 0). Hướng dẫn: `docs/chipyard-minimal-soc.md`.
 
 ## 0. Cập nhật 14/11/2026: Chipyard gốc 1.15.0
 
