@@ -163,11 +163,10 @@ python -V; ray --version; python -c "import site; print(site.ENABLE_USER_SITE)";
 **Xong khi:** `Python 3.10.19`, `ray, version 2.54.0`, `False`, và `chia --help` chạy được.
 **Gửi lại:** kết quả lệnh cuối.
 
-## 5. Dựng Chipyard 1.15.0 (nhiều giờ, chạy trong tmux)
+## 5. Dựng Chipyard 1.15.0 (nhiều giờ)
 
-```bash
-tmux new -s chipyard
-```
+Chạy thẳng trong terminal trên máy và để máy chạy (đừng cho máy ngủ, đừng đóng terminal). Chỉ cần `tmux` khi chạy
+qua SSH hoặc terminal có thể bị đóng.
 
 ```bash
 cd ~/CHIA-workflow && scripts/setup-chipyard.sh --verify
@@ -175,7 +174,6 @@ cd ~/CHIA-workflow && scripts/setup-chipyard.sh --verify
 
 Script clone `ucb-bar/chipyard` vào `~/tools/chipyard`, checkout tag `1.15.0` thành nhánh `local-1.15.0`, rồi
 chạy `build-setup.sh` **đủ 11 bước** trong container `chia-chisel-build` tạm. Log: `~/tools/chipyard/setup.log`.
-Thoát tmux mà vẫn để chạy: `Ctrl+B` rồi `D`; vào lại: `tmux attach -t chipyard`.
 
 **Nếu dừng ở bước 6–9** (FireSim/FireMarshal; có thể cần `sudo` hoặc `/dev/kvm` mà container không có):
 script in số bước, tên bước và lệnh chạy lại. Lệnh đó bỏ luôn các bước đã xong (bước 1 của 1.15.0 không chạy

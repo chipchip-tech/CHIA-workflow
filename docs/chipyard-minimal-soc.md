@@ -41,7 +41,7 @@ Sửa `chipyard/MinimalSoCConfig.scala` trong repo này rồi chạy lại scrip
 ## 2. Build và chạy thử
 
 Dùng container `chipyard-dev` như [cluster-blocks.md](cluster-blocks.md) mục "Làm việc tay với Chipyard"
-(đừng build cùng lúc với khối `chipyard` của CHIA). Chạy trong `tmux`, lần đầu mất khá lâu vì phải elaborate:
+(đừng build cùng lúc với khối `chipyard` của CHIA). Lần đầu mất khá lâu vì phải elaborate:
 
 Chưa có container thì tạo (báo trùng tên thì `docker start chipyard-dev`):
 

@@ -3,7 +3,7 @@
 # `chipyard`/`vivado` của configs/cluster-blocks.template.yaml dùng được. Mã nguồn nằm trên host
 # (sửa tay được), toolchain/conda env được build trong container (cùng môi trường lúc CHIA chạy).
 #
-# Cách dùng (chạy trong tmux: đủ 11 bước mất nhiều giờ và vài chục GB):
+# Cách dùng (đủ 11 bước mất nhiều giờ và vài chục GB):
 #   scripts/setup-chipyard.sh [--tag TAG] [--verify] [--dry-run] [CHIPYARD_DIR] [-- CỜ_BUILD_SETUP...]
 #     CHIPYARD_DIR  mặc định $CHIPYARD_FORK, hoặc ~/tools/chipyard
 #     --tag         tag cần ghim khi clone (mặc định 1.15.0); clone xong ở nhánh cục bộ local-<TAG>

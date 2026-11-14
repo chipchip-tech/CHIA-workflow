@@ -31,7 +31,7 @@ File liên quan:
 ## 1. Dựng Chipyard
 
 Chipyard gốc [`ucb-bar/chipyard`](https://github.com/ucb-bar/chipyard), ghim tag **1.15.0**, ở `~/tools/chipyard`.
-Chạy trong `tmux`; đủ 11 bước của `build-setup.sh` (gồm FireSim, FireMarshal) mất nhiều giờ. Cài từ đầu thì
+Đủ 11 bước của `build-setup.sh` (gồm FireSim, FireMarshal) mất nhiều giờ (để máy chạy, hoặc dùng `tmux` nếu qua SSH). Cài từ đầu thì
 làm theo [reinstall.md](reinstall.md); chỉ dựng Chipyard:
 
 ```bash
