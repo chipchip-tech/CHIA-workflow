@@ -244,7 +244,25 @@ t_rocc_software() {
     ok rocc_software
 }
 
-for t in t_rocc_software t_refuse_concurrent t_rerun_after_success t_verify_failure t_firesim_setup_complete t_stale_log_removed t_dry_run_clone t_realpath_mount t_no_skip_default t_existing_dir_other_ref t_failure_report t_failure_step1 t_skip1_sources_env t_jvm_cache_mount t_conda_retries; do
+# 14/11/2026: bước 9 (FireMarshal) cần `sudo mount -o loop`, container thường không có thiết bị loop.
+# --privileged chỉ thêm cờ cho container tạm; mặc định không có. Hỏng ở bước 9 thì gợi ý --privileged.
+t_privileged() {
+    new_env; local d="$T/cy" err
+    make_cy "$d"
+    bash "$SCRIPT" "$d" > /dev/null 2>&1
+    grep '^docker run' "$CALLS" | grep -qF -- "--privileged" && { bad privileged "mặc định đã có --privileged"; return; }
+    : > "$CALLS"
+    bash "$SCRIPT" --privileged "$d" -- -s 1 > /dev/null 2>&1
+    grep '^docker run' "$CALLS" | grep -qF -- "--privileged" || { bad privileged "thiếu --privileged: $(cat "$CALLS")"; return; }
+    export FAKE_FAIL_STEP=9 FAKE_FAIL_DESC="Pre-compiling FireMarshal buildroot sources"
+    err="$(bash "$SCRIPT" "$d" -- -s 1 2>&1 >/dev/null)"
+    has "$err" "--privileged" || { bad privileged "hỏng bước 9 không gợi ý --privileged: $err"; return; }
+    err="$(bash "$SCRIPT" --privileged "$d" -- -s 1 2>&1 >/dev/null)"
+    has "$err" "setup-chipyard.sh --privileged" || { bad privileged "lệnh chạy lại mất --privileged: $err"; return; }
+    ok privileged
+}
+
+for t in t_privileged t_rocc_software t_refuse_concurrent t_rerun_after_success t_verify_failure t_firesim_setup_complete t_stale_log_removed t_dry_run_clone t_realpath_mount t_no_skip_default t_existing_dir_other_ref t_failure_report t_failure_step1 t_skip1_sources_env t_jvm_cache_mount t_conda_retries; do
     "$t"
 done
 echo "== $PASS pass, $FAIL fail"

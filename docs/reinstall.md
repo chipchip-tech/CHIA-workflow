@@ -192,8 +192,16 @@ cd ~/CHIA-workflow && scripts/setup-chipyard.sh --verify ~/tools/chipyard -- -s 
 **Bước 9 hỏng ở `sudo mount -o loop`** (gặp 14/11/2026, lần chạy thứ 7): FireMarshal tải được ảnh buildroot dựng sẵn
 (`br.9d7c.img`) nhưng phải mount loop ảnh `br-base.img` để chép file vào, việc này cần root và thiết bị loop mà
 container tạm không có (`Command '/usr/bin/sudo mount -o loop .../br-base.img .../disk-mount' returned non-zero exit
-status 1`). Theo thiết kế không mở thêm quyền container, nên bỏ bước 8–9 bằng đúng lệnh ở trên (bước 8 đã xong vẫn
-giữ nguyên, `-s 8` chỉ để không chạy lại). Hệ quả: chưa dựng được workload Linux của FireMarshal; việc này để riêng.
+status 1`). FireMarshal dùng `mount -o loop` vì user `ray` của image có sudo không mật khẩu. Cách xử lý: bỏ bước 8–9
+bằng đúng lệnh ở trên (cài tiếp được bước 10–11), rồi chạy riêng bước 8–9 trong container tạm có `--privileged`
+(chỉ container dựng một lần này; container của cluster CHIA không đổi):
+
+```bash
+cd ~/CHIA-workflow && scripts/setup-chipyard.sh --privileged ~/tools/chipyard -- -s 1 -s 2 -s 3 -s 4 -s 5 -s 6 -s 7 -s 10 -s 11
+```
+
+Bước 8 chạy lại nhanh (submodule đã có) và ghi dòng thêm `software/firemarshal` vào PATH trong `env.sh`; bước 9 dựng
+`br-base` và `bare-base`. Chưa chạy thật (14/11/2026).
 
 **Dừng giữa bước 6 rồi chạy tiếp** (gặp 14/11/2026): `docker stop` lúc bước 6 đang tải submodule FireSim để lại hai
 kiểu hỏng mà `git submodule status` không thấy. (1) Submodule tải dở: lần sau báo `fatal: Unable to find current

@@ -4,10 +4,11 @@
 # (sửa tay được), toolchain/conda env được build trong container (cùng môi trường lúc CHIA chạy).
 #
 # Cách dùng (đủ 11 bước mất nhiều giờ và vài chục GB):
-#   scripts/setup-chipyard.sh [--tag TAG] [--verify] [--dry-run] [CHIPYARD_DIR] [-- CỜ_BUILD_SETUP...]
+#   scripts/setup-chipyard.sh [--tag TAG] [--verify] [--privileged] [--dry-run] [CHIPYARD_DIR] [-- CỜ_BUILD_SETUP...]
 #     CHIPYARD_DIR  mặc định $CHIPYARD_FORK, hoặc ~/tools/chipyard
 #     --tag         tag cần ghim khi clone (mặc định 1.15.0); clone xong ở nhánh cục bộ local-<TAG>
 #     --verify      sau setup: build Verilator RocketConfig và chạy rv64ui-p-simple
+#     --privileged  chạy container tạm với --privileged: bước 9 (FireMarshal) cần `sudo mount -o loop`
 #     --dry-run     chỉ in các lệnh sẽ chạy
 #     -- ...        cờ thêm cho build-setup.sh, ví dụ `-- -s 8 -s 9` để bỏ bước 8, 9
 #
@@ -15,20 +16,21 @@
 # script dừng, in số bước và lệnh chạy lại; KHÔNG tự bỏ bước nào.
 # Thư mục đã có thì không clone, không checkout (giữ sửa tay), chỉ cảnh báo nếu không đứng trên tag.
 #
-# CHƯA chạy thật trên Chipyard 1.15.0 (viết 14/11/2026; các bước tay đã kiểm chứng với fork 1.10.0).
+# Đã chạy thật trên Chipyard 1.15.0 (14/11/2026, bỏ bước 8–9); --privileged cho bước 9 chưa chạy thật.
 set -euo pipefail
 
 IMAGE="ghcr.io/ucb-bar/chia-chisel-build:latest"
 URL="https://github.com/ucb-bar/chipyard.git"
 TAG="1.15.0"
 VERIFY_CONFIG="${VERIFY_CONFIG:-RocketConfig}"
-VERIFY=0 DRY=0 CY="" EXTRA=()
+VERIFY=0 DRY=0 PRIV=0 CY="" EXTRA=()
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --tag) TAG="$2"; shift 2 ;;
         --verify) VERIFY=1; shift ;;
         --dry-run) DRY=1; shift ;;
+        --privileged) PRIV=1; shift ;;
         --) shift; EXTRA=("$@"); break ;;
         -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
         *) CY="$1"; shift ;;
@@ -127,17 +129,22 @@ run mkdir -p "$JVM/coursier" "$JVM/sbt" "$JVM/ivy2"
 # Xoá log lần trước: nếu docker hỏng trước khi tee chạy, log cũ sẽ bị chẩn đoán nhầm (hoặc có sẵn
 # "Setup complete!" làm báo thành công giả).
 run rm -f "$CY/setup.log"
+# Bước 9: FireMarshal thấy có sudo không mật khẩu (user ray của image) nên chép file vào ảnh đĩa bằng
+# `sudo mount -o loop`, cần thiết bị loop mà container thường không có (gặp 14/11/2026). Chỉ bật khi được yêu cầu.
+PRIV_ARGS=()
+[ "$PRIV" = 1 ] && PRIV_ARGS=(--privileged)
 rc=0
 run docker run --rm --shm-size=10.24gb --label "$LABEL" \
     -v "$CY:$CY:z" -w "$CY" \
     -v "$JVM/coursier:/home/ray/.cache/coursier:z" -v "$JVM/sbt:/home/ray/.sbt:z" -v "$JVM/ivy2:/home/ray/.ivy2:z" \
     -e "JAVA_TOOL_OPTIONS=-Dsun.net.client.defaultConnectTimeout=30000 -Dsun.net.client.defaultReadTimeout=120000" \
     -e CONDA_REMOTE_MAX_RETRIES=10 -e CONDA_REMOTE_BACKOFF_FACTOR=3 -e CONDA_REMOTE_READ_TIMEOUT_SECS=120 \
-    "$IMAGE" bash -c "$INNER" || rc=$?
+    "${PRIV_ARGS[@]}" "$IMAGE" bash -c "$INNER" || rc=$?
 
 # Lệnh chạy lại in ra giữ nguyên --verify/--tag của lần này.
 SELF="scripts/setup-chipyard.sh"
 [ "$VERIFY" = 1 ] && SELF="$SELF --verify"
+[ "$PRIV" = 1 ] && SELF="$SELF --privileged"
 [ "$TAG" = "1.15.0" ] || SELF="$SELF --tag $TAG"
 SELF="$SELF $CY"
 
@@ -181,7 +188,11 @@ if [ $rc -ne 0 ]; then
             6|7|8|9)
                 [ "$n" -le 7 ] && first=6 || first=8   # 7 cần 6 (FireSim), 9 cần 8 (FireMarshal)
                 echo "Nếu quyết định bỏ bước $first–$((first+1)) (ghi lỗi vào docs trước), chạy lại:"
-                echo "  $SELF --${keep[*]:+ ${keep[*]}}$(done_steps "$first") -s $first -s $((first+1))" ;;
+                echo "  $SELF --${keep[*]:+ ${keep[*]}}$(done_steps "$first") -s $first -s $((first+1))"
+                if [ "$n" = 9 ] && [ "$PRIV" = 0 ]; then
+                    echo "Hoặc, nếu lỗi là \`sudo mount -o loop\`, chạy lại bước 8–9 trong container --privileged:"
+                    echo "  ${SELF/setup-chipyard.sh/setup-chipyard.sh --privileged} --${keep[*]:+ ${keep[*]}}$(done_steps 8) -s 10 -s 11"
+                fi ;;
             ''|*[!0-9]*)
                 echo "Không xác định được bước hỏng; đọc log." ;;
             *)
