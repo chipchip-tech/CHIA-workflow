@@ -2,7 +2,22 @@
 
 - Ngày: 09/11/2026
 - Nhánh: `setup` (dùng chung cho mọi project)
-- Trạng thái: **đã triển khai và kiểm chứng trên fork (09/11/2026)**, đủ 5 tiêu chí ở mục 5. Hướng dẫn: `docs/chipyard-minimal-soc.md`.
+- Trạng thái: **đã triển khai và kiểm chứng trên fork 1.10.0 (09/11/2026)**, đủ 5 tiêu chí ở mục 5.
+  **14/11/2026: chuyển sang Chipyard gốc 1.15.0, chưa kiểm chứng** (xem mục 0). Hướng dẫn: `docs/chipyard-minimal-soc.md`.
+
+## 0. Cập nhật 14/11/2026: Chipyard gốc 1.15.0
+
+Spec giữ nguyên (cùng danh sách giữ/bỏ). Thay đổi để elaborate được trên 1.15.0, đối chiếu mã nguồn tag
+`1.15.0` và submodule `rocket-chip`, `rocket-chip-inclusive-cache`, `testchipip`:
+
+| Mục | 1.10.0 | 1.15.0 |
+|---|---|---|
+| Core | `freechips.rocketchip.subsystem.WithNBigCores(1)` | `freechips.rocketchip.rocket.WithNBigCores(1)`; tham số core/L1 giống hệt. `RocketConfig` giờ dùng `WithNHugeCores` (L1 64 set × 8 way, Zba/Zbb/Zbs), không theo để giữ SoC cũ |
+| L2 | `subsystem.WithInclusiveCache(nWays = 4, capacityKB = 128)` + `WithNBanks(1)` | không đổi |
+| Scratchpad | `AbstractConfig` không có | `AbstractConfig` thêm `WithMbusScratchpad` 64 KiB ở `0x08000000`; thêm `testchipip.soc.WithNoScratchpads` ở đầu chuỗi (như `TinyRocketConfig`) |
+
+`hello.riscv` link bằng `htif.ld` (DRAM `0x80000000`), không phụ thuộc scratchpad. Tiêu chí ở mục 5 áp dụng lại
+nguyên vẹn, thêm: không có scratchpad. Mục 3–4 dưới đây là bản 1.10.0, giữ làm lịch sử.
 
 ## 1. Mục tiêu
 

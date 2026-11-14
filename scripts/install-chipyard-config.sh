@@ -4,18 +4,20 @@
 #
 # Cách dùng:
 #   scripts/install-chipyard-config.sh [CHIPYARD_DIR]
-#     CHIPYARD_DIR   mặc định $CHIPYARD_FORK, hoặc ~/tools/RISCVTutorial
+#     CHIPYARD_DIR   mặc định $CHIPYARD_FORK, hoặc ~/tools/chipyard
 #
-# Chưa chạy thật (viết 09/11/2026).
+# Sau khi copy, kiểm mọi mixin `new a.b.C` trong các file đó có thật trong cây Chipyard (đúng package
+# VÀ đúng tên lớp), in MIXIN_OK nếu đủ. Kiểm trên cây Chipyard 1.15.0 trong sandbox (14/11/2026);
+# chưa chạy trên máy người dùng.
 set -euo pipefail
 
 case "${1:-}" in -h|--help) sed -n '2,8p' "$0"; exit 0 ;; esac
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-CY="$(realpath -m "${1:-${CHIPYARD_FORK:-$HOME/tools/RISCVTutorial}}")"
+CY="$(realpath -m "${1:-${CHIPYARD_FORK:-$HOME/tools/chipyard}}")"
 DEST="$CY/generators/chipyard/src/main/scala/config"
 
-[ -d "$DEST" ] || { echo "LỖI: không thấy $DEST. CHIPYARD_DIR có đúng là fork Chipyard không?" >&2; exit 1; }
+[ -d "$DEST" ] || { echo "LỖI: không thấy $DEST. CHIPYARD_DIR có đúng là thư mục Chipyard không?" >&2; exit 1; }
 
 shopt -s nullglob
 SRCS=("$REPO"/chipyard/*.scala)
@@ -37,13 +39,18 @@ for src in "${SRCS[@]}"; do
     sha256sum "$dst"
 done
 
-# Fork có thể khác Chipyard 1.10.0 upstream: kiểm tra các mixin MinimalSoCConfig dùng.
+# Mỗi mixin `new <package>.<Lớp>` phải có trong một file .scala của cây Chipyard khai báo đúng
+# `package <package>` và `class <Lớp>`. Chỉ grep tên lớp là không đủ: giữa các bản Chipyard lớp hay
+# đổi package (WithNBigCores: subsystem ở 1.10.0, rocket ở 1.15.0).
 WARN=0
-for pat in "class WithNBigCores" "class WithInclusiveCache" "class WithNBanks" "class AbstractConfig" \
-           "class WithoutFPU" "class WithBroadcastManager" "class WithL1DCacheWays" "class WithL1ICacheWays" \
-           "case class MulDivParams" "fastLoadWord" "nL2TLBEntries"; do
-    if ! grep -rqs --include="*.scala" "$pat" "$CY/generators"; then
-        echo "CẢNH BÁO: không thấy '$pat' trong fork; MinimalSoCConfig có thể không elaborate được." >&2
+for ref in $(grep -ohE 'new +[a-z][A-Za-z0-9_]*(\.[a-z][A-Za-z0-9_]*)*\.[A-Z][A-Za-z0-9_]*' "${SRCS[@]}" | sed -E 's/^new +//' | sort -u); do
+    pkg="${ref%.*}" cls="${ref##*.}"
+    found=0
+    while IFS= read -r f; do
+        grep -qE "^ *(case +)?class +$cls\b" "$f" && { found=1; break; }
+    done < <(grep -rlE --include="*.scala" "^package +${pkg//./\\.} *\$" "$CY/generators" "$CY/tools" 2>/dev/null)
+    if [ $found -eq 0 ]; then
+        echo "CẢNH BÁO: không thấy class $cls trong package $pkg ($ref); config sẽ không elaborate được." >&2
         WARN=1
     fi
 done
