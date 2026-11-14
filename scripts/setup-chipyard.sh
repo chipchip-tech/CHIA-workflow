@@ -131,8 +131,14 @@ run mkdir -p "$JVM/coursier" "$JVM/sbt" "$JVM/ivy2"
 run rm -f "$CY/setup.log"
 # Bước 9: FireMarshal thấy có sudo không mật khẩu (user ray của image) nên chép file vào ảnh đĩa bằng
 # `sudo mount -o loop`, cần thiết bị loop mà container thường không có (gặp 14/11/2026). Chỉ bật khi được yêu cầu.
+# --privileged chỉ chép các nút /dev có lúc container khởi động; nút loop mà kernel tạo sau (host chưa từng dùng
+# loop) không hiện trong container, mount báo "failed to setup loop device" (gặp 14/11/2026). Tạo sẵn loop0–7.
 PRIV_ARGS=()
-[ "$PRIV" = 1 ] && PRIV_ARGS=(--privileged)
+if [ "$PRIV" = 1 ]; then
+    PRIV_ARGS=(--privileged)
+    INNER='for i in 0 1 2 3 4 5 6 7; do [ -e /dev/loop$i ] || sudo mknod /dev/loop$i b 7 $i; done
+'"$INNER"
+fi
 rc=0
 run docker run --rm --shm-size=10.24gb --label "$LABEL" \
     -v "$CY:$CY:z" -w "$CY" \

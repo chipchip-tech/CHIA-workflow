@@ -254,6 +254,7 @@ t_privileged() {
     : > "$CALLS"
     bash "$SCRIPT" --privileged "$d" -- -s 1 > /dev/null 2>&1
     grep '^docker run' "$CALLS" | grep -qF -- "--privileged" || { bad privileged "thiếu --privileged: $(cat "$CALLS")"; return; }
+    grep '^docker run' "$CALLS" | grep -qF -- "mknod /dev/loop" || { bad privileged "thiếu tạo nút /dev/loopN"; return; }
     export FAKE_FAIL_STEP=9 FAKE_FAIL_DESC="Pre-compiling FireMarshal buildroot sources"
     err="$(bash "$SCRIPT" "$d" -- -s 1 2>&1 >/dev/null)"
     has "$err" "--privileged" || { bad privileged "hỏng bước 9 không gợi ý --privileged: $err"; return; }
