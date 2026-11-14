@@ -61,10 +61,10 @@ Chạy test ISA (giống lần kiểm chứng `RocketConfig`), cần thấy kế
 docker exec -it chipyard-dev bash -c 'source /home/ray/anaconda3/etc/profile.d/conda.sh && source env.sh && cd sims/verilator && make CONFIG=MinimalSoCConfig run-binary BINARY=$RISCV/riscv64-unknown-elf/share/riscv-tests/isa/rv64ui-p-simple; echo EXIT=$?'
 ```
 
-Chạy `hello` qua UART (`tests/` của Chipyard), cần thấy dòng chào in ra:
+Chạy `hello` qua UART (`tests/` của Chipyard 1.15.0 build bằng CMake, ra `tests/build/hello.riscv`), cần thấy dòng chào in ra:
 
 ```bash
-docker exec -it chipyard-dev bash -c 'source /home/ray/anaconda3/etc/profile.d/conda.sh && source env.sh && cd tests && make hello.riscv; cd ../sims/verilator && make CONFIG=MinimalSoCConfig run-binary BINARY=../../tests/hello.riscv; echo EXIT=$?'
+docker exec -it chipyard-dev bash -c 'source /home/ray/anaconda3/etc/profile.d/conda.sh && source env.sh && cd tests && cmake -S ./ -B ./build/ -D CMAKE_BUILD_TYPE=Debug && cmake --build ./build/ --target hello; cd ../sims/verilator && make CONFIG=MinimalSoCConfig run-binary BINARY=../../tests/build/hello.riscv; echo EXIT=$?'
 ```
 
 ## 3. Kiểm tra đã bỏ đúng khối
