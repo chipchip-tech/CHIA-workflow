@@ -201,7 +201,9 @@ cd ~/CHIA-workflow && scripts/setup-chipyard.sh --privileged ~/tools/chipyard --
 ```
 
 Bước 8 chạy lại nhanh (submodule đã có) và ghi dòng thêm `software/firemarshal` vào PATH trong `env.sh`; bước 9 dựng
-`br-base` và `bare-base`. Chưa chạy thật (14/11/2026).
+`br-base` và `bare-base`. **Đã chạy thật 14/11/2026:** cả hai `SUCCESS: All builds completed successfully!`, rồi
+`Setup complete!`. Lần đầu hỏng `failed to setup loop device` dù đã `--privileged`: host chưa từng dùng loop nên
+`/dev/loop0` được kernel tạo sau khi container khởi động và container không thấy; script giờ tự `mknod` sẵn loop0–7.
 
 **Dừng giữa bước 6 rồi chạy tiếp** (gặp 14/11/2026): `docker stop` lúc bước 6 đang tải submodule FireSim để lại hai
 kiểu hỏng mà `git submodule status` không thấy. (1) Submodule tải dở: lần sau báo `fatal: Unable to find current

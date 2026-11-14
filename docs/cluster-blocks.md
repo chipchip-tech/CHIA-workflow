@@ -12,10 +12,10 @@ Mọi công cụ nằm trong `~/tools` trên host và được mount vào contai
 
 | Khối | Resource | Image | Mặc định | Trạng thái |
 |---|---|---|---|---|
-| `chipyard` | `chipyard` | `chia-chisel-build` + mount Chipyard | bật | ⏳ chưa kiểm chứng trên 1.15.0 (fork 1.10.0: `blocks_smoke.py --clean` OK, 08/11/2026) |
+| `chipyard` | `chipyard` | `chia-chisel-build` + mount Chipyard | bật | ✅ 1.15.0: `blocks_smoke.py --clean` build `RocketConfig` `SUCCESS=True` (14/11/2026) |
 | `verilator` | `verilator_run` | `chia-verilator-run` | bật | ✅ |
 | `claude` | `claude_creds` | `chia-claude-code` | bật (`--no-claude` để tắt) | ✅ (project rocket-fmax) |
-| `vivado` | `vivado` | `chia-chisel-build` + mount Chipyard + `~/tools/Xilinx` | tắt (`--fpga`) | ⏳ chưa kiểm chứng trên 1.15.0; fork 1.10.0: `vivado v2025.1` của host chạy trong worker (09/11/2026); flow `fpga/` chưa thử |
+| `vivado` | `vivado` | `chia-chisel-build` + mount Chipyard + `~/tools/Xilinx` | tắt (`--fpga`) | ✅ 1.15.0: `vivado v2025.1` trong worker; flow `fpga/` Arty A7-100T ra bitstream trong cùng image (mục 4, 14/11/2026) |
 | `asic` | `asic` | `chia-orfs` tự build + mount `~/tools/OpenROAD-flow-scripts` | tắt (`--asic`) | ✅ `blocks_smoke.py` thấy openroad/yosys, `flow_writable` (08/11/2026) |
 
 File liên quan:
@@ -99,6 +99,50 @@ Cần thấy `[chipyard] env` có `RISCV=<chipyard>/.conda-env/riscv-tools`, `SU
 Vivado cài trên host ở `~/tools/Xilinx/<phiên bản>/Vivado` (bố cục từ 2025.1), mount chỉ đọc
 đúng cùng đường dẫn thật (`settings64.sh` ghi cứng đường dẫn lúc cài). Thư mục khác thì đặt `XILINX_DIR`. Phiên bản lấy từ `VIVADO_VERSION` (mặc định `2025.1`). Khối dùng chung Chipyard
 với khối chipyard để chạy flow `fpga/` của Chipyard.
+
+### Flow `fpga/` ra bitstream (Arty A7-100T)
+
+Đã chạy thật 14/11/2026 với `RocketArty100TConfig` có sẵn của Chipyard 1.15.0, trong container cùng image và
+cùng mount với khối vivado: bitstream `Arty100THarness.bit` (3,8 MB), WNS +0,129 ns ở 50 MHz. Hold còn âm
+nhẹ ở 4 endpoint (WHS −0,063 ns) với config gốc của upstream; flow vẫn ra bitstream (fpga-shells chỉ dừng khi
+setup slack âm). Cần hai thứ:
+
+1. **Board file Digilent** (fpga-shells gán board part `digilentinc.com:arty-a7-100:part0:1.1`; thiếu thì
+   Vivado không mở được project). Cài một lần trên host:
+
+   ```bash
+   git clone --depth 1 https://github.com/Digilent/vivado-boards.git /tmp/vivado-boards && mkdir -p ~/tools/Xilinx/2025.1/Vivado/data/boards/board_files && cp -r /tmp/vivado-boards/new/board_files/arty-a7-100 ~/tools/Xilinx/2025.1/Vivado/data/boards/board_files/
+   ```
+
+   Kiểm tra (cần thấy `digilentinc.com:arty-a7-100:part0:1.1`):
+
+   ```bash
+   source ~/tools/Xilinx/2025.1/Vivado/settings64.sh && echo 'puts "BOARDS: [get_board_parts digilentinc.com:arty-a7-100:*]"' > /tmp/b.tcl && vivado -mode batch -nojournal -nolog -source /tmp/b.tcl | grep BOARDS
+   ```
+
+2. **Container phải có `--net=host`.** Thiếu nó thì Vivado sập ngay sau `Routing Is Done`
+   (`realloc(): invalid old size`, `Abnormal program termination (6)`; stack trong `hs_err_pid*.log` đi qua
+   `libXil_lmgr11` → `GetHostInfo` → `libudev udev_enumerate_scan_devices`: bước kiểm license lấy thông tin
+   máy). Lỗi lặp lại y hệt khi chạy lại; thêm `--net=host` thì qua. Container của CHIA luôn có `--net=host`,
+   nên chỉ cần nhớ khi chạy tay.
+
+Chạy tay (sbt elaborate khoảng 10–20 phút, Vivado khoảng 30–60 phút; dùng chung cache JVM với khối chipyard):
+
+```bash
+CY=$(realpath ~/tools/chipyard); XD=$(realpath ~/tools/Xilinx); J=$(realpath ~/chia_cache/jvm); docker run --rm --net=host --shm-size=10.24gb --security-opt label=disable -v $CY:$CY -v $XD:$XD:ro -v $J/coursier:/home/ray/.cache/coursier -v $J/sbt:/home/ray/.sbt -v $J/ivy2:/home/ray/.ivy2 -e "JAVA_TOOL_OPTIONS=-Dsun.net.client.defaultConnectTimeout=30000 -Dsun.net.client.defaultReadTimeout=120000" -w $CY ghcr.io/ucb-bar/chia-chisel-build:latest bash -c "source /home/ray/anaconda3/etc/profile.d/conda.sh && source env.sh && source $XD/2025.1/Vivado/settings64.sh && export PATH=$XD/2025.1/Vivado/bin:\$PATH && cd fpga && make SUB_PROJECT=arty100t bitstream 2>&1 | tee build-arty100t.log | tail -40"
+```
+
+Kết quả nằm ở `fpga/generated-src/chipyard.fpga.arty100t.Arty100THarness.RocketArty100TConfig/obj/`
+(`Arty100THarness.bit`, `report/timing.txt`, checkpoint `post_synth/post_opt/post_place/post_route.dcp`).
+Trên 1.15.0 jar của `fpga/` là `.classpath_cache/chipyard_fpga.jar`, tách khỏi `chipyard.jar` của
+`sims/verilator`, nên không còn lỗi `--top-module` như fork 1.10.0. Hàng chục `CRITICAL WARNING` ở
+`arty-master.xdc` là chân của file constraint mẫu không được dùng, bỏ qua được.
+
+Nếu Vivado hỏng sau place, chạy tiếp từ checkpoint thay vì làm lại từ đầu (route, bitstream, report):
+
+```bash
+CY=$(realpath ~/tools/chipyard); XD=$(realpath ~/tools/Xilinx); B=$CY/fpga/generated-src/chipyard.fpga.arty100t.Arty100THarness.RocketArty100TConfig; S=$CY/fpga/fpga-shells/xilinx/common/tcl; printf 'set top Arty100THarness\nset wrkdir [file join [pwd] obj]\nopen_checkpoint [file join $wrkdir post_place.dcp]\nsource %s/route.tcl\nsource %s/bitstream.tcl\nsource %s/report.tcl\n' $S $S $S > $B/resume-route.tcl; docker run --rm --net=host --shm-size=10.24gb --security-opt label=disable -v $CY:$CY -v $XD:$XD:ro -w $B ghcr.io/ucb-bar/chia-chisel-build:latest bash -c "source $XD/2025.1/Vivado/settings64.sh && export PATH=$XD/2025.1/Vivado/bin:\$PATH && vivado -nojournal -mode batch -source resume-route.tcl 2>&1 | tee resume-route.log | tail -30"
+```
 
 ## 5. Khối asic (OpenROAD-flow-scripts)
 
