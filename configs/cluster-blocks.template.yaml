@@ -2,10 +2,10 @@
 # dùng scripts/chia-up-blocks.py để bật/tắt khối và sinh cluster.gen.yaml.
 #
 #   Khối       Resource        Mặc định   Trạng thái
-#   chipyard   chipyard        bật        chưa kiểm chứng trên Chipyard 1.15.0 (đã chạy với fork 1.10.0, 08/11/2026)
+#   chipyard   chipyard        bật        đã chạy thật trên Chipyard 1.15.0 (blocks_smoke.py --clean, 14/11/2026)
 #   verilator  verilator_run   bật        đã chạy thật
 #   claude     claude_creds    bật        đã chạy thật (project rocket-fmax)
-#   vivado     vivado          tắt        chưa kiểm chứng trên 1.15.0 (--fpga; trước chỉ kiểm vivado -version)
+#   vivado     vivado          tắt        --fpga; vivado -version trên 1.15.0 đã chạy thật; examples/fpga_smoke.py chưa
 #   asic       asic            tắt        đã chạy thật    (--asic)
 #
 # Biến môi trường (chia-up-blocks.py đặt giá trị mặc định nếu thiếu):
@@ -94,6 +94,8 @@ available_node_types:
         compatible_ips: ["${THIS_MACHINE}"]
         worker_setup_commands:
             - "source /home/ray/anaconda3/etc/profile.d/conda.sh && source ${CHIPYARD_FORK}/env.sh && source ${XILINX_DIR}/${VIVADO_VERSION}/Vivado/settings64.sh && export PATH=${XILINX_DIR}/${VIVADO_VERSION}/Vivado/bin:$PATH:/home/ray/anaconda3/bin"
+            # Flow fpga/ cũng chạy sbt (chipyard_fpga.jar): cùng timeout và cache JVM với khối chipyard.
+            - 'export JAVA_TOOL_OPTIONS="-Dsun.net.client.defaultConnectTimeout=30000 -Dsun.net.client.defaultReadTimeout=120000"'
         docker:
             image: "ghcr.io/ucb-bar/chia-chisel-build:latest"
             container_name: "chia-vivado-${USER}"
@@ -103,6 +105,9 @@ available_node_types:
                 - --security-opt label=disable
                 - "-v ${CHIPYARD_FORK}:${CHIPYARD_FORK}"
                 - "-v ${XILINX_DIR}:${XILINX_DIR}:ro"
+                - "-v ${JVM_CACHE}/coursier:/home/ray/.cache/coursier"
+                - "-v ${JVM_CACHE}/sbt:/home/ray/.sbt"
+                - "-v ${JVM_CACHE}/ivy2:/home/ray/.ivy2"
 
     # --- Khối asic (tuỳ chọn): OpenROAD-flow-scripts. Image tự build: docker/orfs-ray.Dockerfile. ---
     # ORFS trên host (sửa tay được) mount đè lên /OpenROAD-flow-scripts của image.

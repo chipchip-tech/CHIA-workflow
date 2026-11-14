@@ -98,7 +98,8 @@ với khối vivado, `--net=host`). Chưa có trên 1.15.0: flow `fpga/` gửi q
 - `examples/rtl_agent_loop.py`: mới qua `py_compile`, API đã đối chiếu với mã nguồn CHIA 2.0.1.
 - Phần linger trong `check-bazzite-env.sh` (thêm sau lần chạy script).
 - Tailscale/`tailnet:`, phương án Podman rootless.
-- Flow `fpga/` gửi qua job CHIA trên khối `vivado` (đã chạy tay trong cùng image, 14/11/2026).
+- `examples/fpga_smoke.py`: flow `fpga/` gửi qua job CHIA trên khối `vivado` (đã chạy tay trong cùng image,
+  14/11/2026; trong sandbox mới thử với make/vivado giả). Khối vivado vừa thêm cache JVM + `JAVA_TOOL_OPTIONS`.
 
 ## Các lỗi đã gặp trên Bazzite và cách sửa
 

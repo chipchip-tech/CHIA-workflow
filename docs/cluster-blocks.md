@@ -138,6 +138,16 @@ Trên 1.15.0 jar của `fpga/` là `.classpath_cache/chipyard_fpga.jar`, tách k
 `sims/verilator`, nên không còn lỗi `--top-module` như fork 1.10.0. Hàng chục `CRITICAL WARNING` ở
 `arty-master.xdc` là chân của file constraint mẫu không được dùng, bỏ qua được.
 
+Qua job CHIA (cách chính; khối vivado đã có `--net=host`, cache JVM và timeout coursier như khối chipyard):
+
+```bash
+cd ~/CHIA-workflow/examples && chia job submit --working-dir . -- python fpga_smoke.py --clean
+```
+
+`examples/fpga_smoke.py` chạy `make SUB_PROJECT=arty100t bitstream` trên worker `vivado`, `--clean` xoá thư mục
+build và `.classpath_cache/chipyard_fpga.jar` để chạy lại từ sbt. Xong khi in `KẾT QUẢ: OK` (make thoát 0, có
+`.bit` mới, đọc được WNS/WHS). Log đầy đủ ở `fpga/build-arty100t-<CONFIG>-smoke.log`. Chưa chạy thật (14/11/2026).
+
 Nếu Vivado hỏng sau place, chạy tiếp từ checkpoint thay vì làm lại từ đầu (route, bitstream, report):
 
 ```bash
