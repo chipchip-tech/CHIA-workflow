@@ -23,7 +23,7 @@ import yaml
 REPO = Path(__file__).resolve().parent.parent
 TEMPLATE = REPO / "configs" / "cluster-blocks.template.yaml"
 DEFAULTS = {
-    "CHIPYARD_FORK": str(Path.home() / "tools" / "RISCVTutorial"),
+    "CHIPYARD_FORK": str(Path.home() / "tools" / "chipyard"),
     "ORFS_DIR": str(Path.home() / "tools" / "OpenROAD-flow-scripts"),
     "XILINX_DIR": str(Path.home() / "tools" / "Xilinx"),
     "VIVADO_VERSION": "2025.1",
@@ -56,7 +56,7 @@ def main() -> None:
 
     for k, v in DEFAULTS.items():
         os.environ.setdefault(k, v)
-    # Bazzite: /home là symlink tới /var/home. setup-chipyard-fork.sh dựng fork theo đường dẫn
+    # Bazzite: /home là symlink tới /var/home. setup-chipyard.sh dựng Chipyard theo đường dẫn
     # thật (/var/home/...), và env.sh/conda env ghi cứng đường dẫn đó, nên mount cũng phải dùng nó.
     for k in ("CHIPYARD_FORK", "ORFS_DIR", "XILINX_DIR", "JVM_CACHE"):
         os.environ[k] = os.path.realpath(os.environ[k])
@@ -70,7 +70,7 @@ def main() -> None:
     if not fork.is_absolute():
         fail(f"CHIPYARD_FORK phải là đường dẫn tuyệt đối: {fork}")
     if not (fork / "env.sh").is_file():
-        fail(f"{fork}/env.sh không có: fork chưa dựng xong (scripts/setup-chipyard-fork.sh)")
+        fail(f"{fork}/env.sh không có: Chipyard chưa dựng xong (scripts/setup-chipyard.sh)")
 
     enabled = {"chipyard": True, "verilator": True, "claude": not args.no_claude,
                "vivado": args.fpga, "asic": args.asic}

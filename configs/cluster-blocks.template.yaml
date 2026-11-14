@@ -2,16 +2,16 @@
 # dùng scripts/chia-up-blocks.py để bật/tắt khối và sinh cluster.gen.yaml.
 #
 #   Khối       Resource        Mặc định   Trạng thái
-#   chipyard   chipyard        bật        đã chạy thật (fork RISCVTutorial, 08/11/2026)
+#   chipyard   chipyard        bật        chưa kiểm chứng trên Chipyard 1.15.0 (đã chạy với fork 1.10.0, 08/11/2026)
 #   verilator  verilator_run   bật        đã chạy thật
 #   claude     claude_creds    bật        đã chạy thật (project rocket-fmax)
-#   vivado     vivado          tắt        đã chạy thật    (--fpga; mới kiểm vivado -version)
+#   vivado     vivado          tắt        chưa kiểm chứng trên 1.15.0 (--fpga; trước chỉ kiểm vivado -version)
 #   asic       asic            tắt        đã chạy thật    (--asic)
 #
 # Biến môi trường (chia-up-blocks.py đặt giá trị mặc định nếu thiếu):
 #   THIS_MACHINE    IP LAN của máy (tự dò)
-#   CHIPYARD_FORK   đường dẫn tuyệt đối tới fork Chipyard đã dựng xong (có env.sh),
-#                   mặc định ~/tools/RISCVTutorial
+#   CHIPYARD_FORK   đường dẫn tuyệt đối tới Chipyard đã dựng xong (có env.sh; scripts/setup-chipyard.sh),
+#                   mặc định ~/tools/chipyard (Chipyard gốc, tag 1.15.0)
 #   ORFS_DIR        OpenROAD-flow-scripts chép ra host (scripts/setup-orfs.sh),
 #                   mặc định ~/tools/OpenROAD-flow-scripts
 #   XILINX_DIR      thư mục cài Xilinx, mặc định ~/tools/Xilinx
@@ -28,7 +28,7 @@ auth:
     ssh_user: ${USER}
 
 available_node_types:
-    # --- Khối chipyard: build Chisel/Verilog bằng fork Chipyard mount từ host. ---
+    # --- Khối chipyard: build Chisel/Verilog bằng Chipyard mount từ host. ---
     # CHIA chạy worker_setup_commands và `ray start` trong CÙNG một shell, nên biến môi
     # trường của env.sh đi tiếp vào Ray worker. Phải nạp conda.sh trước env.sh.
     chipyard:
@@ -83,11 +83,11 @@ available_node_types:
                 - cp /home/ray/.claude/.claude.json /home/ray/.claude.json
                 - python3 -c "import json,os; p=os.path.expanduser('~/.claude/settings.json'); d=json.load(open(p)) if os.path.exists(p) else {}; d['skipDangerousModePermissionPrompt']=True; json.dump(d,open(p,'w'))"
 
-    # --- Khối vivado (FPGA, tuỳ chọn): flow fpga/ của fork + Vivado trên host (chỉ đọc). ---
+    # --- Khối vivado (FPGA, tuỳ chọn): flow fpga/ của Chipyard + Vivado trên host (chỉ đọc). ---
     # Image chia-chisel-build có sẵn /usr/local/bin/vivado (v2024.2, kiểm chứng 08/11/2026): đặt bin của
     # Vivado trên host lên ĐẦU PATH. settings64.sh ghi cứng đường dẫn thật lúc cài (/var/home/...),
-    # nên Xilinx mount đúng cùng đường dẫn như fork.
-    # Cùng image và cùng fork với khối chipyard. label=disable thay cho relabel (:z) cả cây Xilinx.
+    # nên Xilinx mount đúng cùng đường dẫn như Chipyard.
+    # Cùng image và cùng Chipyard với khối chipyard. label=disable thay cho relabel (:z) cả cây Xilinx.
     vivado:
         resources: {"vivado": 1}
         num_workers: 0
@@ -106,7 +106,7 @@ available_node_types:
 
     # --- Khối asic (tuỳ chọn): OpenROAD-flow-scripts. Image tự build: docker/orfs-ray.Dockerfile. ---
     # ORFS trên host (sửa tay được) mount đè lên /OpenROAD-flow-scripts của image.
-    # Fork được mount để đọc Verilog sinh ra từ khối chipyard.
+    # Chipyard được mount để đọc Verilog sinh ra từ khối chipyard.
     asic:
         resources: {"asic": 1}
         num_workers: 0
