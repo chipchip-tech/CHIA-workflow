@@ -47,11 +47,21 @@ git -C ~/tools/RISCVTutorial status --short | head -20; git -C ~/tools/RISCVTuto
 git -C ~/tools/OpenROAD-flow-scripts/flow status --short | head -20; git -C ~/tools/OpenROAD-flow-scripts/flow log --oneline | head -20
 ```
 
-Nếu có thứ cần giữ, lưu vào `~/archive` **trước bước 2** (ví dụ cho fork):
+Commit cục bộ có thể nằm cả trong **submodule** (agent của project fmax commit vào `rocket-chip`,
+`sifive-cache`...), nên kiểm cả submodule:
 
 ```bash
-mkdir -p ~/archive && git -C ~/tools/RISCVTutorial bundle create ~/archive/RISCVTutorial-$(date +%Y%m%d).bundle --all && git -C ~/tools/RISCVTutorial diff > ~/archive/RISCVTutorial-uncommitted-$(date +%Y%m%d).diff
+cd ~/tools/RISCVTutorial && git submodule foreach --recursive -q 'n=$(git log --oneline --branches --not --remotes 2>/dev/null | wc -l); d=$(git status --short | wc -l); [ "$n$d" != "00" ] && echo "$sm_path: $n commit cục bộ, $d file thay đổi"; true'
 ```
+
+Nếu có thứ cần giữ, lưu vào `~/archive` **trước bước 2**: bundle + patch cho repo gốc và từng submodule có
+commit cục bộ, cùng SHA của mọi submodule (đổi danh sách submodule theo kết quả lệnh trên):
+
+```bash
+A=~/archive/RISCVTutorial-$(date +%Y%m%d) && mkdir -p $A && cd ~/tools/RISCVTutorial && git submodule status --recursive > $A/submodule-heads.txt && for r in . generators/rocket-chip generators/sifive-cache; do n=$(echo "$r" | tr / _); git -C $r bundle create $A/$n.bundle HEAD --branches --not --remotes && git -C $r format-patch -q -o $A/$n-patches HEAD --branches --not --remotes && git -C $r diff > $A/$n-uncommitted.diff; done; ls -la $A
+```
+
+Kết quả sinh ra trong cây (checkpoint Vivado, design/report ORFS) thì chép thư mục ra `~/archive` bằng `cp -a`.
 
 **Xong khi:** đọc hết kết quả, không có gì lạ (ví dụ container không thuộc CHIA mà tên bắt đầu `chia-`), và sửa tay
 cần giữ đã được lưu. **Gửi lại:** toàn bộ kết quả các lệnh.

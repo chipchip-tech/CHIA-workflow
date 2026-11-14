@@ -193,7 +193,9 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   push luôn lên nhánh đích.
 - Project hiện có: `project/ascon-secureboot` (RoCC Ascon-Hash256, secure boot; xong M1–M4),
   `project/rocket-fmax` (tối ưu Fmax RocketTile; chi tiết trong `CLAUDE.md` của nhánh đó).
-  **Cả hai viết cho Chipyard 1.10.0** (fork RISCVTutorial): sau khi chuyển sang 1.15.0 mã Scala của chúng có thể
+  Ngoài ra còn `project/minsoc-fmax` (Fmax `MinimalSoCConfig` FPGA/ASIC, đang chạy tới 13/11/2026; kết quả agent nằm
+  trong fork, nhánh `minsoc-fmax/agent` của repo gốc + submodule `rocket-chip`, `sifive-cache`) và `project/soc-fmax`.
+  **Tất cả viết cho Chipyard 1.10.0** (fork RISCVTutorial): sau khi chuyển sang 1.15.0 mã Scala của chúng có thể
   không build được (mixin đổi package, scratchpad). Chưa sửa; khi quay lại project nào thì `git merge origin/setup`
   và chuyển nó sang 1.15.0 trước.
 
