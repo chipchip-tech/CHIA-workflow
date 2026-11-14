@@ -36,8 +36,25 @@ conda env list
 du -sh ~/tools/RISCVTutorial ~/tools/OpenROAD-flow-scripts ~/chia_cache ~/CHIA-workflow 2>&1; df -h /var
 ```
 
-**Xong khi:** đọc hết kết quả, không có gì lạ (ví dụ container không thuộc CHIA mà tên bắt đầu `chia-`).
-**Gửi lại:** toàn bộ kết quả 4 lệnh.
+Hai cây sắp xoá là nơi sửa tay (fork Chipyard nhánh `base`, `flow/` của ORFS được `git init` để theo dõi sửa
+tay), và bạn không `git push` được, nên kiểm xem có commit hay thay đổi chỉ nằm ở đó không:
+
+```bash
+git -C ~/tools/RISCVTutorial status --short | head -20; git -C ~/tools/RISCVTutorial log --oneline --branches --not --remotes | head -20
+```
+
+```bash
+git -C ~/tools/OpenROAD-flow-scripts/flow status --short | head -20; git -C ~/tools/OpenROAD-flow-scripts/flow log --oneline | head -20
+```
+
+Nếu có thứ cần giữ, lưu vào `~/archive` **trước bước 2** (ví dụ cho fork):
+
+```bash
+mkdir -p ~/archive && git -C ~/tools/RISCVTutorial bundle create ~/archive/RISCVTutorial-$(date +%Y%m%d).bundle --all && git -C ~/tools/RISCVTutorial diff > ~/archive/RISCVTutorial-uncommitted-$(date +%Y%m%d).diff
+```
+
+**Xong khi:** đọc hết kết quả, không có gì lạ (ví dụ container không thuộc CHIA mà tên bắt đầu `chia-`), và sửa tay
+cần giữ đã được lưu. **Gửi lại:** toàn bộ kết quả các lệnh.
 
 ## 1. Dừng cluster và container
 

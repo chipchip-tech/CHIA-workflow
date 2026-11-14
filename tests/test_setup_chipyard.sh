@@ -18,7 +18,13 @@ make_fakes() {
 echo "docker $(tr "\n" " " <<<"$*")" >> "$CALLS"
 w=""; prev=""
 for a in "$@"; do [ "$prev" = "-w" ] && w="$a"; prev="$a"; done
+[ -e "$w/setup.log" ] && echo "STALE_LOG_PRESENT" >> "$CALLS"
+if [ -n "${FAKE_VERIFY_FAIL:-}" ]; then
+    printf ' ========== BEGINNING STEP 11: Cleaning up repository ==========\nSetup complete!\n' >> "$w/setup.log"
+    exit 2
+fi
 if [ -n "${FAKE_FAIL_STEP:-}" ]; then
+    [ -n "${FAKE_FAIL_TEXT:-}" ] && echo "$FAKE_FAIL_TEXT" >> "$w/setup.log"
     printf ' ========== BEGINNING STEP %s: %s ==========\n' "$FAKE_FAIL_STEP" "${FAKE_FAIL_DESC:-x}" >> "$w/setup.log"
     exit 1
 fi
@@ -42,7 +48,7 @@ new_env() {
     T="$(mktemp -d)"; export CALLS="$T/calls"; : > "$CALLS"
     make_fakes "$T/bin"; export PATH="$T/bin:$ORIG_PATH"
     export HOME="$T/home"; mkdir -p "$HOME"
-    unset CHIPYARD_FORK JVM_CACHE FAKE_FAIL_STEP FAKE_FAIL_DESC FAKE_DESCRIBE
+    unset CHIPYARD_FORK JVM_CACHE FAKE_FAIL_STEP FAKE_FAIL_DESC FAKE_FAIL_TEXT FAKE_DESCRIBE FAKE_VERIFY_FAIL
 }
 make_cy() { mkdir -p "$1"; : > "$1/build-setup.sh"; chmod +x "$1/build-setup.sh"; }
 
@@ -145,7 +151,39 @@ t_jvm_cache_mount() {
     ok jvm_cache_mount
 }
 
-for t in t_dry_run_clone t_realpath_mount t_no_skip_default t_existing_dir_other_ref t_failure_report t_failure_step1 t_skip1_sources_env t_jvm_cache_mount; do
+# Chạy lại khi env đã dựng xong: bước 1 báo "already exist". Không được khuyên xoá env đang dùng được.
+t_rerun_after_success() {
+    new_env; local d="$T/cy" err
+    make_cy "$d"; export FAKE_FAIL_STEP=1 FAKE_FAIL_DESC="Conda environment setup"
+    export FAKE_FAIL_TEXT="Error: Conda environment directories already exist! Delete them before trying to recreate"
+    err="$(bash "$SCRIPT" --verify "$d" 2>&1 >/dev/null)"
+    has "$err" "rm -rf" && { bad rerun_after_success "khuyên xoá env đã dựng: $err"; return; }
+    has "$err" "-- -s 1" || { bad rerun_after_success "thiếu gợi ý bỏ bước 1: $err"; return; }
+    has "$err" "--verify" || { bad rerun_after_success "lệnh gợi ý bỏ mất --verify: $err"; return; }
+    ok rerun_after_success
+}
+
+# build-setup xong (Setup complete!) nhưng verify hỏng: không được đổ cho bước 11.
+t_verify_failure() {
+    new_env; local d="$T/cy" err rc
+    make_cy "$d"; export FAKE_VERIFY_FAIL=1
+    err="$(bash "$SCRIPT" --verify "$d" 2>&1 >/dev/null)"; rc=$?
+    [ $rc -ne 0 ] || { bad verify_failure "thoát 0"; return; }
+    has "$err" "bước 11" && { bad verify_failure "đổ lỗi cho bước 11: $err"; return; }
+    has "$err" "build-verify.log" || { bad verify_failure "không trỏ tới build-verify.log: $err"; return; }
+    ok verify_failure
+}
+
+# setup.log của lần trước phải bị xoá trước khi chạy, nếu không có thể báo nhầm bước hay báo thành công giả.
+t_stale_log_removed() {
+    new_env; local d="$T/cy"
+    make_cy "$d"; echo "Setup complete!" > "$d/setup.log"
+    bash "$SCRIPT" "$d" > /dev/null 2>&1
+    grep -q STALE_LOG_PRESENT "$CALLS" && { bad stale_log_removed "setup.log cũ còn lúc chạy docker"; return; }
+    ok stale_log_removed
+}
+
+for t in t_rerun_after_success t_verify_failure t_stale_log_removed t_dry_run_clone t_realpath_mount t_no_skip_default t_existing_dir_other_ref t_failure_report t_failure_step1 t_skip1_sources_env t_jvm_cache_mount; do
     "$t"
 done
 echo "== $PASS pass, $FAIL fail"

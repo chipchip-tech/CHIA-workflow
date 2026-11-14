@@ -57,7 +57,8 @@ echo "== Log: $CY/setup.log"
 # Bỏ bước 1 (chạy lại sau khi hỏng giữa chừng) thì build-setup.sh cần conda env của Chipyard đã kích hoạt
 # và $RISCV (bước 3), nên phải source env.sh do lần chạy trước sinh ra.
 SRC_ENV=""
-case " ${EXTRA[*]} " in *" -s 1 "*|*" --skip-conda "*) SRC_ENV="source env.sh && " ;; esac
+case " ${EXTRA[*]} " in *" -s 1 "*|*" --skip 1 "*|*" --skip-conda "*) SRC_ENV="source env.sh || exit 1
+" ;; esac
 INNER='set -eo pipefail
 source /home/ray/anaconda3/etc/profile.d/conda.sh && conda activate base
 cd "'"$CY"'"
@@ -75,12 +76,31 @@ fi
 # Cache JVM chung với khối chipyard (bước 5/7 tiền biên dịch Scala qua sbt; coursier không có read
 # timeout nên socket chết tới Maven làm treo vô hạn, xem docs/cluster-blocks.md).
 run mkdir -p "$JVM/coursier" "$JVM/sbt" "$JVM/ivy2"
+# Xoá log lần trước: nếu docker hỏng trước khi tee chạy, log cũ sẽ bị chẩn đoán nhầm (hoặc có sẵn
+# "Setup complete!" làm báo thành công giả).
+run rm -f "$CY/setup.log"
 rc=0
 run docker run --rm --shm-size=10.24gb \
     -v "$CY:$CY:z" -w "$CY" \
     -v "$JVM/coursier:/home/ray/.cache/coursier:z" -v "$JVM/sbt:/home/ray/.sbt:z" -v "$JVM/ivy2:/home/ray/.ivy2:z" \
     -e "JAVA_TOOL_OPTIONS=-Dsun.net.client.defaultConnectTimeout=30000 -Dsun.net.client.defaultReadTimeout=120000" \
     "$IMAGE" bash -c "$INNER" || rc=$?
+
+# Lệnh chạy lại in ra giữ nguyên --verify/--tag của lần này.
+SELF="scripts/setup-chipyard.sh"
+[ "$VERIFY" = 1 ] && SELF="$SELF --verify"
+[ "$TAG" = "1.15.0" ] || SELF="$SELF --tag $TAG"
+SELF="$SELF $CY"
+
+if [ $rc -ne 0 ] && grep -q "Setup complete!" "$CY/setup.log" 2>/dev/null; then
+    {
+        echo "LỖI: build-setup.sh đã xong (Setup complete!) nhưng bước kiểm tra --verify hỏng (mã $rc)."
+        echo "Log build Verilator: $CY/sims/verilator/build-verify.log (lỗi chạy rv64ui-p-simple in ở trên)."
+        echo "Chạy lại chỉ phần kiểm tra:"
+        echo "  $SELF -- -s 1 -s 2 -s 3 -s 4 -s 5 -s 6 -s 7 -s 8 -s 9 -s 10 -s 11"
+    } >&2
+    exit $rc
+fi
 
 if [ $rc -ne 0 ]; then
     last="$(grep 'BEGINNING STEP' "$CY/setup.log" 2>/dev/null | tail -1 || true)"
@@ -97,18 +117,27 @@ if [ $rc -ne 0 ]; then
         done_steps() { local k; for ((k=1; k<$1; k++)); do printf -- ' -s %d' "$k"; done; }
         case "$n" in
             1)
-                echo "Bước 1 hỏng thì build-setup.sh không chạy lại được khi env còn sót. Sửa lỗi, xoá rồi chạy lại:"
-                echo "  rm -rf $CY/.conda-lock-env $CY/.conda-env"
-                echo "  scripts/setup-chipyard.sh $CY${keep[*]:+ -- ${keep[*]}}" ;;
+                if grep -q "already exist" "$CY/setup.log" 2>/dev/null; then
+                    # Lần chạy trước đã dựng xong env: KHÔNG xoá, chạy tiếp và bỏ bước 1 (thêm -s cho các bước
+                    # khác đã xong, xem log lần trước; bỏ hết 1..11 nếu chỉ muốn --verify).
+                    echo "Env Chipyard đã có từ lần chạy trước (.conda-env); không xoá. Chạy tiếp, bỏ bước 1:"
+                    echo "  $SELF --${keep[*]:+ ${keep[*]}} -s 1"
+                    echo "Đã xong cả 11 bước trước đó và chỉ muốn kiểm tra: thêm -s 2 ... -s 11."
+                else
+                    echo "Bước 1 hỏng thì build-setup.sh không chạy lại được khi env còn sót. Sửa lỗi, xoá rồi chạy lại"
+                    echo "(env.sh được ghi lại khi bước 1 chạy xong):"
+                    echo "  rm -rf $CY/.conda-lock-env $CY/.conda-env"
+                    echo "  $SELF${keep[*]:+ -- ${keep[*]}}"
+                fi ;;
             6|7|8|9)
                 [ "$n" -le 7 ] && first=6 || first=8   # 7 cần 6 (FireSim), 9 cần 8 (FireMarshal)
                 echo "Nếu quyết định bỏ bước $first–$((first+1)) (ghi lỗi vào docs trước), chạy lại:"
-                echo "  scripts/setup-chipyard.sh $CY --${keep[*]:+ ${keep[*]}}$(done_steps "$first") -s $first -s $((first+1))" ;;
+                echo "  $SELF --${keep[*]:+ ${keep[*]}}$(done_steps "$first") -s $first -s $((first+1))" ;;
             ''|*[!0-9]*)
                 echo "Không xác định được bước hỏng; đọc log." ;;
             *)
                 echo "Bước $n là bước bắt buộc; đọc log và sửa lỗi, rồi chạy tiếp từ bước $n:"
-                echo "  scripts/setup-chipyard.sh $CY --${keep[*]:+ ${keep[*]}}$(done_steps "$n")" ;;
+                echo "  $SELF --${keep[*]:+ ${keep[*]}}$(done_steps "$n")" ;;
         esac
     } >&2
     exit $rc
