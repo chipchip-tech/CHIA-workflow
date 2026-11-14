@@ -43,7 +43,7 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   `docs/reinstall.md` (giữ Vivado, `~/.claude`, Miniforge, image `ghcr.io/ucb-bar/chia-*`), `build-setup.sh` chạy
   **đủ 11 bước**; bước 6–9 (FireSim/FireMarshal) hỏng trong container thì ghi lỗi, chạy lại bỏ các bước đó, không
   mở thêm quyền container. Thiết kế: `docs/superpowers/specs/2026-11-14-chipyard-upstream-design.md`.
-  **Tiến độ `docs/reinstall.md` (14/11/2026): xong bước 0–7.** Fork, ORFS, `~/chia_cache`, `chia-orfs`, `chia_env` cũ
+  **`docs/reinstall.md` XONG cả 8 bước (14/11/2026).** Fork, ORFS, `~/chia_cache`, `chia-orfs`, `chia_env` cũ
   đã xoá; `~/tools` chỉ còn `Xilinx`. Trước khi xoá đã lưu kết quả `minsoc-fmax` vào `~/archive/RISCVTutorial-20261114/`
   (bundle + patch: repo gốc 16, `rocket-chip` 11, `sifive-cache` 8 commit; `submodule-heads.txt`; checkpoint Vivado
   `minsoc-vivado` 2.3 GB) và `~/archive/ORFS-minsoc-20261114/` (design/results/reports/logs `minsoc_*`, 2.8 GB).
@@ -58,7 +58,7 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   (bước 2 luôn `--full`, không tắt được Gemmini). Bản sao `ucb-bar/rocc-software` chỉ có 1 commit mới (`9492c0a`),
   không có commit ghim `fddb795`. `setup-chipyard.sh` giờ dựng sẵn gemmini + gemmini-rocc-tests trên host, clone bản
   sao vào `rocc-software` và đặt `submodule.rocc-software.update none` (đã thử trong sandbox: `git submodule update
-  --init --recursive software/gemmini-rocc-tests` qua, RC=0). Lần 4 (`-- -s 1`): vá rocc-software chạy được trên máy thật, **xong bước 2–5**; người dùng chủ động dừng giữa bước 6 (tải submodule FireSim) bằng `docker stop` theo nhãn, log lưu ở `~/tools/chipyard/setup-lan4.log`. Lần 5 (`-- -s 1 -s 2 -s 3 -s 4 -s 5`): bước 6 tải tiếp các submodule FireSim còn thiếu, rồi hỏng `fatal: Unable to find current revision in submodule path 'platforms/f1/aws-fpga'` (mã 128): submodule đang tải dở lúc dừng ở lần 4. Cách gỡ: xoá git dir `.git/modules/sims/firesim/modules/platforms/f1/aws-fpga` và thư mục làm việc của nó, chạy lại lệnh lần 5. Lần 6 (cùng lệnh): **bước 6 qua** (cách gỡ chạy được), hỏng ở bước 7 (biên dịch Scala của FireSim): `diplomacy` báo `object cde is not a member of package org.chipsalliance`, và `cde` không hề được biên dịch, vì thư mục làm việc của `sims/firesim/sim/cde` thiếu file. **Đã xác nhận:** dừng ở lần 4 ngắt `git submodule update` sau pha clone, trước pha checkout, nên submodule có HEAD đúng commit ghim mà thư mục làm việc trống. `git submodule status` chỉ so HEAD nên không phát hiện, chạy lại cũng bỏ qua. Bị như vậy: `sim/cde` (16 file), `platforms/f2/aws-fpga-firesim-f2` (987 file, chưa init 2 submodule con), NiteFury (178), garnet-firesim (150). Gỡ bằng `git -C <p> reset -q --hard HEAD && git -C <p> submodule update --init --recursive`; dò bằng `git submodule foreach --recursive --quiet '[ -n "$(ls -A | grep -vx .git)" ] || echo "RỖNG: $displaypath"'`. Lần này còn lộ lỗi của `setup-chipyard.sh`: build-setup của FireSim cũng in `Setup complete!`, nên script tưởng build-setup.sh đã xong, vẫn chạy verify và báo nhầm "verify hỏng". Đã sửa: chỉ coi là xong khi `Setup complete!` đứng sau dòng `BEGINNING STEP` cuối (test `t_firesim_setup_complete`). Lần 7 (`-- -s 1 … -s 6`, sau khi gỡ): **bước 7 và 8 qua**, hỏng ở bước 9: FireMarshal dùng ảnh buildroot dựng sẵn nhưng `sudo mount -o loop br-base.img` hỏng (container không có root/thiết bị loop). Theo thiết kế bỏ bước 8–9 (ghi trong `docs/reinstall.md`, kèm cách gỡ khi dừng giữa bước 6); Lần 8 (`-- -s 1 … -s 9`): bước 10–11 qua, verify build Verilator `RocketConfig` + `rv64ui-p-simple` ra **`VERIFY_OK`** → **xong bước 5 của `reinstall.md`** (bước 8–9 của `build-setup.sh` bị bỏ, FireMarshal chưa dựng workload). Bước 6 (`MinimalSoCConfig` trên 1.15.0): build Verilator qua, `rv64ui-p-simple` và `hello.riscv` (`Hello world from core 0, a rocket`) `EXIT=0`, L2 `cache-size = <131072>`, đếm GPIO/SPI/I2C/PWM/scratchpad = 0. Bước 7: build lại `chia-orfs` (281 s), `setup-orfs.sh --verify` chép 1.44 GB, `nangate45/gcd` ra `6_final.gds` và `VERIFY_OK`.
+  --init --recursive software/gemmini-rocc-tests` qua, RC=0). Lần 4 (`-- -s 1`): vá rocc-software chạy được trên máy thật, **xong bước 2–5**; người dùng chủ động dừng giữa bước 6 (tải submodule FireSim) bằng `docker stop` theo nhãn, log lưu ở `~/tools/chipyard/setup-lan4.log`. Lần 5 (`-- -s 1 -s 2 -s 3 -s 4 -s 5`): bước 6 tải tiếp các submodule FireSim còn thiếu, rồi hỏng `fatal: Unable to find current revision in submodule path 'platforms/f1/aws-fpga'` (mã 128): submodule đang tải dở lúc dừng ở lần 4. Cách gỡ: xoá git dir `.git/modules/sims/firesim/modules/platforms/f1/aws-fpga` và thư mục làm việc của nó, chạy lại lệnh lần 5. Lần 6 (cùng lệnh): **bước 6 qua** (cách gỡ chạy được), hỏng ở bước 7 (biên dịch Scala của FireSim): `diplomacy` báo `object cde is not a member of package org.chipsalliance`, và `cde` không hề được biên dịch, vì thư mục làm việc của `sims/firesim/sim/cde` thiếu file. **Đã xác nhận:** dừng ở lần 4 ngắt `git submodule update` sau pha clone, trước pha checkout, nên submodule có HEAD đúng commit ghim mà thư mục làm việc trống. `git submodule status` chỉ so HEAD nên không phát hiện, chạy lại cũng bỏ qua. Bị như vậy: `sim/cde` (16 file), `platforms/f2/aws-fpga-firesim-f2` (987 file, chưa init 2 submodule con), NiteFury (178), garnet-firesim (150). Gỡ bằng `git -C <p> reset -q --hard HEAD && git -C <p> submodule update --init --recursive`; dò bằng `git submodule foreach --recursive --quiet '[ -n "$(ls -A | grep -vx .git)" ] || echo "RỖNG: $displaypath"'`. Lần này còn lộ lỗi của `setup-chipyard.sh`: build-setup của FireSim cũng in `Setup complete!`, nên script tưởng build-setup.sh đã xong, vẫn chạy verify và báo nhầm "verify hỏng". Đã sửa: chỉ coi là xong khi `Setup complete!` đứng sau dòng `BEGINNING STEP` cuối (test `t_firesim_setup_complete`). Lần 7 (`-- -s 1 … -s 6`, sau khi gỡ): **bước 7 và 8 qua**, hỏng ở bước 9: FireMarshal dùng ảnh buildroot dựng sẵn nhưng `sudo mount -o loop br-base.img` hỏng (container không có root/thiết bị loop). Theo thiết kế bỏ bước 8–9 (ghi trong `docs/reinstall.md`, kèm cách gỡ khi dừng giữa bước 6); Lần 8 (`-- -s 1 … -s 9`): bước 10–11 qua, verify build Verilator `RocketConfig` + `rv64ui-p-simple` ra **`VERIFY_OK`** → **xong bước 5 của `reinstall.md`** (bước 8–9 của `build-setup.sh` bị bỏ, FireMarshal chưa dựng workload). Bước 6 (`MinimalSoCConfig` trên 1.15.0): build Verilator qua, `rv64ui-p-simple` và `hello.riscv` (`Hello world from core 0, a rocket`) `EXIT=0`, L2 `cache-size = <131072>`, đếm GPIO/SPI/I2C/PWM/scratchpad = 0. Bước 7: build lại `chia-orfs` (281 s), `setup-orfs.sh --verify` chép 1.44 GB, `nangate45/gcd` ra `6_final.gds` và `VERIFY_OK`. Bước 8 (IP LAN lúc này `192.168.1.7`): `chia-up-blocks.py --fpga --asic` lên đủ 5 khối, `blocks_smoke.py --clean` ra `[chipyard] env` `RISCV=/var/home/dingus/tools/chipyard/.conda-env/riscv-tools`, build `RocketConfig` (clean) `SUCCESS=True`, `vivado v2025.1`, asic Yosys 0.68, `KẾT QUẢ: OK`; `chia down` gỡ sạch 5 container + head (`ok=True`).
 
 ## Đã kiểm chứng và chưa kiểm chứng
 
@@ -87,12 +87,10 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   `/opt/orfs-python` (3.14), không có `psutil`. Dockerfile đã cài `psutil`; kiểm chứng 09/11/2026:
   `ok=True`, container bị xoá sạch.
 
-**Chưa chạy thử trên Chipyard 1.15.0** (14/11/2026, các mục "đã chạy thật" có fork ở trên là với 1.10.0):
-- (Đã kiểm chứng 14/11/2026: `scripts/setup-chipyard.sh --verify` ra `VERIFY_OK` trên máy thật, bỏ bước 8–9;
-  `install-chipyard-config.sh` + `MinimalSoCConfig` bản 1.15.0 build và chạy đúng; `docs/reinstall.md` bước 0–7.)
-- Phần còn lại của `docs/reinstall.md` (8), khối `chipyard`/`vivado` trên 1.15.0. Trong sandbox mới kiểm: test bash của hai script
-  (`tests/test_setup_chipyard.sh`, `tests/test_install_chipyard_config.sh`) và `install-chipyard-config.sh` in
-  `MIXIN_OK` trên cây 1.15.0 thật (shallow).
+**Đã chạy thật trên Chipyard 1.15.0** (14/11/2026; các mục có fork ở trên là với 1.10.0): toàn bộ `docs/reinstall.md`
+(bước 0–8): `scripts/setup-chipyard.sh --verify` (`VERIFY_OK`, bỏ bước 8–9 của `build-setup.sh`),
+`install-chipyard-config.sh` + `MinimalSoCConfig` bản 1.15.0, ORFS, cluster theo khối đủ 5 khối (`KẾT QUẢ: OK`).
+Chưa có trên 1.15.0: FireMarshal workload (bước 9 cần mount loop), flow `fpga/`, các project cũ.
 
 **Chưa chạy thử** (viết từ docs và mã nguồn CHIA):
 - `configs/cluster-lan.yaml`, `prepare-remote-worker.sh`, `check-remote-worker.sh`.
@@ -216,9 +214,9 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
 
 ## Việc tiếp theo (gợi ý)
 
-1. **Người dùng chạy `docs/reinstall.md`** (bước 0–8), gửi log từng bước. Cập nhật docs và file này theo kết
-   quả: chuyển mục sang "đã kiểm chứng trên 1.15.0", ghi lỗi mới (nhất là bước 6–9 của `build-setup.sh`).
-2. Nếu bước 6–9 phải bỏ: việc riêng để làm FireSim/FireMarshal chạy được (dựa trên log thật).
+1. (Xong 14/11/2026) `docs/reinstall.md` chạy hết trên Chipyard 1.15.0.
+2. Việc riêng: FireMarshal bước 9 (`sudo mount -o loop` trong container; cần root/thiết bị loop, hoặc dựng workload
+   trên host). FireSim bước 6–7 đã qua.
 3. Mở project mới theo **Quy ước nhánh**, dùng cluster theo khối (`docs/cluster-blocks.md`), config kế thừa
    `chipyard.MinimalSoCConfig` (nền mặc định cho mọi project).
 4. Chuyển `project/ascon-secureboot`, `project/rocket-fmax` sang Chipyard 1.15.0 khi quay lại.
