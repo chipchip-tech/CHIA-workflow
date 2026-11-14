@@ -58,7 +58,7 @@ Nếu có thứ cần giữ, lưu vào `~/archive` **trước bước 2**: bundl
 commit cục bộ, cùng SHA của mọi submodule (đổi danh sách submodule theo kết quả lệnh trên):
 
 ```bash
-A=~/archive/RISCVTutorial-$(date +%Y%m%d) && mkdir -p $A && cd ~/tools/RISCVTutorial && git submodule status --recursive > $A/submodule-heads.txt && for r in . generators/rocket-chip generators/sifive-cache; do n=$(echo "$r" | tr / _); git -C $r bundle create $A/$n.bundle HEAD --branches --not --remotes && git -C $r format-patch -q -o $A/$n-patches HEAD --branches --not --remotes && git -C $r diff > $A/$n-uncommitted.diff; done; ls -la $A
+A=~/archive/RISCVTutorial-$(date +%Y%m%d) && mkdir -p $A && cd ~/tools/RISCVTutorial && git submodule status --recursive > $A/submodule-heads.txt && for r in . generators/rocket-chip generators/sifive-cache; do n=$([ "$r" = . ] && echo fork-root || echo "$r" | tr / _); git -C $r bundle create $A/$n.bundle HEAD --branches --not --remotes && git -C $r format-patch -q -o $A/$n-patches HEAD --branches --not --remotes && git -C $r diff > $A/$n-uncommitted.diff; done; ls -la $A
 ```
 
 Kết quả sinh ra trong cây (checkpoint Vivado, design/report ORFS) thì chép thư mục ra `~/archive` bằng `cp -a`.
