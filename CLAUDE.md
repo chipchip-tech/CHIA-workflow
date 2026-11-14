@@ -58,7 +58,7 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
   (bước 2 luôn `--full`, không tắt được Gemmini). Bản sao `ucb-bar/rocc-software` chỉ có 1 commit mới (`9492c0a`),
   không có commit ghim `fddb795`. `setup-chipyard.sh` giờ dựng sẵn gemmini + gemmini-rocc-tests trên host, clone bản
   sao vào `rocc-software` và đặt `submodule.rocc-software.update none` (đã thử trong sandbox: `git submodule update
-  --init --recursive software/gemmini-rocc-tests` qua, RC=0). Lần 4 (`-- -s 1`): chưa chạy.
+  --init --recursive software/gemmini-rocc-tests` qua, RC=0). Lần 4 (`-- -s 1`): vá rocc-software chạy được trên máy thật, **xong bước 2–5**; người dùng chủ động dừng giữa bước 6 (tải submodule FireSim) bằng `docker stop` theo nhãn, log lưu ở `~/tools/chipyard/setup-lan4.log`. Lần 5: chạy tiếp với `-- -s 1 -s 2 -s 3 -s 4 -s 5` (chưa chạy; chưa kiểm chứng việc tải tiếp sau khi dừng).
 
 ## Đã kiểm chứng và chưa kiểm chứng
 
