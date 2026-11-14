@@ -2,7 +2,7 @@
 
 - Ngày: 14/11/2026
 - Nhánh: `setup`
-- Trạng thái: **bản thiết kế, chờ người dùng duyệt**. Chưa có gì được sửa hay chạy.
+- Trạng thái: **bản thiết kế, đã qua builder check, chờ người dùng duyệt**. Chưa có gì được sửa hay chạy.
 
 ## 1. Mục đích và lý do
 
@@ -28,6 +28,7 @@ liệu cài đặt được kiểm chứng lại trên bản mới.
   build được). Chỉ ghi chú vào `CLAUDE.md`.
 - Không tự động đồng bộ lên bản Chipyard mới hơn; không theo `main`.
 - Không chạy thử flow FireSim/FireMarshal (chỉ cài đặt), không chạy flow `fpga/`.
+- Không sửa image hay thêm quyền container (`--privileged`, root, `/dev/kvm`) để bước 6–9 qua được.
 - Không kéo lại image `ghcr.io/ucb-bar/chia-*` (giữ image đang có).
 
 **Phản mục tiêu** (thành thất bại dù "chạy được")
@@ -76,8 +77,9 @@ Người dùng chọn **A** (14/11/2026).
 | 4 | "Xoá" | Dựng lại toàn bộ CHIA từ đầu với config mới, giữ Vivado |
 | 5 | Image `ghcr.io/ucb-bar/chia-*` | Giữ, không kéo lại; chỉ xoá và build lại `chia-orfs` |
 | 6 | Nhánh project | Không đụng; ghi chú trong `CLAUDE.md` |
-| 7 | Bước 6–9 hỏng trong container | Script dừng và báo rõ bước nào; người dùng quyết định |
+| 7 | Bước 6–9 hỏng trong container | Script dừng và báo rõ bước nào. Lần này **không** mở thêm quyền hay dựng image phái sinh: ghi lỗi vào docs, chạy lại với `-s` bỏ các bước hỏng để dựng xong CHIA, đánh dấu "chưa đạt 11 bước"; làm cho 6–9 qua là việc riêng sau, dựa trên log thật |
 | 8 | Tổ chức | Hướng A |
+| 9 | Đưa thay đổi lên đâu | Session này được giao nhánh `setup`: commit và push thẳng `origin/setup` trước khi người dùng tới bước 3 của `reinstall.md` (clone lại). Không tạo PR |
 
 ## 6. Phạm vi xoá / giữ trên máy người dùng
 
@@ -165,7 +167,8 @@ Mỗi bước: một khối lệnh `bash` riêng, dấu hiệu xong, log cần g
 3. **Clone** `~/CHIA-workflow` nhánh `setup`; `check-bazzite-env.sh`.
 4. **`chia_env`**: tạo lại, `conda env config vars set PYTHONNOUSERSITE=1`, cài `chialoops` 2.0.1; dấu hiệu:
    Python 3.10.19, Ray 2.54.0.
-5. **Chipyard**: `scripts/setup-chipyard.sh --verify` (tmux, vài giờ) → `VERIFY_OK`.
+5. **Chipyard**: `scripts/setup-chipyard.sh --verify` (tmux, vài giờ) → `VERIFY_OK`. Nếu dừng ở bước 6–9: gửi
+   log, rồi chạy lại theo lệnh script in ra (thêm `-s N`, thư mục đã có nên không clone lại) và đi tiếp.
 6. **MinimalSoCConfig**: `install-chipyard-config.sh` → `MIXIN_OK`; build + chạy theo `chipyard-minimal-soc.md`.
 7. **ORFS**: `docker build` `chia-orfs`, `setup-orfs.sh --verify` → `VERIFY_OK`.
 8. **Cluster**: `chia-up-blocks.py --fpga --asic`, `blocks_smoke.py --clean` → `KẾT QUẢ: OK`; `chia down`.
