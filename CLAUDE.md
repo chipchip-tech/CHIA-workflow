@@ -87,15 +87,16 @@ với khối vivado, `--net=host`), rồi qua job CHIA: `examples/fpga_smoke.py 
 11,1 phút, `.bit` 3 825 916 byte, WNS 0,129 / WHS −0,063 ns, `KẾT QUẢ: OK`; `chia down` sạch. Chưa có trên 1.15.0:
 các project cũ.
 
+**Đã chạy thật 15/11/2026** (project `soc-fmax-sky130`, M1): `scripts/fakeram_sky130.py` qua ORFS sky130hd tới place
+(10 macro của `MinimalSoCConfig`: Yosys, macro placement, PDN, OpenSTA). Kênh hẹp giữa macro và mép core cần cắt row
+trong halo khi tapcell (`PDN-0179`, xem `docs/fakeram-sky130.md`). `chia-up-blocks.py --verilator-slots 4` (4 sim song
+song) và `ASIC_MEM=20g`.
+
 **Chưa chạy thử** (viết từ docs và mã nguồn CHIA):
 - `configs/cluster-lan.yaml`, `prepare-remote-worker.sh`, `check-remote-worker.sh`.
 - `examples/rtl_agent_loop.py`: mới qua `py_compile`, API đã đối chiếu với mã nguồn CHIA 2.0.1.
 - Phần linger trong `check-bazzite-env.sh` (thêm sau lần chạy script).
 - Tailscale/`tailnet:`, phương án Podman rootless.
-- `scripts/fakeram_sky130.py` (`docs/fakeram-sky130.md`, 15/11/2026): mới kiểm trong sandbox (GDS, Liberty đọc lại
-  được, chân khớp header `*_ext` mẫu); chưa qua OpenROAD.
-- `chia-up-blocks.py --verilator-slots N` và biến `ASIC_MEM` (giới hạn RAM container asic, mặc định 12g): mới kiểm
-  `--dry-run` trong sandbox.
 
 ## Các lỗi đã gặp trên Bazzite và cách sửa
 
