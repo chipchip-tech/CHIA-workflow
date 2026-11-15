@@ -60,19 +60,19 @@ AGENT_FNS = ("agent_propose", "agent_fix_build", "agent_debug")
 # Agent (M2: chỉ bypass; thân hàm thật viết ở M3/M4 với ClaudeCodeLLM trên khối claude)
 # ---------------------------------------------------------------------------
 
-@ChiaFunction(resources={"claude": 1}, max_retries=0)
+@ChiaFunction(resources={"claude_creds": 1}, max_retries=0)
 def agent_propose(ctx: dict) -> dict:
     """-> {"patch": unified diff, "summary": str}."""
     raise NotImplementedError("agent thật chưa có (M3/M4): chạy với --bypass")
 
 
-@ChiaFunction(resources={"claude": 1}, max_retries=0)
+@ChiaFunction(resources={"claude_creds": 1}, max_retries=0)
 def agent_fix_build(ctx: dict) -> dict:
     """ctx có patch và lỗi build. -> {"patch": patch thay thế (rỗng = bỏ cuộc), "summary"}."""
     raise NotImplementedError("agent thật chưa có (M3/M4): chạy với --bypass")
 
 
-@ChiaFunction(resources={"claude": 1}, max_retries=0)
+@ChiaFunction(resources={"claude_creds": 1}, max_retries=0)
 def agent_debug(ctx: dict) -> dict:
     """ctx có patch và lý do gate/func hỏng. -> {"diagnosis": str} (chỉ ghi vào history, không sửa)."""
     raise NotImplementedError("agent thật chưa có (M3/M4): chạy với --bypass")
@@ -458,10 +458,12 @@ def main():
     c = None
     try:
         res = ray.cluster_resources()
-        need = ["chipyard", "verilator_run", "asic", "claude"]   # agent bypass vẫn chạy trên khối claude
+        need = ["chipyard", "verilator_run", "asic", "claude_creds"]   # agent bypass vẫn chạy trên khối claude (resource claude_creds)
         missing = [r for r in need if not res.get(r)]
         if missing:
-            raise SystemExit(f"cluster thiếu resource {missing}")
+            raise SystemExit(f"cluster thiếu resource {missing}: python scripts/chia-up-blocks.py --asic --verilator-slots 4 "
+                             f"(khối claude bật mặc định)")
+        print(f"verilator_run: {res.get('verilator_run')} slot", flush=True)
         if not a.bypass_list:
             raise SystemExit("M2 chưa có agent thật: chạy với --bypass empty,comment,broken")
         print("== baseline (phải có sẵn trong cache: soc_fmax.py --until place)", flush=True)
