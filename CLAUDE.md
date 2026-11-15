@@ -92,6 +92,10 @@ các project cũ.
 - `examples/rtl_agent_loop.py`: mới qua `py_compile`, API đã đối chiếu với mã nguồn CHIA 2.0.1.
 - Phần linger trong `check-bazzite-env.sh` (thêm sau lần chạy script).
 - Tailscale/`tailnet:`, phương án Podman rootless.
+- `scripts/fakeram_sky130.py` (`docs/fakeram-sky130.md`, 15/11/2026): mới kiểm trong sandbox (GDS, Liberty đọc lại
+  được, chân khớp header `*_ext` mẫu); chưa qua OpenROAD.
+- `chia-up-blocks.py --verilator-slots N` và biến `ASIC_MEM` (giới hạn RAM container asic, mặc định 12g): mới kiểm
+  `--dry-run` trong sandbox.
 
 ## Các lỗi đã gặp trên Bazzite và cách sửa
 
@@ -201,10 +205,13 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
 - Project hiện có: `project/ascon-secureboot` (RoCC Ascon-Hash256, secure boot; xong M1–M4),
   `project/rocket-fmax` (tối ưu Fmax RocketTile; chi tiết trong `CLAUDE.md` của nhánh đó).
   Ngoài ra còn `project/minsoc-fmax` (Fmax `MinimalSoCConfig` FPGA/ASIC, đang chạy tới 13/11/2026; kết quả agent nằm
-  trong fork, nhánh `minsoc-fmax/agent` của repo gốc + submodule `rocket-chip`, `sifive-cache`) và `project/soc-fmax`.
+  trong fork, nhánh `minsoc-fmax/agent` của repo gốc + submodule `rocket-chip`, `sifive-cache`) và `project/soc-fmax`
+  (project cũ, xong 06/11/2026, lịch sử git tách khỏi `setup`; giữ nguyên).
   **Tất cả viết cho Chipyard 1.10.0** (fork RISCVTutorial): sau khi chuyển sang 1.15.0 mã Scala của chúng có thể
   không build được (mixin đổi package, scratchpad). Chưa sửa; khi quay lại project nào thì `git merge origin/setup`
   và chuyển nó sang 1.15.0 trước.
+- `project/soc-fmax-sky130` (mở 15/11/2026, Chipyard 1.15.0): loop agent tối ưu Fmax cả SoC `MinimalSoCConfig`
+  (`DigitalTop`) trên sky130hd đo bằng ORFS sau place, fakeram, bậc chu kỳ 10 → 5 ns; chi tiết trong nhánh đó.
 
 ## Việc tiếp theo (gợi ý)
 

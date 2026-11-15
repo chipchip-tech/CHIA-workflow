@@ -5,6 +5,8 @@ Mặc định bật chipyard + verilator + claude. Tuỳ chọn:
   --fpga        bật khối vivado
   --asic        bật khối asic (cần image chia-orfs:latest)
   --no-claude   tắt khối claude
+  --verilator-slots N   số slot verilator_run (mặc định 1): N sim chạy song song trong 1 container
+  ASIC_MEM=20g  (biến môi trường) giới hạn RAM của container asic, mặc định 12g
   --dry-run     chỉ sinh cluster.gen.yaml và in ra, không `chia up`
 
 Chạy trong env chia_env:
@@ -28,6 +30,7 @@ DEFAULTS = {
     "XILINX_DIR": str(Path.home() / "tools" / "Xilinx"),
     "VIVADO_VERSION": "2025.1",
     "JVM_CACHE": str(Path.home() / "chia_cache" / "jvm"),
+    "ASIC_MEM": "12g",
 }
 
 
@@ -50,6 +53,7 @@ def main() -> None:
     ap.add_argument("--fpga", action="store_true", help="bật khối vivado")
     ap.add_argument("--asic", action="store_true", help="bật khối asic")
     ap.add_argument("--no-claude", action="store_true", help="tắt khối claude")
+    ap.add_argument("--verilator-slots", type=int, default=1, help="số slot verilator_run (mặc định 1)")
     ap.add_argument("--out", default="cluster.gen.yaml", help="file config sinh ra (mặc định ./cluster.gen.yaml)")
     ap.add_argument("--dry-run", action="store_true", help="không chạy chia up")
     args = ap.parse_args()
@@ -90,15 +94,19 @@ def main() -> None:
     cfg = yaml.safe_load(TEMPLATE.read_text())
     for name, node in cfg["available_node_types"].items():
         node["num_workers"] = 1 if enabled.get(name) else 0
+    if args.verilator_slots < 1:
+        fail("--verilator-slots phải >= 1")
+    cfg["available_node_types"]["verilator"]["resources"]["verilator_run"] = args.verilator_slots
 
     header = (f"# SINH TỰ ĐỘNG bởi scripts/chia-up-blocks.py từ {TEMPLATE.name}. Đừng sửa tay.\n"
               f"# Khối bật: {', '.join(n for n, on in enabled.items() if on)}\n"
               f"# CHIPYARD_FORK={fork}  ORFS_DIR={os.environ['ORFS_DIR']}  VIVADO_VERSION={os.environ['VIVADO_VERSION']}"
-              f"  JVM_CACHE={os.environ['JVM_CACHE']}\n")
+              f"  JVM_CACHE={os.environ['JVM_CACHE']}\n"
+              f"# ASIC_MEM={os.environ['ASIC_MEM']}  verilator_run={args.verilator_slots}\n")
     body = yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True, width=1000)
     # CHIA không thay ${VAR} trong worker_setup_commands (chỉ trong run_options), nên tự thay
     # các biến của template ở đây. ${THIS_MACHINE}, ${USER} để CHIA thay như các config khác.
-    for k in ("CHIPYARD_FORK", "ORFS_DIR", "XILINX_DIR", "VIVADO_VERSION", "JVM_CACHE"):
+    for k in ("CHIPYARD_FORK", "ORFS_DIR", "XILINX_DIR", "VIVADO_VERSION", "JVM_CACHE", "ASIC_MEM"):
         body = body.replace("${" + k + "}", os.environ[k])
     out = Path(args.out)
     out.write_text(header + body)

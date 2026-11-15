@@ -72,7 +72,9 @@ conda activate chia_env && cd ~/CHIA-workflow
 python scripts/chia-up-blocks.py
 ```
 
-Thêm `--fpga`, `--asic`, `--no-claude` tuỳ nhu cầu; `--dry-run` để chỉ xem config. Chipyard khác chỗ
+Thêm `--fpga`, `--asic`, `--no-claude` tuỳ nhu cầu; `--dry-run` để chỉ xem config. `--verilator-slots N` cho N sim
+chạy song song trong container verilator (mặc định 1). `ASIC_MEM=20g` đổi giới hạn RAM của container asic (mặc định
+`12g`; flow quá giới hạn thì container bị OOM-kill, không ảnh hưởng máy). Chipyard khác chỗ
 mặc định (`~/tools/chipyard`) thì đặt `CHIPYARD_FORK=/đường/dẫn/tuyệt/đối`; ORFS khác chỗ thì `ORFS_DIR`. Script kiểm
 trước: Chipyard có `env.sh`, Vivado có `settings64.sh`, image `chia-orfs` đã build, Claude đã đăng nhập.
 
