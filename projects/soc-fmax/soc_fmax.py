@@ -286,7 +286,7 @@ def step_gate(a, d: Path, art, rtl, mw: MemWatch, tm: Timer, baseline: bool = Tr
 
 
 def step_func(a, d: Path, art, rtl, elfs: dict, mw: MemWatch, tm: Timer, base: "F.FuncResult | None" = None,
-              base_hash: str = "") -> "F.FuncResult":
+              base_hash: str = "", report: list | None = None) -> "F.FuncResult":
     """base=None: ghi vết baseline (tag ftrace_), rồi tự so baseline ở seed khác (tag fcheck_, phải ĐẠT).
     Có base: so ứng viên với vết baseline (tag fcheck_<ứng viên>_<baseline>)."""
     if base is None:
@@ -313,6 +313,8 @@ def step_func(a, d: Path, art, rtl, elfs: dict, mw: MemWatch, tm: Timer, base: "
     tm.add("func so", (time.time() - t0) / 60, hit, f"sim {fc.seconds / 60:.1f} phút")
     for line in F.summary_lines(fc):
         print(line, flush=True)
+    if report is not None:
+        report += ["", "## Func check", "", f"Seed {a.repeat_seed}, tag `{tag}`", "", "```", *F.summary_lines(fc), "```"]
     write(d / "func_check.json", as_json(fc))
     if not fc.ok and base_hash == rtl.hash:
         cache_evict(tag)
@@ -439,7 +441,8 @@ def noise_variants(orfs_vars: dict) -> list[tuple[str, dict]]:
             ("util+1", {**orfs_vars, "CORE_UTILIZATION": f"{util + 1:g}"})]
 
 
-def step_noise(a, out: Path, rtl, fakeram, base_stages: dict, mw: MemWatch, tm: Timer) -> "P.Noise":
+def step_noise(a, out: Path, rtl, fakeram, base_stages: dict, mw: MemWatch, tm: Timer,
+               report: list | None = None) -> "P.Noise":
     samples = [{"name": "baseline", "fmax": base_stages["place"].fmax_mhz, "family": base_stages["place"].family_score,
                 "synth_fmax": base_stages["synth"].fmax_mhz, "area": base_stages["place"].std_area_um2}]
     print("\n== nhiễu: 4 lần chạy baseline nhiễu nhẹ (synth → place mỗi lần)", flush=True)
@@ -457,10 +460,16 @@ def step_noise(a, out: Path, rtl, fakeram, base_stages: dict, mw: MemWatch, tm: 
               f"  logic {fmt(s_['area'], 0)} um2", flush=True)
     print(f"  {noise.note}", flush=True)
     print(f"  NGƯỠNG NHẬN: Fmax ±{noise.fmax_mhz:.3f} MHz, điểm họ ±{noise.family_ns:.3f} ns -> {out}/noise.json", flush=True)
+    if report is not None:
+        report += ["", "## Nhiễu (sau place)", "", "| lần | Fmax (MHz) | điểm họ | synth Fmax (MHz) | logic (um2) |",
+                   "|---|---|---|---|---|"]
+        report += [f"| {s_['name']} | {fmt(s_['fmax'], 3)} | {fmt(s_['family'])} | {fmt(s_['synth_fmax'], 2)} | "
+                   f"{fmt(s_['area'], 0)} |" for s_ in samples]
+        report += ["", noise.note, "", f"**Ngưỡng nhận:** Fmax ±{noise.fmax_mhz:.3f} MHz, điểm họ ±{noise.family_ns:.3f} ns"]
     return noise
 
 
-def summary(a, tm: Timer, mw: MemWatch, rtl, gate, prep, stages: dict) -> str:
+def summary(a, tm: Timer, mw: MemWatch, rtl, gate, prep, stages: dict, report: list | None = None) -> str:
     L = [f"# soc-fmax {a.run_name}", "",
          f"- Thời điểm: {datetime.now(timezone.utc).isoformat(timespec='seconds')}",
          f"- Config `{a.config}`, top `DigitalTop`, PDK sky130hd `tt_025C_1v80`, chu kỳ {a.period_ns} ns",
@@ -483,6 +492,7 @@ def summary(a, tm: Timer, mw: MemWatch, rtl, gate, prep, stages: dict) -> str:
         L += ["", "## Gate", "", f"ISA {sum(g.isa.values())}/{len(g.isa)} pass; hỏng sẵn: {gate['known_fail'] or '-'}", "",
               "| benchmark | mcycle | minstret |", "|---|---|---|"]
         L += [f"| {n} | {b['mcycle']} | {b['minstret']} |" for n, b in g.bench.items()]
+    L += report or []
     for stage, r in stages.items():
         L += ["", f"## {stage}", "",
               f"Fmax **{fmt(r.fmax_mhz, 2)} MHz**, slack không I/O {fmt(r.internal_slack_ns)} ns, WNS mọi đường "
@@ -517,6 +527,7 @@ def main():
     tm = Timer()
     rtl = gate = prep = None
     stages = {}
+    report = []   # mục func check / nhiễu cho summary.md
     try:
         res = ray.cluster_resources()
         need = ["chipyard", "verilator_run"] + (["asic"] if until >= STEPS.index("synth") else [])
@@ -528,13 +539,13 @@ def main():
         if until >= STEPS.index("gate"):
             gate = step_gate(a, d, art, rtl, mw, tm)
         if until >= STEPS.index("func"):
-            func_base = step_func(a, d, art, rtl, gate["elfs"], mw, tm)
+            func_base = step_func(a, d, art, rtl, gate["elfs"], mw, tm, report=report)
         if until >= STEPS.index("synth"):
             fakeram = load_fakeram(a.repo)
             prep, stages = run_orfs_point(a, d, rtl, fakeram, a.orfs_vars, "baseline",
                                           STEPS[until] if STEPS[until] in ORFS_STEPS else "place", mw, tm)
             if a.noise and "place" in stages and stages["place"].ok:
-                step_noise(a, out, rtl, fakeram, stages, mw, tm)
+                step_noise(a, out, rtl, fakeram, stages, mw, tm, report=report)
     except SystemExit as e:
         print(f"\nDỪNG: {e}", flush=True)
         raise
@@ -544,7 +555,7 @@ def main():
     finally:
         mw.stop()
         write(out / "memory.json", json.dumps({"peaks": mw.peaks(), "error": mw.error}, indent=2))
-        write(out / "summary.md", summary(a, tm, mw, rtl, gate, prep, stages))
+        write(out / "summary.md", summary(a, tm, mw, rtl, gate, prep, stages, report))
         print("\n## Thời gian và RAM đỉnh (docker stats, GB)", flush=True)
         for row in tm.rows:
             print(f"  {row['step']:10s} {row['minutes']:8.2f} phút  {'(cache)' if row['cached'] else '       '}  {row['note']}", flush=True)
