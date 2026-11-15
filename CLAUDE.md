@@ -224,7 +224,9 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   sky130hd 10 ns sau place **65,42 MHz** (WNS −5,285, đường găng FPU `dfma`), logic 2,23 mm², place 8,5 phút, RAM bước
   ORFS đỉnh 2,4 GB; chạy lại toàn bộ từ cache. Sửa khi chạy: clock phụ bất đồng bộ cho serial TL/JTAG, `tapcell.tcl`
   riêng (PDN-0179), slack vùng trên mọi endpoint (bỏ chân clock macro). Chi tiết ở mục Trạng thái kiểm chứng của README.
-  Kế tiếp: M2 (chờ duyệt danh sách file).
+  M2 (duyệt 15/11/2026 "như đề xuất"): `func_check.py` (vết commit `+verbose`, taint bộ đếm, dừng ở `tohost`),
+  `policy.py`, `loop.py` (agent bypass, patch áp lên `~/tools/chipyard` rồi hoàn nguyên), `soc_fmax.py --noise`; code
+  xong, mới kiểm bằng mock, chờ log `m2-noise` và `m2-loop`. Patch giả sinh lúc chạy (không có thư mục `bypass/`).
 - Claude không viết Chisel: mọi sửa thiết kế do agent trong loop làm (từ M3).
 
 ## Việc tiếp theo (gợi ý)

@@ -5,12 +5,16 @@ Mốc M1 (chưa có agent): baseline đo thật, từng bước, mỗi bước c
              danh sách macro SRAM (mems.conf), cây instance cấp 1-2 và vùng gán cho từng instance
   gate       riscv-tests rv64ui/um/ua/uf/ud-p-* + 8 benchmark trên Verilator (fan-out trên verilator_run);
              test ISA hỏng sẵn ở baseline được ghi ra (known_fail) và loại khỏi gate
+  func       (M2) vết commit của dhrystone/qsort/mm/spmv (func_check.py), lưu làm chuẩn; tự so baseline với
+             chính nó ở seed khác để kiểm func_check không báo nhầm
   synth      sinh fakeram + thư mục design ORFS, `make synth` (Yosys phân cấp, ABC ở chu kỳ mục tiêu) +
              OpenSTA với Liberty fakeram: bộ lọc rẻ
   floorplan  `make floorplan` (đặt macro, PDN): kiểm LEF/PDN của fakeram trước khi tốn giờ place
   place      `make place` (global place + repair_design + detailed place), RC ước lượng sau place:
              Fmax = 1000 / (chu kỳ - slack xấu nhất không kể I/O), slack theo vùng và theo họ endpoint
 --until <bước> dừng sau bước đó. Mỗi bước in thời gian và RAM đỉnh (docker stats + log của ORFS).
+--noise (M2): sau place, đo nhiễu bằng 4 lần chạy baseline nhiễu nhẹ (chạy lại y hệt, PLACE_DENSITY ±0,01,
+CORE_UTILIZATION +1), ghi noise.json (ngưỡng nhận của policy.py).
 
 Chạy từ thư mục này trên host (README.md):
   chia job submit --no-wait --submission-id m1-base --working-dir . -- python soc_fmax.py --run-name m1-base
@@ -34,7 +38,9 @@ from pathlib import Path
 
 import ray
 
+import func_check as F
 import orfs_nodes as O
+import policy as P
 import soc_nodes as S
 from memwatch import MemWatch
 from chia.base.ChiaFunction import get
@@ -45,8 +51,9 @@ from chia.trace.profiler import start_collector, stop_collector
 
 HERE = Path(__file__).resolve().parent
 EXP_YAML = HERE / "exp.yaml"
-STEPS = ("rtl", "gate", "synth", "floorplan", "place")
-CACHED_FNS = ("ChiselBuildNode.build", "extract_soc_rtl", "run_gate", "orfs_stage")
+STEPS = ("rtl", "gate", "func", "synth", "floorplan", "place")
+ORFS_STEPS = ("synth", "floorplan", "place")
+CACHED_FNS = ("ChiselBuildNode.build", "extract_soc_rtl", "run_gate", "run_func", "orfs_stage")
 REGION_COLS = ("tile", "L2", "bus", "uncore", "I/O")
 CSV_FIELDS = ["time", "run", "point", "stage", "period_ns", "fmax_mhz", "internal_slack_ns", "worst_slack_ns",
               "tns_ns", *[f"{r}_slack_ns" for r in REGION_COLS], "family_score", "std_area_um2", "macro_area_um2",
@@ -54,11 +61,20 @@ CSV_FIELDS = ["time", "run", "point", "stage", "period_ns", "fmax_mhz", "interna
 
 
 def parse_args():
-    home = Path.home()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_common_args(ap)
+    ap.add_argument("--until", choices=STEPS, default="place", help="dừng sau bước này (mặc định place)")
+    ap.add_argument("--noise", action="store_true", help="sau place: đo nhiễu (4 lần chạy baseline nhiễu nhẹ), ghi noise.json")
+    a = ap.parse_args()
+    finish_args(a, ap)
+    return a
+
+
+def add_common_args(ap):
+    """Tham số chung của soc_fmax.py và loop.py."""
+    home = Path.home()
     ap.add_argument("--run-name", required=True)
     ap.add_argument("--out-dir", default=str(home / "soc-fmax-runs"))
-    ap.add_argument("--until", choices=STEPS, default="place", help="dừng sau bước này (mặc định place)")
     ap.add_argument("--period-ns", type=float, default=10.0, help="chu kỳ ràng buộc (bậc hiện tại)")
     ap.add_argument("--chipyard", default=os.environ.get("CHIPYARD_FORK", str(home / "tools" / "chipyard")))
     ap.add_argument("--orfs-dir", default=os.environ.get("ORFS_DIR", str(home / "tools" / "OpenROAD-flow-scripts")))
@@ -79,7 +95,10 @@ def parse_args():
     ap.add_argument("--mem-limit-gb", type=float, default=20.0, help="cảnh báo khi RAM đỉnh vượt mức này")
     ap.add_argument("--cache-dir", default=str(home / "chia_cache" / "soc-fmax"))
     ap.add_argument("--cache-gb", type=float, default=8.0)
-    a = ap.parse_args()
+
+
+def finish_args(a, ap):
+    """Phần chung với loop.py: chuẩn hoá đường dẫn, biến ORFS."""
     a.chipyard = os.path.realpath(os.path.expanduser(a.chipyard))
     a.orfs_dir = os.path.realpath(os.path.expanduser(a.orfs_dir))
     a.repo = os.path.realpath(os.path.expanduser(a.repo))
@@ -89,7 +108,6 @@ def parse_args():
         if not k or not _:
             ap.error(f"--orfs-var cần KEY=VAL: {kv}")
         a.orfs_vars[k] = v
-    return a
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +186,9 @@ class Timer:
 # Các bước
 # ---------------------------------------------------------------------------
 
-def step_rtl(a, d: Path, mw: MemWatch, tm: Timer) -> tuple:
+def step_rtl(a, d: Path, mw: MemWatch, tm: Timer, baseline: bool = True) -> tuple:
+    """Build + tách DigitalTop. baseline=False (vòng của loop.py): cây được phép có thay đổi (patch của agent),
+    build lỗi thì trả art (success=False) thay vì dừng."""
     state = get(S.tree_state.chia_remote(a.chipyard))
     write(d / "tree_state.json", json.dumps(state, indent=2))
     dirty = S.dirty_paths(state)
@@ -178,7 +198,7 @@ def step_rtl(a, d: Path, mw: MemWatch, tm: Timer) -> tuple:
         print("  bỏ qua (không ảnh hưởng build Verilator): " + ", ".join(state["ignored_dirty"]), flush=True)
     if dirty:
         print("  cây có thay đổi:\n    " + "\n    ".join(dirty[:40]), flush=True)
-        if not a.allow_dirty:
+        if baseline and not a.allow_dirty:
             raise SystemExit("Baseline cần cây Chipyard sạch (trừ MinimalSoCConfig.scala). Xem lại hoặc --allow-dirty.")
     tag = f"build_{state['digest'][:16]}_{a.config}"
     hit = cache_has(tag)
@@ -194,6 +214,8 @@ def step_rtl(a, d: Path, mw: MemWatch, tm: Timer) -> tuple:
         cache_evict(tag)
         write(d / "build.log", f"returncode={art.returncode}\n[stdout]\n{(art.stdout or '')[-300000:]}\n"
                                f"[stderr]\n{(art.stderr or '')[-100000:]}")
+        if not baseline:
+            return state, art, None
         raise SystemExit(f"build lỗi (rc={art.returncode}), xem {d}/build.log:\n{build_errors(art)}")
     print(f"build ok: {len(art.generated_src_files)} file sinh ra, simulator "
           f"{len(art.simulator_binary_content) / 1e6:.1f} MB ({(time.time() - t0) / 60:.1f} phút)", flush=True)
@@ -225,15 +247,17 @@ def step_rtl(a, d: Path, mw: MemWatch, tm: Timer) -> tuple:
     return state, art, rtl
 
 
-def step_gate(a, d: Path, art, rtl, mw: MemWatch, tm: Timer) -> dict:
-    elfs = get(S.load_test_elfs.chia_remote())
-    tag = f"gate_{rtl.hash[:16]}_{S.GATE_VERSION}_s{a.repeat_seed}"
+def step_gate(a, d: Path, art, rtl, mw: MemWatch, tm: Timer, baseline: bool = True, elfs: dict | None = None) -> dict:
+    """baseline=False: không chạy lại seed thứ hai, không dừng khi hỏng (loop.py chấm bằng policy.gate_check)."""
+    elfs = elfs or get(S.load_test_elfs.chia_remote())
+    seed = a.repeat_seed if baseline else None
+    tag = f"gate_{rtl.hash[:16]}_{S.GATE_VERSION}_s{seed if seed is not None else 'x'}"
     hit = cache_has(tag)
     print(f"gate: {len(elfs['isa'])} test ISA, {len(elfs['bench'])} benchmark ({elfs['root']}); tag {tag} "
           f"({'cache HIT' if hit else 'chạy thật'})", flush=True)
     t0 = time.time()
     with mw.step("gate"):
-        g = get(S.run_gate.chia_remote(art, elfs, repeat_seed=a.repeat_seed, _chia_tag=tag))
+        g = get(S.run_gate.chia_remote(art, elfs, repeat_seed=seed, _chia_tag=tag))
     tm.add("gate", (time.time() - t0) / 60, hit, f"sim {g.seconds / 60:.1f} phút")
     write(d / "gate.json", as_json(g))
     rows = ["bench,passed,mcycle,minstret,sim_cycles,mcycle_seed2"]
@@ -249,6 +273,8 @@ def step_gate(a, d: Path, art, rtl, mw: MemWatch, tm: Timer) -> dict:
     for n, b in g.bench.items():
         print(f"  {n:10s} pass={b['passed']} mcycle={b['mcycle']} minstret={b['minstret']} "
               f"seed{a.repeat_seed}: mcycle={g.bench_repeat.get(n, {}).get('mcycle')}", flush=True)
+    if not baseline:
+        return {"gate": g, "known_fail": known, "elfs": elfs, "tag": tag}
     problems = [f"benchmark hỏng: {n}" for n, b in g.bench.items() if not b["passed"]]
     problems += [f"{n}: mcycle khác khi đổi seed" for n, b in g.bench.items()
                  if n in g.bench_repeat and g.bench_repeat[n]["mcycle"] != b["mcycle"]]
@@ -256,7 +282,42 @@ def step_gate(a, d: Path, art, rtl, mw: MemWatch, tm: Timer) -> dict:
         cache_evict(tag)
         write(d / "problems.txt", "\n".join(problems))
         raise SystemExit("baseline chưa dùng được:\n  " + "\n  ".join(problems) + f"\nxem {d}/sim_fail.log")
-    return {"gate": g, "known_fail": known}
+    return {"gate": g, "known_fail": known, "elfs": elfs, "tag": tag}
+
+
+def step_func(a, d: Path, art, rtl, elfs: dict, mw: MemWatch, tm: Timer, base: "F.FuncResult | None" = None,
+              base_hash: str = "") -> "F.FuncResult":
+    """base=None: ghi vết baseline (tag ftrace_), rồi tự so baseline ở seed khác (tag fcheck_, phải ĐẠT).
+    Có base: so ứng viên với vết baseline (tag fcheck_<ứng viên>_<baseline>)."""
+    if base is None:
+        tag = f"ftrace_{rtl.hash[:16]}_{F.FUNC_VERSION}"
+        hit = cache_has(tag)
+        print(f"func: ghi vết {', '.join(F.FUNC_BENCHES)}; tag {tag} ({'cache HIT' if hit else 'chạy thật'})", flush=True)
+        t0 = time.time()
+        with mw.step("func"):
+            fr = get(F.run_func.chia_remote(art, elfs, None, None, _chia_tag=tag))
+        tm.add("func vết", (time.time() - t0) / 60, hit, f"sim {fr.seconds / 60:.1f} phút")
+        for line in F.summary_lines(fr):
+            print(line, flush=True)
+        write(d / "func_base.json", as_json({b: dataclasses.replace(r, blob=b"") for b, r in fr.benches.items()}))
+        if not fr.ok:
+            cache_evict(tag)
+            raise SystemExit("func: không ghi được vết baseline (xem func_base.json: bad_samples, log_tail)")
+        base, base_hash = fr, rtl.hash
+    tag = f"fcheck_{rtl.hash[:16]}_{base_hash[:16]}_{F.FUNC_VERSION}_s{a.repeat_seed}"
+    hit = cache_has(tag)
+    print(f"func: so với vết baseline (seed {a.repeat_seed}); tag {tag} ({'cache HIT' if hit else 'chạy thật'})", flush=True)
+    t0 = time.time()
+    with mw.step("func"):
+        fc = get(F.run_func.chia_remote(art, elfs, base, a.repeat_seed, _chia_tag=tag))
+    tm.add("func so", (time.time() - t0) / 60, hit, f"sim {fc.seconds / 60:.1f} phút")
+    for line in F.summary_lines(fc):
+        print(line, flush=True)
+    write(d / "func_check.json", as_json(fc))
+    if not fc.ok and base_hash == rtl.hash:
+        cache_evict(tag)
+        raise SystemExit("func: baseline so với chính nó KHÔNG đạt: func_check báo nhầm, cần sửa trước khi dùng")
+    return base if base_hash == rtl.hash and fc.ok else fc
 
 
 def stage_row(a, point: str, r: "O.StageResult", minutes: float, peak, cached: bool) -> dict:
@@ -296,7 +357,8 @@ def print_stage(r: "O.StageResult"):
         print("  LỖI/CẢNH BÁO: " + r.error[:3000], flush=True)
 
 
-def step_orfs(a, d: Path, stage: str, rtl, fakeram, mw: MemWatch, tm: Timer, prep: dict) -> "O.StageResult":
+def step_orfs(a, d: Path, stage: str, rtl, fakeram, mw: MemWatch, tm: Timer, prep: dict, point: str = "baseline",
+              fatal: bool = True) -> "O.StageResult":
     variant = prep["variant"]
     tag = f"orfs_{variant}_{O.REPORT_VERSION}_{stage}"
     hit = cache_has(tag)
@@ -308,7 +370,7 @@ def step_orfs(a, d: Path, stage: str, rtl, fakeram, mw: MemWatch, tm: Timer, pre
         r = get(O.orfs_stage.chia_remote(prep["config_mk"], variant, stage, a.period_ns, timeout, _chia_tag=tag))
     minutes = (time.time() - t0) / 60
     peak = mw.peaks().get(stage, {}).get("_tổng")
-    tm.add(stage, minutes, hit, f"make {r.seconds / 60:.1f} phút")
+    tm.add(stage if point == "baseline" else f"{stage} {point}", minutes, hit, f"make {r.seconds / 60:.1f} phút")
     write(d / f"orfs_{stage}.json", as_json(dataclasses.replace(r, endpoints="", paths="", report_log="")))
     write(d / f"families_{stage}.txt", r.families + "\n")
     write(d / f"endpoints_{stage}.txt", r.endpoints + "\n")
@@ -319,12 +381,83 @@ def step_orfs(a, d: Path, stage: str, rtl, fakeram, mw: MemWatch, tm: Timer, pre
     write(d / f"noclock_{stage}.txt", getattr(r, "noclock", "") + "\n")
     write(d / f"make_{stage}.tail", r.make_tail + "\n")
     print_stage(r)
-    append_csv(Path(a.out) / "results.csv", stage_row(a, "baseline", r, minutes, peak, hit))
+    append_csv(Path(a.out) / "results.csv", stage_row(a, point, r, minutes, peak, hit))
     if not r.ok:
         cache_evict(tag)
+        if not fatal:
+            return r
         raise SystemExit(f"{stage} lỗi: {r.error.splitlines()[0] if r.error else ''}. Log ORFS: "
                          f"{a.orfs_dir}/{O.work_dirs_rel(variant)['logs']}/")
     return r
+
+
+def run_orfs_point(a, d: Path, rtl, fakeram, orfs_vars: dict, point: str, until: str, mw: MemWatch, tm: Timer,
+                   fatal: bool = True, stop_after_synth=None) -> tuple[dict, dict]:
+    """Chuẩn bị design ORFS cho (RTL, chu kỳ, biến ORFS) rồi chạy synth → ... → `until`.
+    stop_after_synth(StageResult) -> str: trả lý do khác rỗng thì dừng sau synth (bộ lọc mức 1 của loop.py).
+    Trả (prep, {bước: StageResult}); bước lỗi (fatal=False) là bước cuối trong dict."""
+    prm = fakeram.Params(access_ns=a.fakeram_access_ns, um2_per_bit=a.fakeram_um2_per_bit)
+    fr_tag = f"{fakeram.VERSION}a{a.fakeram_access_ns:g}u{a.fakeram_um2_per_bit:g}"
+    variant = O.variant_name(rtl.hash, a.period_ns, fr_tag, orfs_vars)
+    prep = O.prepare_design(a.orfs_dir, rtl, a.period_ns, fakeram, prm, variant, orfs_vars)
+    write(d / "prepare.json", json.dumps(prep, indent=2))
+    print(f"\ndesign ORFS: {prep['design_dir']} (đổi: {prep['changed_files'] or 'không'}), cổng {prep['ports']}, "
+          f"clock {prep['clock_ports']}, clock phụ (bất đồng bộ) {prep.get('aux_clock_ports')}, {prep['sv_casts_rewritten']} cast viết lại", flush=True)
+    if prep["fakeram_port_issues"]:
+        print("  CẢNH BÁO chân fakeram khác Verilog:\n    " + "\n    ".join(prep["fakeram_port_issues"]), flush=True)
+    if point == "baseline":
+        for m in prep["fakeram"]["macros"]:
+            print(f"  fakeram {m['name']:36s} {m['depth']}x{m['width']} {','.join(m['ports'])} "
+                  f"{m['w_um']:.0f}x{m['h_um']:.0f} um", flush=True)
+    stages = {}
+    for stage in ORFS_STEPS[:ORFS_STEPS.index(until) + 1]:
+        r = stages[stage] = step_orfs(a, d, stage, rtl, fakeram, mw, tm, prep, point=point, fatal=fatal)
+        if not r.ok:
+            break
+        pk = mw.peaks().get(stage, {}).get("_tổng") or 0
+        orfs_pk = max((s["peak_mb"] for s in r.steps), default=0) / 1024
+        if max(pk, orfs_pk) > a.mem_limit_gb:
+            msg = (f"RAM đỉnh {max(pk, orfs_pk):.1f} GB > {a.mem_limit_gb} GB ở {stage}: dừng, cần giảm "
+                   "(PLACE_DENSITY, die size, place theo vùng)")
+            print("CẢNH BÁO: " + msg, flush=True)
+            raise SystemExit(msg)
+        if stage == "synth" and stop_after_synth:
+            why = stop_after_synth(r)
+            if why:
+                print(f"  bộ lọc synth: dừng trước floorplan/place: {why}", flush=True)
+                break
+    return prep, stages
+
+
+def noise_variants(orfs_vars: dict) -> list[tuple[str, dict]]:
+    """4 lần chạy baseline nhiễu nhẹ: y hệt (biến giả chỉ đổi tên variant), PLACE_DENSITY ±0,01, CORE_UTILIZATION +1."""
+    dens = float(orfs_vars["PLACE_DENSITY"])
+    util = float(orfs_vars["CORE_UTILIZATION"])
+    return [("rerun", {**orfs_vars, "SOCFMAX_NOISE": "rerun"}),
+            ("density-", {**orfs_vars, "PLACE_DENSITY": f"{dens - 0.01:.2f}"}),
+            ("density+", {**orfs_vars, "PLACE_DENSITY": f"{dens + 0.01:.2f}"}),
+            ("util+1", {**orfs_vars, "CORE_UTILIZATION": f"{util + 1:g}"})]
+
+
+def step_noise(a, out: Path, rtl, fakeram, base_stages: dict, mw: MemWatch, tm: Timer) -> "P.Noise":
+    samples = [{"name": "baseline", "fmax": base_stages["place"].fmax_mhz, "family": base_stages["place"].family_score,
+                "synth_fmax": base_stages["synth"].fmax_mhz, "area": base_stages["place"].std_area_um2}]
+    print("\n== nhiễu: 4 lần chạy baseline nhiễu nhẹ (synth → place mỗi lần)", flush=True)
+    for name, ov in noise_variants(a.orfs_vars):
+        print(f"\n-- nhiễu {name}: {', '.join(f'{k}={v}' for k, v in ov.items() if a.orfs_vars.get(k) != v)}", flush=True)
+        _prep, st = run_orfs_point(a, out / "runs" / f"noise_{name}", rtl, fakeram, ov, f"noise:{name}", "place", mw, tm)
+        samples.append({"name": name, "fmax": st["place"].fmax_mhz, "family": st["place"].family_score,
+                        "synth_fmax": st["synth"].fmax_mhz, "area": st["place"].std_area_um2,
+                        "variant": st["place"].variant})
+    noise = P.noise_from(samples)
+    write(out / "noise.json", json.dumps(dataclasses.asdict(noise), indent=2))
+    print("\n== nhiễu (sau place):", flush=True)
+    for s_ in samples:
+        print(f"  {s_['name']:9s} Fmax {fmt(s_['fmax'], 3)} MHz  điểm họ {fmt(s_['family'])}  synth {fmt(s_['synth_fmax'], 2)} MHz"
+              f"  logic {fmt(s_['area'], 0)} um2", flush=True)
+    print(f"  {noise.note}", flush=True)
+    print(f"  NGƯỠNG NHẬN: Fmax ±{noise.fmax_mhz:.3f} MHz, điểm họ ±{noise.family_ns:.3f} ns -> {out}/noise.json", flush=True)
+    return noise
 
 
 def summary(a, tm: Timer, mw: MemWatch, rtl, gate, prep, stages: dict) -> str:
@@ -342,7 +475,7 @@ def summary(a, tm: Timer, mw: MemWatch, rtl, gate, prep, stages: dict) -> str:
     L += ["", "## Thời gian và RAM đỉnh", "", "| bước | phút | cache | RAM đỉnh (GB, tổng container) | ghi chú |", "|---|---|---|---|---|"]
     peaks = mw.peaks()
     for row in tm.rows:
-        key = {"tách RTL": "build"}.get(row["step"], row["step"])
+        key = {"tách RTL": "build", "func vết": "func", "func so": "func"}.get(row["step"], row["step"])
         L.append(f"| {row['step']} | {row['minutes']} | {'có' if row['cached'] else ''} | "
                  f"{fmt(peaks.get(key, {}).get('_tổng'), 2) if key == row['step'] else ''} | {row['note']} |")
     if gate:
@@ -394,28 +527,14 @@ def main():
         _state, art, rtl = step_rtl(a, d, mw, tm)
         if until >= STEPS.index("gate"):
             gate = step_gate(a, d, art, rtl, mw, tm)
+        if until >= STEPS.index("func"):
+            func_base = step_func(a, d, art, rtl, gate["elfs"], mw, tm)
         if until >= STEPS.index("synth"):
             fakeram = load_fakeram(a.repo)
-            prm = fakeram.Params(access_ns=a.fakeram_access_ns, um2_per_bit=a.fakeram_um2_per_bit)
-            fr_tag = f"{fakeram.VERSION}a{a.fakeram_access_ns:g}u{a.fakeram_um2_per_bit:g}"
-            variant = O.variant_name(rtl.hash, a.period_ns, fr_tag, a.orfs_vars)
-            prep = O.prepare_design(a.orfs_dir, rtl, a.period_ns, fakeram, prm, variant, a.orfs_vars)
-            write(d / "prepare.json", json.dumps(prep, indent=2))
-            print(f"\ndesign ORFS: {prep['design_dir']} (đổi: {prep['changed_files'] or 'không'}), cổng {prep['ports']}, "
-                  f"clock {prep['clock_ports']}, clock phụ (bất đồng bộ) {prep.get('aux_clock_ports')}, {prep['sv_casts_rewritten']} cast viết lại", flush=True)
-            if prep["fakeram_port_issues"]:
-                print("  CẢNH BÁO chân fakeram khác Verilog:\n    " + "\n    ".join(prep["fakeram_port_issues"]), flush=True)
-            for m in prep["fakeram"]["macros"]:
-                print(f"  fakeram {m['name']:36s} {m['depth']}x{m['width']} {','.join(m['ports'])} "
-                      f"{m['w_um']:.0f}x{m['h_um']:.0f} um", flush=True)
-            for stage in STEPS[STEPS.index("synth"):until + 1]:
-                stages[stage] = step_orfs(a, d, stage, rtl, fakeram, mw, tm, prep)
-                pk = mw.peaks().get(stage, {}).get("_tổng") or 0
-                orfs_pk = max((s["peak_mb"] for s in stages[stage].steps), default=0) / 1024
-                if max(pk, orfs_pk) > a.mem_limit_gb:
-                    print(f"CẢNH BÁO: RAM đỉnh {max(pk, orfs_pk):.1f} GB > {a.mem_limit_gb} GB ở {stage}: dừng, cần giảm "
-                          "(PLACE_DENSITY, die size, place theo vùng)", flush=True)
-                    break
+            prep, stages = run_orfs_point(a, d, rtl, fakeram, a.orfs_vars, "baseline",
+                                          STEPS[until] if STEPS[until] in ORFS_STEPS else "place", mw, tm)
+            if a.noise and "place" in stages and stages["place"].ok:
+                step_noise(a, out, rtl, fakeram, stages, mw, tm)
     except SystemExit as e:
         print(f"\nDỪNG: {e}", flush=True)
         raise

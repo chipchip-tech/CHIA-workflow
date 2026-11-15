@@ -3,17 +3,25 @@
 #   ChiselBuildNode.build -> build_<digest cây Chipyard>_<config>
 #   extract_soc_rtl       -> rtl_<digest>_<config>_x1
 #   run_gate              -> gate_<rtl hash>_<GATE_VERSION>_s<seed>
-#   orfs_stage            -> orfs_<variant>_<bước>   (variant = rtl hash + chu kỳ + FLOW_VERSION + fakeram + biến ORFS)
+#   run_func              -> ftrace_<rtl hash>_<FUNC_VERSION> (vết baseline), fcheck_<rtl>_<rtl baseline>_<v>_s<seed>
+#   orfs_stage            -> orfs_<variant>_<REPORT_VERSION>_<bước>   (variant = rtl hash + chu kỳ + FLOW_VERSION + fakeram + biến ORFS)
+# Agent của loop.py (agent_propose, agent_fix_build, agent_debug) không cache; M2 bypass khi tag là
+# agent_bypass_<run>_r<N>_... (loop.py --bypass), provider loop.bypass_agent_provider trả câu trả lời dựng sẵn.
 # Lần đầu ghi kết quả thật, các lần sau đọc lại (bypass chỉ khi tag thật sự có trong cache, xem
 # soc_nodes.cache_hit_cond). Kết quả hỏng bị xoá khỏi cache (soc_fmax.cache_evict).
 cache:
   ChiselBuildNode.build: {cache: true, tags: ["build_.*"]}
   extract_soc_rtl:       {cache: true, tags: ["rtl_.*"]}
   run_gate:              {cache: true, tags: ["gate_.*"]}
+  run_func:              {cache: true, tags: ["ftrace_.*", "fcheck_.*"]}
   orfs_stage:            {cache: true, tags: ["orfs_.*"]}
 
 bypass:
   ChiselBuildNode.build: {bypass: true, tags: ["build_.*"]}
   extract_soc_rtl:       {bypass: true, tags: ["rtl_.*"]}
   run_gate:              {bypass: true, tags: ["gate_.*"]}
+  run_func:              {bypass: true, tags: ["ftrace_.*", "fcheck_.*"]}
   orfs_stage:            {bypass: true, tags: ["orfs_.*"]}
+  agent_propose:         {bypass: true, tags: ["agent_bypass_.*"]}
+  agent_fix_build:       {bypass: true, tags: ["agent_bypass_.*"]}
+  agent_debug:           {bypass: true, tags: ["agent_bypass_.*"]}

@@ -18,7 +18,7 @@ và GDS của mỗi bậc đã đạt.
 | | |
 |---|---|
 | Pha đi qua | **Simulate** (bắt buộc) → **ASIC**. Không làm FPGA. |
-| Pha hiện tại | M1 xong (baseline đo thật sau place 10 ns: **65,42 MHz**). Kế tiếp M2 |
+| Pha hiện tại | M1 xong (baseline đo thật sau place 10 ns: **65,42 MHz**). M2 code xong, chờ chạy thật |
 | PDK / corner | sky130hd (`sky130_fd_sc_hd`), `tt_025C_1v80` |
 | SRAM | fakeram (`scripts/fakeram_sky130.py`, `docs/fakeram-sky130.md`): access 1,5 ns, 3 µm²/bit, timing giả định. OpenRAM thật chỉ ở M6 |
 | Bậc chu kỳ | 10 → 9 → 8 → 7 → 6 → 5 ns. Bản tốt nhất có WNS ≥ 0 sau place ở bậc hiện tại → CTS + route + GDS cho bản đó → bậc kế |
@@ -61,6 +61,32 @@ vvadd, mm, spmv), `minstret` của mọi benchmark bằng baseline; thêm `func_
 - Giới hạn thời gian: build 3 giờ, synth 3 giờ, floorplan 2 giờ, place 3 giờ (`--*-timeout`); quá giờ thì giết cả nhóm
   tiến trình. Container asic giới hạn RAM bằng `ASIC_MEM` (dùng `20g`).
 
+## func_check và luật nhận (M2)
+
+- `func_check.py` chạy dhrystone, qsort, mm, spmv với `+verbose` và đọc vết commit của Rocket. Mỗi dòng in khi một lệnh
+  rời pipeline: `C0: <cycle> [valid] pc=[..] W[rd=..][wen] R[..] R[..] inst=[..]`. Vết ứng viên được so với vết
+  baseline từng lệnh một: `pc`, `inst`, `valid` phải giống hệt, và giá trị ghi phải giống khi cả hai bên có `wen=1`.
+  Không so cycle.
+- Những phần phụ thuộc thời gian thì không so:
+  - lệnh trước `0x80000000`, tức bootrom chờ nạp ELF;
+  - giá trị đọc từ bộ đếm (`mcycle`, `minstret`, `cycle`, `time`, `hpmcounter`). Giá trị này "nhiễm" (taint) và
+    taint lan qua thanh ghi và bộ nhớ (địa chỉ = giá trị nguồn + imm). Gặp nhánh hoặc `jalr` có nguồn nhiễm thì
+    dừng so;
+  - từ lần ghi đầu tiên vào `tohost` (symbol trong ELF, tức printf hoặc exit qua HTIF) thì dừng.
+- Vết baseline được nén và lưu trong cache (tag `ftrace_`). Ứng viên được so ngay trên worker verilator (tag
+  `fcheck_`), không ghi vết ra đĩa. Bước `func` của baseline tự so baseline với chính nó ở seed 7: kết quả phải
+  **ĐẠT**, nếu không thì `func_check` đang báo nhầm.
+- `policy.py` nhận một vòng khi đủ cả các điều kiện sau:
+  - gate pass (trừ test hỏng sẵn) và `minstret` bằng baseline;
+  - `func_check` đạt;
+  - chi phí cycle ≤ 1,03 và diện tích logic ≤ 1,15 × baseline;
+  - so với **bản tốt nhất hiện tại**: Fmax không giảm quá ngưỡng nhiễu, **và** Fmax hoặc điểm họ tăng hơn ngưỡng
+    nhiễu.
+- Bộ lọc synth: bỏ floorplan và place khi Fmax synth kém bản tốt nhất quá 5 % và điểm họ synth không tốt hơn.
+- Ngưỡng nhiễu lấy từ `soc_fmax.py --noise`. Baseline chạy lại 4 lần: một lần y hệt (chỉ đổi tên variant),
+  `PLACE_DENSITY` ±0,01 và `CORE_UTILIZATION` +1, mỗi lần đi từ synth tới place.
+  Ngưỡng = max(1,5 × khoảng chênh, 0,3 MHz); với điểm họ thì tối thiểu là 0,2 ns.
+
 ## File
 
 | File | Nội dung |
@@ -70,8 +96,11 @@ vvadd, mm, spmv), `minstret` của mọi benchmark bằng baseline; thêm `func_
 | `orfs_nodes.py` | chuẩn bị design ORFS (host), `orfs_stage` trên khối asic (make + báo cáo, có timeout), đọc log `Elapsed`/`Peak memory` |
 | `orfs/report.tcl` | báo cáo trên kết quả một bước: WNS/TNS, 5000 đường xấu nhất (mỗi endpoint một đường), slack theo instance cấp 1 trên mọi endpoint, đếm thanh ghi theo clock, nhóm thanh ghi không clock, diện tích logic/macro |
 | `orfs/diag_floorplan.tcl` | chẩn đoán tay: macro (bbox, halo), blockage, và inst/pin/row trong một hộp (`SOCFMAX_BOX`) |
+| `func_check.py` | vết commit (`+verbose`) của 4 benchmark: ghi vết baseline, so ứng viên (taint bộ đếm, dừng ở `tohost`) |
+| `policy.py` | luật nhận/loại, bộ lọc synth, ngưỡng nhiễu (hàm thuần) |
+| `loop.py` | đợt N vòng: agent đề xuất patch → áp lên `~/tools/chipyard` → build → gate + func → synth (lọc) → place → nhận/loại → hoàn nguyên cây; `history.md`, `history.json`, `best.patch`, `results.csv`. M2: agent bị bypass (`--bypass empty,comment,broken,file:<patch>`) |
 | `memwatch.py` | RAM đỉnh từng container theo bước (`docker stats` mỗi 5 s, trên host) |
-| `exp.yaml` | cache/bypass: `ChiselBuildNode.build`, `extract_soc_rtl`, `run_gate`, `orfs_stage` |
+| `exp.yaml` | cache/bypass: `ChiselBuildNode.build`, `extract_soc_rtl`, `run_gate`, `run_func`, `orfs_stage`; bypass agent (`agent_bypass_*`) |
 
 ORFS: design của mỗi variant ở `~/tools/OpenROAD-flow-scripts/flow/designs/sky130hd/soc_fmax/<variant>/`, kết quả ở
 `flow/{results,logs,reports,objects}/sky130hd/soc_fmax/<variant>/`. Variant = `<RTL hash 12>_p<chu kỳ>_<FLOW_VERSION>_<fakeram>`.
@@ -119,6 +148,30 @@ Gửi lại: toàn bộ log của job, `~/soc-fmax-runs/m1/summary.md`, `results
 Tuỳ chọn hay dùng: `--orfs-var PLACE_DENSITY=0.5` (hoặc `CORE_UTILIZATION=35`; tạo variant mới), `--make-jobs 16`,
 `--fakeram-access-ns 1.5`, `--allow-dirty` (khi cây Chipyard có sửa tay), `--clean-build`.
 
+## Chạy M2
+
+Bước 1 tính vết baseline, rồi tự so baseline với chính nó ở seed khác (phải **ĐẠT**). Sau đó đo nhiễu bằng 4 lần
+chạy baseline từ synth tới place, mỗi lần khoảng 14 phút, tổng khoảng 1 giờ. Build, gate và ORFS của baseline đọc từ
+cache.
+
+```bash
+cd ~/CHIA-workflow && git pull && cd projects/soc-fmax && chia job submit --no-wait --submission-id m2-noise --working-dir . -- python soc_fmax.py --run-name m2-noise --noise
+```
+
+Bước 2 chạy 3 vòng loop với agent bị bypass:
+- vòng 1: patch rỗng, hỏi lại 2 lần rồi ghi `rỗng`;
+- vòng 2: chú thích cuối `RocketCore.scala`, build thật nhưng RTL hash không đổi, ra `RTL trùng`;
+- vòng 3: dòng Scala sai, ra `build lỗi`.
+
+Sau mỗi vòng cây Chipyard phải về đúng digest baseline.
+
+```bash
+cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-id m2-loop --working-dir . -- python loop.py --run-name m2-loop --noise-json ~/soc-fmax-runs/m2-noise/noise.json --rounds 3 --bypass empty,comment,broken
+```
+
+Chạy tiếp một đợt cũ: `--history-from ~/soc-fmax-runs/<run>`. Cây Chipyard bị sửa trong lúc loop chạy, nên đừng build
+tay trong `~/tools/chipyard` khi đang có job.
+
 ## Trạng thái kiểm chứng
 
 - **Mới kiểm bằng mock (15/11/2026, sandbox):** `py_compile`; tách RTL `DigitalTop` (lọc macro theo `mems.conf`, thay
@@ -165,12 +218,30 @@ Tuỳ chọn hay dùng: `--orfs-var PLACE_DENSITY=0.5` (hoặc `CORE_UTILIZATION
   - Chưa giải thích: số thanh ghi giảm từ 41 874 (synth) xuống 38 125 (floorplan), riêng miền aux từ 2115 xuống 1146.
     Có thể do floorplan của ORFS xoá logic chết; chưa kiểm.
 
+- **M2 mới kiểm bằng mock (15/11/2026, sandbox; Ray 2.54 + chialoops cục bộ, node giả, cây git giả có submodule):**
+  - `func_check` trên vết giả lập:
+    - đạt khi chỉ cycle hoặc giá trị bộ đếm khác;
+    - hỏng khi sai giá trị ghi, sai lệnh, thiếu lệnh;
+    - dừng đúng ở `tohost` và ở nhánh nhiễm;
+    - đọc được symbol `tohost` từ ELF.
+  - `soc_fmax.py --noise`: 4 variant nhiễu, `noise.json`.
+  - `loop.py` với 6 vòng, cho đủ các kết quả `RTL trùng`, `build lỗi`, `rỗng`, `gate`, `func`, `nhận`.
+  - `--history-from` đi tiếp đúng: vòng sau thấy `best.patch`, RTL trùng vòng 6, patch xung đột ra `patch lỗi`.
+  - Cây về sạch sau mọi vòng.
+- **Chưa chạy thật:**
+  - định dạng vết `+verbose` của Rocket trong Chipyard 1.15.0 (đã đối chiếu `RocketCore.scala` bản master);
+  - thời gian sim có `+verbose`;
+  - `git apply` trên submodule thật;
+  - build sau patch (sbt biên dịch lại).
+- Đường nhận vòng thật (gate/func/ORFS của ứng viên có RTL khác) chỉ có ở mock: session không viết thay đổi thiết
+  kế, nên lần chạy thật đầu tiên của đường này là ở M3/M4.
+
 ## Mốc
 
 | Mốc | Nội dung | Trạng thái |
 |---|---|---|
 | M1 | build → gate → fakeram → ORFS place 10 ns → Fmax/WNS, vùng, diện tích, thời gian/RAM, `results.csv`; lần hai từ cache | **xong 15/11/2026** (chạy thật, kể cả kiểm cache) |
-| M2 | `func_check.py` vào gate, đo nhiễu place, chốt ngưỡng nhận, orchestration với bypass LLM | chưa |
+| M2 | `func_check.py` vào gate, đo nhiễu place, chốt ngưỡng nhận, orchestration với bypass LLM | code xong, mới kiểm bằng mock |
 | M3 | pha sim có agent (tầng pipeline, chỉ đo cycle) → `candidates.json` | chưa |
 | M4 | pha asic có agent, 5 vòng, nhận/loại theo place, tự xuống bậc | chưa |
 | M5 | CTS + route + GDS mỗi bậc đạt, timing sau route | chưa |
