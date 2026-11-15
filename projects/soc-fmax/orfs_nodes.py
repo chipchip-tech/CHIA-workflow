@@ -157,6 +157,7 @@ def prepare_design(orfs_dir: str, rtl: "S.SocRTL", period_ns: float, fakeram, fr
     if _put(d / "constraint.sdc", sdc_text(period_ns, ports)):
         changed.append("constraint.sdc")
     _put(d / "report.tcl", (HERE / "orfs" / "report.tcl").read_text())
+    _put(d / "diag_floorplan.tcl", (HERE / "orfs" / "diag_floorplan.tcl").read_text())
     lines = [f"# soc-fmax {FLOW_VERSION}: sinh bởi orfs_nodes.py, variant {variant}",
              f"export PLATFORM = {PLATFORM}", "export DESIGN_NAME = DigitalTop", f"export DESIGN_NICKNAME = {NICK}",
              f"export VERILOG_FILES = {cd}/soc.sv", f"export SDC_FILE = {cd}/constraint.sdc",
