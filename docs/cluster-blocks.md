@@ -78,11 +78,15 @@ chạy song song trong container verilator (mặc định 1). `ASIC_MEM=20g` đ�
 mặc định (`~/tools/chipyard`) thì đặt `CHIPYARD_FORK=/đường/dẫn/tuyệt/đối`; ORFS khác chỗ thì `ORFS_DIR`. Script kiểm
 trước: Chipyard có `env.sh`, Vivado có `settings64.sh`, image `chia-orfs` đã build, Claude đã đăng nhập.
 
-Tắt cluster:
+Tắt cluster (từ `~/CHIA-workflow`):
 
 ```bash
-chia down cluster.gen.yaml -y
+python scripts/chia-up-blocks.py --down
 ```
+
+Lệnh này đặt `THIS_MACHINE` như lúc bật rồi gọi `chia down cluster.gen.yaml -y`. Gọi thẳng `chia down` khi shell không có
+`THIS_MACHINE` thì `head_ip` rỗng: CHIA in `Head:` trống, mọi `scoped ray stop` báo `is psutil available ...` và không
+container nào bị gỡ (gặp 15/11/2026).
 
 `cluster_name` là `default` như các config khác: mỗi lúc chỉ chạy một cluster.
 Tên container thực tế có hậu tố `-0` (ví dụ `chia-chipyard-dingus-0`).
@@ -200,6 +204,7 @@ Các dòng ghi *(1.10)* gặp với fork RISCVTutorial (Chipyard 1.10.0, đã g�
 | `chia up --asic`: `Version mismatch ... Python: 3.10.22` | Ray so cả bản vá Python với head (3.10.19) | Dockerfile ghim `python=3.10.19` (đã sửa) |
 | Khối vivado in `Vivado v2024.2` dù host là 2025.1 | Image `chia-chisel-build` có sẵn `/usr/local/bin/vivado` | Đặt `Vivado/bin` của host lên đầu PATH (đã sửa) |
 | `settings64.sh: ... /var/home/dingus/tools/Xilinx/.../.settings64-Vitis_for_HLS.sh: No such file` | `settings64.sh` ghi cứng đường dẫn thật lúc cài; Xilinx bị mount ở `/tools/Xilinx` | Mount Xilinx đúng đường dẫn thật (`XILINX_DIR`, qua `realpath`) (đã sửa) |
+| `chia down`: `Head:` trống, mọi khối báo `scoped ray stop ... could not run (is psutil available ...)`, không container nào bị gỡ | shell không có `THIS_MACHINE`, `head_ip` của `cluster.gen.yaml` thành rỗng | `python scripts/chia-up-blocks.py --down` (tự dò IP), hoặc `THIS_MACHINE=<IP> chia down cluster.gen.yaml -y` |
 | `chia down`: `scoped ray stop in 'chia-asic-...' could not run (is psutil available ...)`, container asic không bị xoá | CHIA dừng Ray bằng `python3` của image (`/opt/orfs-python`, 3.14), không có `psutil` | Dockerfile cài `psutil` vào cả hai Python (đã sửa, kiểm chứng 09/11/2026) |
 | `docker: command not found` | Gõ `docker` khi đang ở trong container | `exit` ra host |
 
