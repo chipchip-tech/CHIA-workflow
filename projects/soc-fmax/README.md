@@ -185,11 +185,11 @@ file chưa track (`MinimalSoCConfig.scala`). Build lỗi thì agent sửa tối 
 Khối claude cần mount Chipyard chỉ đọc (template trên `setup` từ 15/11/2026), nên phải dựng lại cluster:
 
 ```bash
-chia down
+cd ~/CHIA-workflow && git pull && python scripts/chia-up-blocks.py --down
 ```
 
 ```bash
-cd ~/CHIA-workflow && git pull && ASIC_MEM=20g python scripts/chia-up-blocks.py --asic --verilator-slots 4
+ASIC_MEM=20g python scripts/chia-up-blocks.py --asic --verilator-slots 4
 ```
 
 ```bash
