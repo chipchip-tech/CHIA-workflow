@@ -298,7 +298,7 @@ def print_stage(r: "O.StageResult"):
 
 def step_orfs(a, d: Path, stage: str, rtl, fakeram, mw: MemWatch, tm: Timer, prep: dict) -> "O.StageResult":
     variant = prep["variant"]
-    tag = f"orfs_{variant}_{stage}"
+    tag = f"orfs_{variant}_{O.REPORT_VERSION}_{stage}"
     hit = cache_has(tag)
     timeout = {"synth": a.synth_timeout, "floorplan": a.floorplan_timeout, "place": a.place_timeout}[stage]
     print(f"\n== {stage} @ {a.period_ns} ns, variant {variant} ({'cache HIT' if hit else f'chạy thật, giới hạn {timeout / 60:.0f} phút'})",
@@ -314,6 +314,7 @@ def step_orfs(a, d: Path, stage: str, rtl, fakeram, mw: MemWatch, tm: Timer, pre
     write(d / f"endpoints_{stage}.txt", r.endpoints + "\n")
     write(d / f"paths_{stage}.rpt", r.paths + "\n")
     write(d / f"report_{stage}.log", r.report_log + "\n")
+    write(d / f"top_slack_{stage}.txt", getattr(r, "top_slack", "") + "\n")
     write(d / f"noclock_{stage}.txt", getattr(r, "noclock", "") + "\n")
     write(d / f"make_{stage}.tail", r.make_tail + "\n")
     print_stage(r)

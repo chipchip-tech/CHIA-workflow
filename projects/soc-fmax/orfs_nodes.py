@@ -26,7 +26,8 @@ from chia.base.ChiaFunction import ChiaFunction
 
 import soc_nodes as S
 
-FLOW_VERSION = "o4"                       # đổi khi đổi config.mk/SDC/script báo cáo
+FLOW_VERSION = "o4"                       # đổi khi đổi config.mk/SDC/tapcell (chạy lại ORFS từ synth)
+REPORT_VERSION = "r2"                     # đổi khi chỉ đổi report.tcl/cách đọc (make không chạy lại, chỉ báo cáo)
 PLATFORM = "sky130hd"
 NICK = "soc_fmax"
 C_ORFS = "/OpenROAD-flow-scripts"          # đường dẫn ORFS trong container asic
@@ -227,6 +228,7 @@ class StageResult:
     n_macro: int | None = None
     core_area_um2: float | None = None
     counts: dict = dataclasses.field(default_factory=dict)  # async pins, sync cells, unclocked...
+    top_slack: str = ""  # "<instance cấp 1> <vùng> <slack> <số endpoint> <số âm>" mỗi dòng (mọi endpoint)
     noclock: str = ""   # "<nhóm instance> <số thanh ghi> <net clock mẫu>" mỗi dòng, xếp theo số giảm dần
     report_log: str = ""
 
@@ -300,6 +302,29 @@ def analyze_report(log: str, period_ns: float, r: StageResult) -> StageResult:
         r.internal_slack_ns, r.crit_start, r.crit_end = worst_int
         if period_ns - worst_int[0] > 0:
             r.fmax_mhz = 1000.0 / (period_ns - worst_int[0])
+    # Vùng theo MỌI endpoint (TOP_SLACK): bổ sung vùng không lọt vào 5000 đường xấu nhất, và số endpoint/âm
+    # đếm đủ. Đường bắt đầu/kết thúc chỉ có khi vùng đó nằm trong PATHS_LIST.
+    agg, rows = {}, []
+    for line in _section(log, "TOP_SLACK").splitlines():
+        p = line.split()
+        if len(p) != 4 or not re.fullmatch(r"-?[\d.]+(?:e[-+]?\d+)?", p[1]):
+            continue
+        top, sl, n, neg = p[0], float(p[1]), int(p[2]), int(p[3])
+        reg = S.region_of(top + "/x")
+        rows.append(f"{top:40s} {reg:7s} {sl:9.3f} {n:7d} {neg:7d}")
+        a = agg.setdefault(reg, {"slack": sl, "count": 0, "neg": 0})
+        a["slack"] = min(a["slack"], sl)
+        a["count"] += n
+        a["neg"] += neg
+    r.top_slack = "\n".join(rows)
+    for reg, a in agg.items():
+        cur = r.regions.get(reg)
+        if cur is None:
+            r.regions[reg] = {"slack": a["slack"], "start": "", "end": "(ngoài 5000 đường xấu nhất)",
+                              "count": a["count"], "neg": a["neg"]}
+        else:
+            cur["slack"] = min(cur["slack"], a["slack"])
+            cur["count"], cur["neg"] = a["count"], a["neg"]
     r.endpoints = _section(log, "ENDPOINTS")
     r.families = S.endpoint_families(r.endpoints, 25)
     r.family_score = S.family_score(r.endpoints) if r.endpoints else None

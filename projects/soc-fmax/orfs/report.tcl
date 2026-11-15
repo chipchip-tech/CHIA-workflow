@@ -61,6 +61,34 @@ if {[catch {
   }
 } err]} { puts "ERROR paths: $err" }
 
+# Slack xấu nhất theo instance cấp 1, trên MỌI endpoint (chân data của thanh ghi + chân vào của macro), không
+# bị giới hạn 5000 đường như PATHS_LIST (đo thật place o4: vùng bus dương nên rơi khỏi danh sách).
+# Dòng: <instance cấp 1> <slack xấu nhất> <số endpoint> <số âm>
+puts "@@TOP_SLACK"
+if {[catch {
+  set pins [all_registers -edge_triggered -data_pins]
+  if {[catch {
+    foreach i [[ord::get_db_block] getInsts] {
+      if {[[$i getMaster] isBlock]} {
+        foreach p [get_pins -quiet -of_objects [get_cells [$i getName]]] {
+          if {[get_property $p direction] eq "input"} { lappend pins $p }
+        }
+      }
+    }
+  } e]} { puts "ERROR top_slack macro: $e" }
+  array set ws {}; array set nn {}; array set ng {}
+  foreach p $pins {
+    set sl [get_property $p slack_max]
+    if {![string is double -strict $sl]} { continue }
+    set k [lindex [split [get_full_name $p] /] 0]
+    if {![info exists ws($k)]} { set ws($k) $sl; set nn($k) 0; set ng($k) 0 }
+    if {$sl < $ws($k)} { set ws($k) $sl }
+    incr nn($k)
+    if {$sl < 0} { incr ng($k) }
+  }
+  foreach k [lsort [array names ws]] { puts "$k $ws($k) $nn($k) $ng($k)" }
+} e]} { puts "ERROR top_slack: $e" }
+
 puts "@@ENDPOINTS"
 if {[catch {report_checks -path_delay max -group_path_count 3000 -format end -digits 3} e]} {
   report_checks -path_delay max -group_count 3000 -format end -digits 3
