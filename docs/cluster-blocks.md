@@ -14,7 +14,7 @@ Mọi công cụ nằm trong `~/tools` trên host và được mount vào contai
 |---|---|---|---|---|
 | `chipyard` | `chipyard` | `chia-chisel-build` + mount Chipyard | bật | ✅ 1.15.0: `blocks_smoke.py --clean` build `RocketConfig` `SUCCESS=True` (14/11/2026) |
 | `verilator` | `verilator_run` | `chia-verilator-run` | bật | ✅ |
-| `claude` | `claude_creds` | `chia-claude-code` | bật (`--no-claude` để tắt) | ✅ (project rocket-fmax) |
+| `claude` | `claude_creds` | `chia-claude-code` + mount Chipyard **chỉ đọc** | bật (`--no-claude` để tắt) | ✅ (project rocket-fmax); mount Chipyard thêm 15/11/2026, chưa chạy thật |
 | `vivado` | `vivado` | `chia-chisel-build` + mount Chipyard + `~/tools/Xilinx` | tắt (`--fpga`) | ✅ 1.15.0: `vivado v2025.1` trong worker; flow `fpga/` Arty A7-100T ra bitstream trong cùng image (mục 4, 14/11/2026) |
 | `asic` | `asic` | `chia-orfs` tự build + mount `~/tools/OpenROAD-flow-scripts` | tắt (`--asic`) | ✅ `blocks_smoke.py` thấy openroad/yosys, `flow_writable` (08/11/2026) |
 
