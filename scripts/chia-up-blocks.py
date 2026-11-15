@@ -11,8 +11,8 @@ Mặc định bật chipyard + verilator + claude. Tuỳ chọn:
 
 Chạy trong env chia_env:
   python scripts/chia-up-blocks.py [--fpga] [--asic]
-Tắt cluster:
-  chia down cluster.gen.yaml -y
+Tắt cluster (đặt THIS_MACHINE như lúc bật rồi gọi `chia down cluster.gen.yaml -y`):
+  python scripts/chia-up-blocks.py --down
 """
 import argparse
 import os
@@ -56,7 +56,18 @@ def main() -> None:
     ap.add_argument("--verilator-slots", type=int, default=1, help="số slot verilator_run (mặc định 1)")
     ap.add_argument("--out", default="cluster.gen.yaml", help="file config sinh ra (mặc định ./cluster.gen.yaml)")
     ap.add_argument("--dry-run", action="store_true", help="không chạy chia up")
+    ap.add_argument("--down", action="store_true",
+                    help="tắt cluster của --out (chia down -y) với THIS_MACHINE tự dò; thiếu biến này thì chia down "
+                         "SSH vào host rỗng và không gỡ được gì")
     args = ap.parse_args()
+
+    if args.down:
+        if not os.environ.get("THIS_MACHINE"):
+            os.environ["THIS_MACHINE"] = detect_ip() or fail("không dò được IP, hãy export THIS_MACHINE")
+        if not Path(args.out).is_file():
+            fail(f"không có {args.out}: cluster được bật từ thư mục khác? dùng --out")
+        print(f"chia down {args.out} -y (THIS_MACHINE={os.environ['THIS_MACHINE']})", flush=True)
+        sys.exit(subprocess.run(["chia", "down", args.out, "-y"]).returncode)
 
     for k, v in DEFAULTS.items():
         os.environ.setdefault(k, v)
