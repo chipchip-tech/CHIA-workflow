@@ -18,7 +18,7 @@ và GDS của mỗi bậc đã đạt.
 | | |
 |---|---|
 | Pha đi qua | **Simulate** (bắt buộc) → **ASIC**. Không làm FPGA. |
-| Pha hiện tại | M1 xong (baseline đo thật sau place 10 ns: **65,42 MHz**). M2: func_check và nhiễu chạy thật (ngưỡng **±1,546 MHz**), chờ `m2-loop` |
+| Pha hiện tại | M1 xong (baseline đo thật sau place 10 ns: **65,42 MHz**). **M2 xong** (func_check, nhiễu, ngưỡng **±1,546 MHz**, loop bypass chạy thật) |
 | PDK / corner | sky130hd (`sky130_fd_sc_hd`), `tt_025C_1v80` |
 | SRAM | fakeram (`scripts/fakeram_sky130.py`, `docs/fakeram-sky130.md`): access 1,5 ns, 3 µm²/bit, timing giả định. OpenRAM thật chỉ ở M6 |
 | Bậc chu kỳ | 10 → 9 → 8 → 7 → 6 → 5 ns. Bản tốt nhất có WNS ≥ 0 sau place ở bậc hiện tại → CTS + route + GDS cho bản đó → bậc kế |
@@ -248,9 +248,19 @@ tay trong `~/tools/chipyard` khi đang có job.
     ORFS tất định: chạy lại y hệt cho cùng số. Synth không đổi theo biến place (52,39 MHz cả 5 lần). Ngưỡng nhận:
     Fmax **±1,546 MHz** (khoảng 1,031 × 1,5), điểm họ **±6,356 ns**. Điểm họ nhiễu gần bằng nửa giá trị baseline,
     nên trên thực tế vòng chỉ được nhận nhờ Fmax.
-- **Chưa chạy thật:**
-  - `git apply` trên submodule thật;
-  - build sau patch (sbt biên dịch lại).
+- **M2 loop chạy thật 15/11/2026 (`m2-loop3`, bypass `empty,comment,broken`):**
+  - Hai lần đầu (`m2-loop`, `m2-loop2`) dừng ở kiểm resource: `loop.py` đòi `claude`, khối claude cấp `claude_creds`
+    (mock đặt tên sai). Sửa ở `422aca8`.
+  - Baseline (build, RTL, gate, func, synth/floorplan/place) đọc hết từ cache.
+  - Vòng 1: patch rỗng 3 lần, ra `rỗng`. Vòng 2: `git apply` vào submodule `rocket-chip` thật, build thật 1,3 phút
+    (sbt biên dịch lại), RTL hash vẫn `d2607fe708db`, ra `RTL trùng`, không đo lại. Vòng 3: sbt báo
+    `RocketCore.scala:1389:1: expected class or object definition` sau 0,2 phút, agent sửa build (bypass) không sửa,
+    ra `build lỗi`.
+  - Sau job, `generators/rocket-chip` sạch. Còn lại là trạng thái có sẵn từ trước, digest baseline đã tính cùng nó:
+    `generators/gemmini` và `software/gemmini-rocc-tests` (`m`), `sims/firesim` (bỏ qua),
+    `MinimalSoCConfig.scala` chưa track.
+  - Dung lượng: mỗi variant ORFS tới place chiếm **2,3 GB** trong `flow/results` (5 variant nhiễu khoảng 11,5 GB), còn
+    `runs/<vòng>` chỉ 2–14 MB. Một đợt 5 vòng có thể thêm khoảng 11 GB: M4 cần dọn `flow/results` của vòng bị loại.
 - Đường nhận vòng thật (gate/func/ORFS của ứng viên có RTL khác) chỉ có ở mock: session không viết thay đổi thiết
   kế, nên lần chạy thật đầu tiên của đường này là ở M3/M4.
 
@@ -259,7 +269,7 @@ tay trong `~/tools/chipyard` khi đang có job.
 | Mốc | Nội dung | Trạng thái |
 |---|---|---|
 | M1 | build → gate → fakeram → ORFS place 10 ns → Fmax/WNS, vùng, diện tích, thời gian/RAM, `results.csv`; lần hai từ cache | **xong 15/11/2026** (chạy thật, kể cả kiểm cache) |
-| M2 | `func_check.py` vào gate, đo nhiễu place, chốt ngưỡng nhận, orchestration với bypass LLM | func_check + nhiễu chạy thật 15/11/2026; chờ `m2-loop` |
+| M2 | `func_check.py` vào gate, đo nhiễu place, chốt ngưỡng nhận, orchestration với bypass LLM | **xong 15/11/2026** (chạy thật: func_check, nhiễu, loop bypass 3 vòng) |
 | M3 | pha sim có agent (tầng pipeline, chỉ đo cycle) → `candidates.json` | chưa |
 | M4 | pha asic có agent, 5 vòng, nhận/loại theo place, tự xuống bậc | chưa |
 | M5 | CTS + route + GDS mỗi bậc đạt, timing sau route | chưa |
