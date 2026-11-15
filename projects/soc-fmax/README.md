@@ -18,7 +18,7 @@ và GDS của mỗi bậc đã đạt.
 | | |
 |---|---|
 | Pha đi qua | **Simulate** (bắt buộc) → **ASIC**. Không làm FPGA. |
-| Pha hiện tại | M1: baseline đo thật (chưa có agent) |
+| Pha hiện tại | M1 xong (baseline đo thật sau place 10 ns: **65,42 MHz**). Kế tiếp M2 |
 | PDK / corner | sky130hd (`sky130_fd_sc_hd`), `tt_025C_1v80` |
 | SRAM | fakeram (`scripts/fakeram_sky130.py`, `docs/fakeram-sky130.md`): access 1,5 ns, 3 µm²/bit, timing giả định. OpenRAM thật chỉ ở M6 |
 | Bậc chu kỳ | 10 → 9 → 8 → 7 → 6 → 5 ns. Bản tốt nhất có WNS ≥ 0 sau place ở bậc hiện tại → CTS + route + GDS cho bản đó → bậc kế |
@@ -47,9 +47,14 @@ vvadd, mm, spmv), `minstret` của mọi benchmark bằng baseline; thêm `func_
 
 - Fmax = 1000 / (chu kỳ − slack xấu nhất **không kể đường chạm cổng I/O**). Cổng I/O trễ 0 so với clock; đường I/O báo
   riêng (vùng `I/O`), không vào Fmax. WNS mọi đường cũng được ghi.
-- Một clock lý tưởng `clk` trên mọi cổng `*clock` của `DigitalTop`. Reset bất đồng bộ, chân async của flop và tầng đầu
+- Một clock lý tưởng `clk` trên mọi cổng `*clock` của `DigitalTop`. Cổng clock của miền bất đồng bộ (`*clock_in`,
+  `*TCK`: `serial_tl_0_clock_in`, `debug_systemjtag_jtag_TCK`) có clock riêng `aux0/aux1` chu kỳ 5 × `clk`, khai
+  `set_clock_groups -asynchronous` với `clk`; thiếu chúng thì 2115 thanh ghi (serial TL, JTAG) không có clock và không
+  được tính. Reset bất đồng bộ, chân async của flop và tầng đầu
   bộ đồng bộ (`*sync_0*`) không tính (như soc-fmax cũ).
 - `EICG_wrapper` (clock gate kiểu latch của rocket-chip) được thay bằng cell ICG `sky130_fd_sc_hd__dlclkp_4`.
+- Slack theo vùng tính trên **mọi** endpoint (chân D của flop + chân vào dữ liệu của macro, bỏ chân clock của macro),
+  không chỉ 5000 đường xấu nhất (`TOP_SLACK` trong `report.tcl`, `top_slack_<bước>.txt`).
 - Vùng theo instance cấp một của `DigitalTop` (`soc_nodes.REGION_RULES`): `tile`, `L2`, `bus`, `uncore`, `I/O`.
   **Luật viết trước khi thấy build thật**: bước `rtl` in vùng gán cho từng instance để chỉnh.
 - Không đo lại RTL đã đo: RTL hash (bỏ chú thích vị trí nguồn của firtool) nằm trong tag cache và tên variant ORFS.
@@ -63,12 +68,16 @@ vvadd, mm, spmv), `minstret` của mọi benchmark bằng baseline; thêm `func_
 | `soc_fmax.py` | driver M1: các bước `rtl`, `gate`, `synth`, `floorplan`, `place` (`--until`), cache, bảng thời gian/RAM, `results.csv`, `summary.md` |
 | `soc_nodes.py` | node chipyard (`tree_state` mọi submodule, `load_test_elfs`), verilator (`run_gate`), tách RTL `DigitalTop` (`SocRTL`), vùng, họ endpoint. Chép chọn lọc từ `rocket-fmax/fmax_nodes.py` |
 | `orfs_nodes.py` | chuẩn bị design ORFS (host), `orfs_stage` trên khối asic (make + báo cáo, có timeout), đọc log `Elapsed`/`Peak memory` |
-| `orfs/report.tcl` | báo cáo trên kết quả một bước: WNS/TNS, 5000 đường xấu nhất (mỗi endpoint một đường), endpoint, diện tích logic/macro |
+| `orfs/report.tcl` | báo cáo trên kết quả một bước: WNS/TNS, 5000 đường xấu nhất (mỗi endpoint một đường), slack theo instance cấp 1 trên mọi endpoint, đếm thanh ghi theo clock, nhóm thanh ghi không clock, diện tích logic/macro |
+| `orfs/diag_floorplan.tcl` | chẩn đoán tay: macro (bbox, halo), blockage, và inst/pin/row trong một hộp (`SOCFMAX_BOX`) |
 | `memwatch.py` | RAM đỉnh từng container theo bước (`docker stats` mỗi 5 s, trên host) |
 | `exp.yaml` | cache/bypass: `ChiselBuildNode.build`, `extract_soc_rtl`, `run_gate`, `orfs_stage` |
 
 ORFS: design của mỗi variant ở `~/tools/OpenROAD-flow-scripts/flow/designs/sky130hd/soc_fmax/<variant>/`, kết quả ở
 `flow/{results,logs,reports,objects}/sky130hd/soc_fmax/<variant>/`. Variant = `<RTL hash 12>_p<chu kỳ>_<FLOW_VERSION>_<fakeram>`.
+Tag cache của bước ORFS thêm `REPORT_VERSION`: đổi riêng `report.tcl` thì chỉ chạy lại báo cáo (`make` không làm gì).
+Design dir có `tapcell.tcl` riêng (`TAPCELL_TCL`): như tapcell của sky130hd nhưng cắt row trong halo macro 40 µm và bỏ
+mảnh row ngắn hơn 80 µm (`-row_min_width`).
 
 ## Chạy M1
 
@@ -101,6 +110,9 @@ mỗi lần). Lần chạy cuối cùng (kiểm cache), chạy lại toàn bộ 
 cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-id m1-cache --working-dir . -- python soc_fmax.py --run-name m1-cache
 ```
 
+File theo bước (`orfs_<bước>.json`, `top_slack_*.txt`, `paths_*.rpt`, `noclock_*.txt`...) nằm ở
+`~/soc-fmax-runs/<run>/runs/baseline/`.
+
 Gửi lại: toàn bộ log của job, `~/soc-fmax-runs/m1/summary.md`, `results.csv`; nếu lỗi ở bước ORFS thì thêm đuôi
 `flow/logs/sky130hd/soc_fmax/<variant>/*.log`.
 
@@ -128,15 +140,36 @@ Tuỳ chọn hay dùng: `--orfs-var PLACE_DENSITY=0.5` (hoặc `CORE_UTILIZATION
   - Log có một lỗi Ray `grpc ... port 10050 Address already in use` của một worker phụ (các container cùng `--net=host`
     tranh dải cổng worker của Ray); Ray tự thử lại, gate không bị ảnh hưởng. Lặp lại nhiều thì tách dải
     `--min-worker-port/--max-worker-port` theo khối (sửa trên `setup`).
-- **Chưa chạy thật:** bước synth/floorplan/place. Chỗ dễ lỗi nhất: tên file/cổng của Chipyard 1.15.0 (`*.top.mems.conf`,
-  cổng clock `*_clock` của `DigitalTop`), luật vùng, Yosys 0.68 đọc RTL SoC, fakeram với PDN/macro placement của ORFS,
-  `make run RUN_SCRIPT=...` của bản ORFS trong image, thời gian và RAM của place.
+  - `--until synth|floorplan|place` (variant `d2607fe708db_p10_o4_fr1a1p5u3`, 10 ns):
+
+    | Bước | Thời gian | RAM đỉnh bước ORFS | Fmax | WNS | TNS | tile | L2 | bus | uncore | logic (cell) |
+    |---|---|---|---|---|---|---|---|---|---|---|
+    | synth | 3,8 phút | 0,84 GB | 52,39 MHz | −9,086 | −31 749 | −9,086 | −8,402 | −6,229 | +4,229 | 2,365 mm² (193 531) |
+    | floorplan | 1,4 phút | 1,23 GB | 80,13 MHz | −2,480 | −2 460 | −2,480 | −2,126 | +0,014 | +4,855 | 2,221 mm² (187 475) |
+    | place | 8,5 phút (3_3 gp 4,8) | 2,43 GB | **65,42 MHz** | **−5,285** | −10 163 | −5,285 | −2,096 | +1,176 | +1,916 | 2,233 mm² (180 223) |
+
+    Macro 4,16 mm² (10), core 15,9 mm². Container asic đỉnh khoảng 3 GB, tổng các container 2,5 GB lúc báo cáo; xa
+    ngưỡng dừng (3 giờ, 20 GB). Đường găng sau place: FPU `fpuOpt/dfma` `in_in1` → `mulAddRecFNToRaw_postMul_io_mulAddResult_pipe_b`
+    (118 endpoint âm ở tile). L2: 6120 endpoint âm (`sinkA/putbuffer`, `sourceD/queue` từ `mshrs_*`). Floorplan chạy
+    `repair_timing` nên Fmax của nó cao hơn place (chưa có dây thật).
+  - Lần chạy `m1-cache` (tên run mới): mọi bước `cache HIT`, kể cả 3 bước ORFS (`make` 0,0 phút).
+  - Lỗi đã gỡ khi chạy:
+    - 2115 thanh ghi không có clock (serial TL, JTAG TCK): thêm clock phụ bất đồng bộ (xem **Cách đo**); sau sửa
+      `registers_unclocked` = 0.
+    - Floorplan lỗi `PDN-0179` (kênh met1 hẹp): tapcell của sky130hd đặt tapcell trên mảnh row giữa mép core và macro
+      dcache, nằm trong halo; tăng `MACRO_PLACE_HALO` không đủ. Sửa bằng `tapcell.tcl` riêng (halo row 40 µm,
+      `-row_min_width 80`), flow `o4`.
+    - Slack theo vùng chỉ lấy từ 5000 đường xấu nhất nên mất vùng bus sau place: thêm `TOP_SLACK` trên mọi endpoint.
+      Bản đầu gom cả chân clock của macro (`RW0_clk`), cho slack giả −52 ns ở synth/floorplan (`report_checks -to` báo
+      `No paths found`); `r4` bỏ 10 chân đó, slack vùng khớp WNS ở cả 3 bước.
+  - Chưa giải thích: số thanh ghi giảm từ 41 874 (synth) xuống 38 125 (floorplan), riêng miền aux từ 2115 xuống 1146.
+    Có thể do floorplan của ORFS xoá logic chết; chưa kiểm.
 
 ## Mốc
 
 | Mốc | Nội dung | Trạng thái |
 |---|---|---|
-| M1 | build → gate → fakeram → ORFS place 10 ns → Fmax/WNS, vùng, diện tích, thời gian/RAM, `results.csv`; lần hai từ cache | code xong, mới kiểm bằng mock |
+| M1 | build → gate → fakeram → ORFS place 10 ns → Fmax/WNS, vùng, diện tích, thời gian/RAM, `results.csv`; lần hai từ cache | **xong 15/11/2026** (chạy thật, kể cả kiểm cache) |
 | M2 | `func_check.py` vào gate, đo nhiễu place, chốt ngưỡng nhận, orchestration với bypass LLM | chưa |
 | M3 | pha sim có agent (tầng pipeline, chỉ đo cycle) → `candidates.json` | chưa |
 | M4 | pha asic có agent, 5 vòng, nhận/loại theo place, tự xuống bậc | chưa |

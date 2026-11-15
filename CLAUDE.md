@@ -219,8 +219,11 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   `project/soc-fmax-sky130` (vì `project/soc-fmax` là project cũ), Chipyard 1.15.0 ở `~/tools/chipyard`, fakeram bằng
   script riêng (`setup`: `scripts/fakeram_sky130.py`), bộ lọc mức 1 là `make synth` của ORFS (không dùng script `v3`
   riêng; `v3` chỉ để dành cho `synth_ab` của agent ở M4).
-- Trạng thái: M1 code xong (`soc_fmax.py`, `soc_nodes.py`, `orfs_nodes.py`, `orfs/report.tcl`, `memwatch.py`), mới kiểm
-  bằng mock; chờ log chạy thật của người dùng, từng bước `--until rtl|gate|synth|floorplan|place`.
+- Trạng thái: **M1 xong 15/11/2026** (chạy thật): gate ISA 106/107 (`rv64ui-p-ma_data` hỏng sẵn) + 8 benchmark; ORFS
+  sky130hd 10 ns sau place **65,42 MHz** (WNS −5,285, đường găng FPU `dfma`), logic 2,23 mm², place 8,5 phút, RAM bước
+  ORFS đỉnh 2,4 GB; chạy lại toàn bộ từ cache. Sửa khi chạy: clock phụ bất đồng bộ cho serial TL/JTAG, `tapcell.tcl`
+  riêng (PDN-0179), slack vùng trên mọi endpoint (bỏ chân clock macro). Chi tiết ở mục Trạng thái kiểm chứng của README.
+  Kế tiếp: M2 (chờ duyệt danh sách file).
 - Claude không viết Chisel: mọi sửa thiết kế do agent trong loop làm (từ M3).
 
 ## Việc tiếp theo (gợi ý)
