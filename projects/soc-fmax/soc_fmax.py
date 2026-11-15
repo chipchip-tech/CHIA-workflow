@@ -304,7 +304,7 @@ def step_func(a, d: Path, art, rtl, elfs: dict, mw: MemWatch, tm: Timer, base: "
             cache_evict(tag)
             raise SystemExit("func: không ghi được vết baseline (xem func_base.json: bad_samples, log_tail)")
         base, base_hash = fr, rtl.hash
-    tag = f"fcheck_{rtl.hash[:16]}_{base_hash[:16]}_{F.FUNC_VERSION}_s{a.repeat_seed}"
+    tag = f"fcheck_{rtl.hash[:16]}_{base_hash[:16]}_{F.FUNC_VERSION}{F.CHECK_VERSION}_s{a.repeat_seed}"
     hit = cache_has(tag)
     print(f"func: so với vết baseline (seed {a.repeat_seed}); tag {tag} ({'cache HIT' if hit else 'chạy thật'})", flush=True)
     t0 = time.time()

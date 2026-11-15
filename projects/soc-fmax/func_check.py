@@ -6,7 +6,7 @@ Một dòng mỗi lệnh rời pipeline (valid=0 là lệnh gây exception).
 
 So gì (từng lệnh, theo thứ tự):
   - pc, inst, valid phải giống hệt;
-  - giá trị ghi W khi cả hai bên có wen=1 (lệnh latency dài ghi về sau, wen=0, không so giá trị);
+  - giá trị ghi W khi cả hai bên có wen=1 và rd ≠ 0 (x0: Rocket in wdata rác; lệnh latency dài ghi về sau, wen=0, không so giá trị);
   - không so R (giá trị nguồn), không so cycle.
 Phần phụ thuộc thời gian (không so):
   - trước chương trình: mọi lệnh ở pc < 0x80000000 (bootrom chờ nạp ELF, số vòng tuỳ thời gian);
@@ -32,7 +32,8 @@ from dataclasses import dataclass, field
 
 from chia.base.ChiaFunction import ChiaFunction, get
 
-FUNC_VERSION = "f1"                         # đổi khi đổi cách ghi/so vết
+FUNC_VERSION = "f1"                         # đổi khi đổi cách GHI vết (tag ftrace_)
+CHECK_VERSION = "c2"                        # đổi khi đổi cách SO vết (tag fcheck_); c2: bỏ ghi vào x0
 FUNC_BENCHES = ("dhrystone", "qsort", "mm", "spmv")
 WORK_DIR = "/home/ray/soc_fmax_func"        # trên verilator_run
 PROGRAM_BASE = 0x8000_0000
@@ -251,7 +252,7 @@ def compare(lines, base_blob: bytes, tohost: int | None) -> tuple[bool, str, dic
             stats.update(n=n, skipped_w=skipped)
             return False, (f"lệnh {n}: pc/inst khác: baseline pc={pc:#x} inst={inst:#010x} valid={valid}, "
                            f"ứng viên pc={c.pc:#x} inst={c.inst:#010x} valid={c.valid}"), stats
-        if bwen and c.wen:
+        if bwen and c.wen and brd != 0:          # x0: Rocket in wdata rác (csrw/j có rd=0), không ghi thật
             if taint.skip_w:
                 skipped += 1
             elif (brd, wdata) != (c.rd, c.wdata):

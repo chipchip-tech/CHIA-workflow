@@ -3,7 +3,7 @@
 #   ChiselBuildNode.build -> build_<digest cây Chipyard>_<config>
 #   extract_soc_rtl       -> rtl_<digest>_<config>_x1
 #   run_gate              -> gate_<rtl hash>_<GATE_VERSION>_s<seed>
-#   run_func              -> ftrace_<rtl hash>_<FUNC_VERSION> (vết baseline), fcheck_<rtl>_<rtl baseline>_<v>_s<seed>
+#   run_func              -> ftrace_<rtl hash>_<FUNC_VERSION> (vết baseline), fcheck_<rtl>_<rtl baseline>_<FUNC_VERSION><CHECK_VERSION>_s<seed>
 #   orfs_stage            -> orfs_<variant>_<REPORT_VERSION>_<bước>   (variant = rtl hash + chu kỳ + FLOW_VERSION + fakeram + biến ORFS)
 # Agent của loop.py (agent_propose, agent_fix_build, agent_debug) không cache; M2 bypass khi tag là
 # agent_bypass_<run>_r<N>_... (loop.py --bypass), provider loop.bypass_agent_provider trả câu trả lời dựng sẵn.
