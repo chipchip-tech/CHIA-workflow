@@ -51,6 +51,9 @@ class Point:
     fmax: float | None = None          # sau place
     family: float | None = None        # sau place
     area: float | None = None          # diện tích logic sau place (um2)
+    fp_fmax: float | None = None       # sau floorplan (loop.py --batch chain chọn vòng theo số này)
+    fp_family: float | None = None
+    fp_area: float | None = None
     period_ns: float | None = None
 
     def as_dict(self) -> dict:
@@ -125,20 +128,32 @@ def decide(base: Point, best: Point, cand: Point, noise: Noise, budget: Budget) 
 
 def decide_place(base: Point, best: Point, cand: Point, noise: Noise, budget: Budget) -> Decision:
     """Chỉ phần ORFS của decide (diện tích, Fmax, điểm họ); loop.py dùng để xếp hạng trước khi gate."""
-    if cand.fmax is None:
-        return Decision(False, "place", ["không có Fmax sau place"])
+    return decide_metric("place", base.area, (best.fmax, best.family), (cand.fmax, cand.family, cand.area),
+                         noise, budget)
+
+
+def decide_floorplan(base: Point, best: Point, cand: Point, noise: Noise, budget: Budget) -> Decision:
+    """Như decide_place nhưng trên số sau floorplan (noise = ngưỡng nhiễu floorplan)."""
+    return decide_metric("floorplan", base.fp_area, (best.fp_fmax, best.fp_family),
+                         (cand.fp_fmax, cand.fp_family, cand.fp_area), noise, budget)
+
+
+def decide_metric(stage: str, base_area, best: tuple, cand: tuple, noise: Noise, budget: Budget) -> Decision:
+    (bf, bg), (cf, cg, ca) = best, cand
+    if cf is None:
+        return Decision(False, stage, [f"không có Fmax sau {stage}"])
     reasons = []
-    if base.area and cand.area and cand.area > base.area * budget.area:
-        return Decision(False, "place", [f"diện tích logic {cand.area:,.0f} > {budget.area} × baseline {base.area:,.0f} um2"])
-    d_f = cand.fmax - best.fmax
-    d_g = (cand.family - best.family) if cand.family is not None and best.family is not None else None
-    reasons.append(f"Fmax {cand.fmax:.3f} vs bản tốt nhất {best.fmax:.3f} MHz (Δ {d_f:+.3f}, nhiễu ±{noise.fmax_mhz:.3f})")
+    if base_area and ca and ca > base_area * budget.area:
+        return Decision(False, stage, [f"diện tích logic ({stage}) {ca:,.0f} > {budget.area} × baseline {base_area:,.0f} um2"])
+    d_f = cf - bf
+    d_g = (cg - bg) if cg is not None and bg is not None else None
+    reasons.append(f"{stage}: Fmax {cf:.3f} vs {bf:.3f} MHz (Δ {d_f:+.3f}, nhiễu ±{noise.fmax_mhz:.3f})")
     if d_g is not None:
-        reasons.append(f"điểm họ {cand.family:.3f} vs {best.family:.3f} (Δ {d_g:+.3f}, nhiễu ±{noise.family_ns:.3f})")
+        reasons.append(f"{stage}: điểm họ {cg:.3f} vs {bg:.3f} (Δ {d_g:+.3f}, nhiễu ±{noise.family_ns:.3f})")
     if d_f < -noise.fmax_mhz:
-        return Decision(False, "place", ["Fmax giảm quá nhiễu"] + reasons, d_f, d_g)
+        return Decision(False, stage, ["Fmax giảm quá nhiễu"] + reasons, d_f, d_g)
     if d_f > noise.fmax_mhz:
-        return Decision(True, "place", ["Fmax tăng"] + reasons, d_f, d_g)
+        return Decision(True, stage, ["Fmax tăng"] + reasons, d_f, d_g)
     if d_g is not None and d_g > noise.family_ns:
-        return Decision(True, "place", ["điểm họ tăng (Fmax trong nhiễu)"] + reasons, d_f, d_g)
-    return Decision(False, "place", ["trong nhiễu"] + reasons, d_f, d_g)
+        return Decision(True, stage, ["điểm họ tăng (Fmax trong nhiễu)"] + reasons, d_f, d_g)
+    return Decision(False, stage, ["trong nhiễu"] + reasons, d_f, d_g)

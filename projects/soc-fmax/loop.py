@@ -276,8 +276,10 @@ def history_md(a, base: P.Point, best: P.Point, noise: P.Noise, rounds: list[Rou
          f"- Cập nhật {datetime.now(timezone.utc).isoformat(timespec='seconds')}, chu kỳ {a.period_ns} ns",
          f"- Baseline: Fmax {D.fmt(base.fmax, 3)} MHz, điểm họ {D.fmt(base.family)}, logic {D.fmt(base.area, 0)} um2",
          f"- Bản tốt nhất: **{best.name}**, Fmax {D.fmt(best.fmax, 3)} MHz, điểm họ {D.fmt(best.family)}",
+         f"- Chế độ đợt: {getattr(a, 'batch', '-')} (pha {a.phase})",
          f"- Ngưỡng nhiễu: Fmax ±{noise.fmax_mhz:.3f} MHz, điểm họ ±{noise.family_ns:.3f} ({noise.note})", "",
-         "| vòng | agent | patch | kết quả | Fmax | điểm họ | cycle | logic | phút |", "|---|---|---|---|---|---|---|---|---|"]
+         "| vòng | agent | patch | kết quả | Fmax floorplan | Fmax place | điểm họ place | cycle | logic | phút |",
+         "|---|---|---|---|---|---|---|---|---|---|"]
     for r in rounds:
         p = r.point or {}
         who = ("file:" + os.path.basename(r.bypass[5:])) if r.bypass.startswith("file:") else (r.bypass or "agent")
@@ -285,7 +287,7 @@ def history_md(a, base: P.Point, best: P.Point, noise: P.Noise, rounds: list[Rou
         if r.gate_rank:
             res += f" (gate #{r.gate_rank})"
         L.append(f"| {r.n} | {who} | {r.patch_stat} | {res} | "
-                 f"{D.fmt(p.get('fmax'), 3)} | {D.fmt(p.get('family'))} | {D.fmt(p.get('cycle_cost'), 4)} | "
+                 f"{D.fmt(p.get('fp_fmax'), 3)} | {D.fmt(p.get('fmax'), 3)} | {D.fmt(p.get('family'))} | {D.fmt(p.get('cycle_cost'), 4)} | "
                  f"{D.fmt(p.get('area'), 0)} | {r.minutes:.1f} |")
     for r in rounds:
         L += ["", f"## Vòng {r.n}: {'NHẬN' if r.accepted else ('ỨNG VIÊN' if r.candidate else r.status)}", "",
@@ -314,15 +316,25 @@ class Ctx:
         self.base = P.Point(name="baseline", rtl_hash=base_rtl.hash, gate_ok=True, func_ok=True, cycle_cost=1.0,
                             synth_fmax=base_stages["synth"].fmax_mhz, synth_family=base_stages["synth"].family_score,
                             fmax=base_stages["place"].fmax_mhz, family=base_stages["place"].family_score,
-                            area=base_stages["place"].std_area_um2, period_ns=a.period_ns)
+                            area=base_stages["place"].std_area_um2, period_ns=a.period_ns,
+                            fp_fmax=base_stages["floorplan"].fmax_mhz, fp_family=base_stages["floorplan"].family_score,
+                            fp_area=base_stages["floorplan"].std_area_um2)
         self.best, self.best_patch = self.base, ""
+        self.head, self.head_patch = self.best, ""   # cây agent sửa trên đó; --batch chain: đầu chuỗi cộng dồn
+        self.chain: list[dict] = []                  # --batch chain: các vòng đã cộng dồn trong đợt
+        self.fp_noise = None                         # --batch chain: ngưỡng nhiễu floorplan
         self.measured = {base_rtl.hash: "baseline"}
         self.rounds: list[Round] = []
         self.candidates: list[dict] = []
         self.pending: dict[int, dict] = {}     # vòng chờ gate cuối đợt: patch cây, patch agent, Point
         self.untracked = sorted(base_state.get("untracked_sha", {}))
         self.ctx_files = {"baseline_place.txt": stage_text(base_stages["place"]),
+                          "baseline_floorplan.txt": stage_text(base_stages["floorplan"]),
                           "baseline_synth.txt": stage_text(base_stages["synth"])}
+
+    def set_best(self, pt: P.Point, patch: str):
+        self.best, self.best_patch = pt, patch
+        self.head, self.head_patch = pt, patch
 
 
 def stage_text(r) -> str:
@@ -374,14 +386,14 @@ def ask(fn_name: str, fn, ctx_in: dict, kind: str, a, tag: str, d: Path | None =
 def agent_context(c: Ctx, n: int) -> dict:
     """Thông tin cho agent: báo cáo ORFS baseline, lịch sử, ngân sách, cấu hình agent."""
     files = {**c.ctx_files, "history.md": history_md(c.a, c.base, c.best, c.noise, c.rounds)}
-    if c.best_patch:
-        files["best.patch"] = c.best_patch
+    if c.head_patch:
+        files["best.patch"] = c.head_patch
     if c.candidates:
         files["candidates.json"] = json.dumps(c.candidates, indent=2)
     return {"round": n, "phase": c.a.phase, "period_ns": c.a.period_ns, "chipyard": c.a.chipyard,
-            "best": c.best.as_dict(), "baseline": c.base.as_dict(),
+            "best": c.head.as_dict(), "baseline": c.base.as_dict(), "batch": c.a.batch,
             "noise": {"fmax_mhz": c.noise.fmax_mhz, "family_ns": c.noise.family_ns},
-            "budget": dataclasses.asdict(c.budget), "best_patch": c.best_patch, "untracked": c.untracked,
+            "budget": dataclasses.asdict(c.budget), "best_patch": c.head_patch, "untracked": c.untracked,
             "context_files": files,
             "agent": {"model": c.a.agent_model, "effort": c.a.agent_effort, "max_turns": c.a.agent_max_turns,
                       "timeout_s": c.a.agent_timeout, "keep_workspace": c.a.agent_keep_workspace}}
@@ -396,9 +408,9 @@ def run_round(c: Ctx, n: int, kind: str) -> Round:
     ctx_in = agent_context(c, n)
     applied = Applied(a.chipyard)
     try:
-        if c.best_patch:                     # agent nhìn thấy (và sửa trên) cây đã có các vòng được nhận
+        if c.head_patch:                     # agent nhìn thấy (và sửa trên) cây đã có các vòng được nhận/cộng dồn
             try:
-                applied.apply(c.best_patch, c.subs)
+                applied.apply(c.head_patch, c.subs)
             except PatchError as e:
                 raise SystemExit(f"best.patch không áp được vào cây hiện tại: {e}")
         return _round_body(c, n, kind, rd, d, tag_base, ctx_in, applied)
@@ -459,8 +471,8 @@ def _round_body(c: Ctx, n: int, kind: str, rd: Round, d: Path, tag_base: str, ct
                                                       err[-1500:]]
                 return rd
             applied.revert()
-            if c.best_patch:
-                applied.apply(c.best_patch, c.subs)
+            if c.head_patch:
+                applied.apply(c.head_patch, c.subs)
             try:
                 pre = apply_round(fix["patch"])
             except PatchError as e:
@@ -480,7 +492,7 @@ def _round_body(c: Ctx, n: int, kind: str, rd: Round, d: Path, tag_base: str, ct
             return rd
         c.measured[rtl.hash] = f"vòng {n}"
         pt = P.Point(name=f"r{n}", rtl_hash=rtl.hash, period_ns=a.period_ns)
-        if a.phase == "sim" or a.gate_each:
+        if a.phase == "sim" or a.batch == "each":
             if not gate_point(c, d, art, rtl, pt, patch, ctx_in, kind, tag_base, rd):
                 return rd
         if a.phase == "sim":
@@ -491,6 +503,9 @@ def _round_body(c: Ctx, n: int, kind: str, rd: Round, d: Path, tag_base: str, ct
                                  "patch": str(d / "candidate.patch"), "patch_stat": rd.patch_stat,
                                  "summary": rd.summary[-1500:]})
             return rd
+
+        if a.batch == "chain":
+            return chain_round(c, n, kind, rd, d, tag_base, patch, cand_patch, art, rtl, pt, ctx_in)
 
         def synth_gate(r):
             pt.synth_fmax, pt.synth_family = r.fmax_mhz, r.family_score
@@ -512,7 +527,7 @@ def _round_body(c: Ctx, n: int, kind: str, rd: Round, d: Path, tag_base: str, ct
         pt.fmax, pt.family, pt.area = st["place"].fmax_mhz, st["place"].family_score, st["place"].std_area_um2
         rd.point = pt.as_dict()
         c.ctx_files[f"r{n}_place.txt"] = stage_text(st["place"])
-        if not a.gate_each:
+        if a.batch == "best":
             dec = P.decide_place(c.base, c.best, pt, c.noise, c.budget)
             rd.reasons = dec.reasons
             if dec.accept:
@@ -525,8 +540,156 @@ def _round_body(c: Ctx, n: int, kind: str, rd: Round, d: Path, tag_base: str, ct
         dec = P.decide(c.base, c.best, pt, c.noise, c.budget)
         rd.accepted, rd.status, rd.reasons = dec.accept, ("nhận" if dec.accept else dec.stage), dec.reasons
         if dec.accept:
-            c.best, c.best_patch = pt, cand_patch
+            c.set_best(pt, cand_patch)
         return rd
+
+
+def quick_gate(c: Ctx, d: Path, art, rtl) -> tuple[bool, list, float | None]:
+    """Gate nhanh mỗi vòng của --batch chain. isa: chỉ riscv-tests ISA (tag riêng, không lẫn với gate đủ);
+    full: gate đủ (ISA + benchmark, minstret, ngân sách cycle), không func_check."""
+    a = c.a
+    if a.quick_gate == "full":
+        g = D.step_gate(a, d, art, rtl, c.mw, c.tm, baseline=False, elfs=c.base_gate["elfs"])["gate"]
+        ok, why = P.gate_check(c.base_gate["gate"], g, c.base_gate["known_fail"])
+        cc = S.cycle_cost(c.base_gate["gate"], g)
+        if ok and (cc is None or cc > c.budget.cycle):
+            ok, why = False, [f"chi phí cycle {cc} > {c.budget.cycle}"]
+        return ok, why, cc
+    elfs = {**c.base_gate["elfs"], "bench": {}}
+    tag = f"gate_q_{rtl.hash[:16]}_{S.GATE_VERSION}_isa"
+    hit = D.cache_has(tag)
+    t0 = time.time()
+    with c.mw.step("gate nhanh"):
+        g = get(S.run_gate.chia_remote(art, elfs, _chia_tag=tag))
+    c.tm.add("gate nhanh", (time.time() - t0) / 60, hit, f"{len(elfs['isa'])} test ISA")
+    bad = sorted(t for t, ok in g.isa.items() if not ok and t not in c.base_gate["known_fail"])
+    print(f"gate nhanh (ISA): {sum(g.isa.values())}/{len(g.isa)} pass, {(time.time() - t0) / 60:.1f} phút"
+          f"{' (cache)' if hit else ''}", flush=True)
+    for t in bad:
+        D.write(d / "gate_quick_fail" / f"{t}.log", g.fail_logs.get(t, ""))
+    return not bad, ([f"ISA hỏng: {', '.join(bad[:10])}" + (f" (+{len(bad) - 10})" if len(bad) > 10 else "")]
+                     if bad else []), None
+
+
+def chain_round(c: Ctx, n: int, kind: str, rd: Round, d: Path, tag_base: str, patch: str, cand_patch: str, art, rtl,
+                pt: P.Point, ctx_in: dict) -> Round:
+    """--batch chain: ORFS tới floorplan, so với đầu chuỗi (ngưỡng nhiễu floorplan); tốt hơn thì gate nhanh rồi cộng
+    dồn (vòng sau xây trên vòng này). Place + gate đủ để ở cuối đợt (finish_chain)."""
+    a = c.a
+    _prep, st = D.run_orfs_point(a, d, rtl, c.fakeram, a.orfs_vars, f"r{n}", "floorplan", c.mw, c.tm, fatal=False)
+    last = list(st.values())[-1]
+    if not last.ok:
+        rd.status, rd.reasons = "lỗi", [f"ORFS {last.stage}: {last.error[:1500]}"]
+        return rd
+    fp = st["floorplan"]
+    pt.synth_fmax, pt.synth_family = st["synth"].fmax_mhz, st["synth"].family_score
+    pt.fp_fmax, pt.fp_family, pt.fp_area = fp.fmax_mhz, fp.family_score, fp.std_area_um2
+    rd.point = pt.as_dict()
+    c.ctx_files[f"r{n}_floorplan.txt"] = stage_text(fp)
+    dec = P.decide_floorplan(c.base, c.head, pt, c.fp_noise, c.budget)
+    rd.reasons = dec.reasons
+    if not dec.accept:
+        rd.status = "floorplan"
+        return rd
+    if a.quick_gate != "none":
+        ok, why, cc = quick_gate(c, d, art, rtl)
+        pt.cycle_cost = cc if cc is not None else pt.cycle_cost
+        rd.point = pt.as_dict()
+        if not ok:
+            rd.status, rd.reasons = "gate nhanh", why + rd.reasons
+            dg = ask("agent_debug", agent_debug, {**ctx_in, "patch": patch, "failures": why}, kind, a,
+                     f"{tag_base}_dbg", d, rd)
+            rd.diagnosis = dg.get("diagnosis", "")
+            return rd
+    rd.status, rd.pending = "cộng dồn", True
+    c.chain.append({"n": n, "tree_patch": cand_patch, "patch": patch, "point": pt, "tag_base": tag_base, "kind": kind})
+    c.head, c.head_patch = pt, cand_patch
+    print(f"  cộng dồn: vòng sau xây trên r{n} (chuỗi {' + '.join('r' + str(x['n']) for x in c.chain)})", flush=True)
+    return rd
+
+
+def finish_chain(c: Ctx, debug: bool = True):
+    """Cuối đợt --batch chain: place + gate đủ (gate + func + ngân sách cycle) cho bản cộng dồn dài nhất; place không
+    tốt hơn bản tốt nhất hoặc gate hỏng thì bỏ vòng cuối chuỗi và thử lại (tối đa --max-backtrack lần lùi)."""
+    a = c.a
+    rounds = {r.n: r for r in c.rounds}
+    chain = list(c.chain)
+    if not chain:
+        print("\n== cuối đợt: không vòng nào được cộng dồn", flush=True)
+        return
+    print("\n== cuối đợt: chuỗi " + " + ".join(f"r{x['n']}" for x in chain) + ": place + gate đủ", flush=True)
+    tries, won = 0, None
+    while chain and tries <= a.max_backtrack:
+        info = chain[-1]
+        n, pt = info["n"], info["point"]
+        rd = rounds[n]
+        tries += 1
+        print(f"\n######## r{n} (chuỗi {'+'.join('r' + str(x['n']) for x in chain)}, lần {tries})", flush=True)
+        t0 = time.time()
+        d = Path(a.out) / "runs" / f"r{n}"
+        rd.gate_rank, rd.pending, ok = tries, False, False
+        applied = Applied(a.chipyard)
+        try:
+            applied.apply(info["tree_patch"], c.subs)
+            _state, art, rtl = D.step_rtl(a, d, c.mw, c.tm, baseline=False)
+            if rtl is None or rtl.hash != pt.rtl_hash:
+                rd.status, rd.reasons = "lỗi", [f"build lại r{n} ra RTL khác ({rtl.hash[:12] if rtl else 'lỗi'})"]
+            else:
+                _prep, st = D.run_orfs_point(a, d, rtl, c.fakeram, a.orfs_vars, f"r{n}", "place", c.mw, c.tm,
+                                             fatal=False)
+                last = list(st.values())[-1]
+                if not last.ok or "place" not in st:
+                    rd.status, rd.reasons = "lỗi", [f"ORFS {last.stage}: {(last.error or '')[:1500]}"]
+                else:
+                    pl = st["place"]
+                    pt.fmax, pt.family, pt.area = pl.fmax_mhz, pl.family_score, pl.std_area_um2
+                    rd.point = pt.as_dict()
+                    c.ctx_files[f"r{n}_place.txt"] = stage_text(pl)
+                    dec = P.decide_place(c.base, c.best, pt, c.noise, c.budget)
+                    print(f"  place: {'tốt hơn' if dec.accept else 'không tốt hơn'} bản tốt nhất: "
+                          + "; ".join(dec.reasons), flush=True)
+                    if not dec.accept:
+                        rd.status, rd.reasons = "place", dec.reasons + rd.reasons
+                    else:
+                        rd.reasons = dec.reasons + rd.reasons
+                        ok = gate_point(c, d, art, rtl, pt, info["patch"], agent_context(c, n), info["kind"],
+                                        info["tag_base"], rd, debug=debug)
+        except AgentStop as e:
+            print(f"  (agent không chẩn đoán được: {e})", flush=True)
+            debug = False
+        except Exception as e:      # noqa: BLE001
+            traceback.print_exc()
+            rd.status, rd.reasons = "lỗi", [f"cuối đợt: {type(e).__name__}: {e}"[:1500]]
+        finally:
+            applied.revert()
+            check_tree(c, f"cuối đợt r{n}")
+            rd.gate_minutes = (time.time() - t0) / 60
+        if ok:
+            dec = P.decide(c.base, c.best, pt, c.noise, c.budget)
+            rd.point = pt.as_dict()
+            rd.accepted, rd.status = dec.accept, ("nhận" if dec.accept else dec.stage)
+            rd.reasons = [f"gate + func đạt, chi phí cycle {pt.cycle_cost:.4f}"] + dec.reasons
+            if dec.accept:
+                c.set_best(pt, info["tree_patch"])
+                won = n
+        print(f"r{n}: {'NHẬN' if rd.accepted else rd.status} ({rd.gate_minutes:.1f} phút)", flush=True)
+        if won is not None:
+            for x in chain[:-1]:
+                rounds[x["n"]].status, rounds[x["n"]].pending = "trong bản nhận", False
+                rounds[x["n"]].reasons = [f"nằm trong bản cộng dồn được nhận (r{won})"] + rounds[x["n"]].reasons
+            break
+        chain.pop()
+        if chain:
+            rounds[chain[-1]["n"]].reasons = [f"lùi về r{chain[-1]['n']} (bỏ r{n})"] + rounds[chain[-1]["n"]].reasons
+        save(Path(a.out), a, c)
+    for x in chain if won is None else []:
+        r = rounds[x["n"]]
+        if r.pending:
+            r.status, r.pending = "chưa kiểm", False
+            r.reasons = [f"hết lượt lùi (--max-backtrack {a.max_backtrack})"] + r.reasons
+    c.chain.clear()
+    c.head, c.head_patch = c.best, c.best_patch
+    save(Path(a.out), a, c)
 
 
 def gate_point(c: Ctx, d: Path, art, rtl, pt: P.Point, patch: str, ctx_in: dict, kind: str, tag_base: str,
@@ -604,10 +767,18 @@ def finish_batch(c: Ctx, debug: bool = True):
             rd.accepted, rd.status = dec.accept, ("nhận" if dec.accept else dec.stage)
             rd.reasons = [f"gate + func đạt, chi phí cycle {pt.cycle_cost:.4f}"] + dec.reasons
             if dec.accept:
-                c.best, c.best_patch, won = pt, info["tree_patch"], n
+                c.set_best(pt, info["tree_patch"])
+                won = n
         print(f"r{n}: {'NHẬN' if rd.accepted else rd.status} (gate {rd.gate_minutes:.1f} phút)", flush=True)
         save(Path(a.out), a, c)
     c.pending.clear()
+
+
+def finish(c: Ctx, debug: bool = True):
+    if c.a.batch == "chain":
+        finish_chain(c, debug)
+    elif c.a.batch == "best":
+        finish_batch(c, debug)
 
 
 def check_tree(c: Ctx, what: str):
@@ -631,9 +802,17 @@ def parse_args():
     ap.add_argument("--agent-timeout", type=int, default=1800, help="giây cho mỗi phiên agent")
     ap.add_argument("--agent-keep-workspace", action="store_true", help="giữ /tmp/socfmax-agent/<tag> trên khối claude")
     ap.add_argument("--fix-retries", type=int, default=2, help="số lần agent sửa build mỗi vòng")
-    ap.add_argument("--gate-each", action="store_true",
-                    help="--phase asic: gate mọi vòng trước ORFS (cách cũ). Mặc định: đo ORFS mọi vòng, cuối đợt chỉ "
-                         "gate vòng đo tốt nhất, hỏng thì vòng tốt kế tiếp")
+    ap.add_argument("--batch", choices=("chain", "best", "each"), default="chain",
+                    help="--phase asic. chain (mặc định): mỗi vòng đo tới floorplan, tốt hơn thì gate nhanh + cộng dồn, "
+                         "cuối đợt place + gate đủ bản cộng dồn, hỏng thì lùi; best: mỗi vòng tới place, cuối đợt gate "
+                         "vòng đo tốt nhất, hỏng thì vòng kế; each: gate mọi vòng trước ORFS")
+    ap.add_argument("--quick-gate", choices=("isa", "full", "none"), default="isa",
+                    help="--batch chain: gate mỗi vòng trước khi cộng dồn: isa (riscv-tests ISA), full (ISA + benchmark "
+                         "+ ngân sách cycle, không func_check), none")
+    ap.add_argument("--max-backtrack", type=int, default=2, help="--batch chain: số lần lùi tối đa ở cuối đợt")
+    ap.add_argument("--fp-noise", default="",
+                    help="--batch chain: ngưỡng nhiễu floorplan 'FMAX_MHZ,FAMILY_NS'; mặc định tính từ results.csv cạnh "
+                         "--noise-json (các điểm baseline/noise:* ở bước floorplan)")
     ap.add_argument("--bypass", default="", help="M2: thay agent bằng câu trả lời dựng sẵn, vd empty,comment,broken")
     ap.add_argument("--empty-retries", type=int, default=2, help="hỏi lại agent bao nhiêu lần khi patch rỗng")
     ap.add_argument("--noise-json", required=True, help="noise.json của soc_fmax.py --noise")
@@ -645,6 +824,27 @@ def parse_args():
     D.finish_args(a, ap)
     a.bypass_list = [x.strip() for x in a.bypass.split(",") if x.strip()]
     return a
+
+
+def load_fp_noise(a) -> P.Noise:
+    """Ngưỡng nhiễu floorplan: --fp-noise, hoặc từ results.csv của lần đo nhiễu (cùng thư mục noise.json)."""
+    if a.fp_noise:
+        f, g = (float(x) for x in a.fp_noise.split(","))
+        return P.Noise(fmax_mhz=f, family_ns=g, note="--fp-noise")
+    import csv
+    path = Path(os.path.expanduser(a.noise_json)).parent / "results.csv"
+    if not path.is_file():
+        raise SystemExit(f"không thấy {path} để tính nhiễu floorplan: đặt --fp-noise FMAX_MHZ,FAMILY_NS")
+    pts = {}
+    for row in csv.DictReader(path.open()):
+        if row["stage"] == "floorplan" and row.get("ok") == "True" and row["fmax_mhz"] and \
+                (row["point"] == "baseline" or row["point"].startswith("noise:")):
+            pts[row["point"]] = {"name": row["point"], "fmax": float(row["fmax_mhz"]),
+                                 "family": float(row["family_score"]) if row["family_score"] else None}
+    try:
+        return P.noise_from(list(pts.values()))
+    except ValueError as e:
+        raise SystemExit(f"nhiễu floorplan từ {path}: {e}; đặt --fp-noise FMAX_MHZ,FAMILY_NS")
 
 
 def load_noise(path: str) -> P.Noise:
@@ -688,14 +888,18 @@ def main():
         fakeram = D.load_fakeram(a.repo)
         _prep, stages = D.run_orfs_point(a, d0, rtl, fakeram, a.orfs_vars, "baseline", "place", mw, tm)
         c = Ctx(a, mw, tm, fakeram, state, art, rtl, gate, func_base, stages, noise)
+        if a.phase == "asic" and a.batch == "chain":
+            c.fp_noise = load_fp_noise(a)
+            print(f"ngưỡng nhiễu floorplan: Fmax ±{c.fp_noise.fmax_mhz:.3f} MHz, điểm họ ±{c.fp_noise.family_ns:.3f} "
+                  f"({c.fp_noise.note}); gate nhanh: {a.quick_gate}; lùi tối đa {a.max_backtrack}", flush=True)
         start = 1
         if a.history_from:
             hdir = Path(os.path.expanduser(a.history_from))
             h = json.loads((hdir / "history.json").read_text())
             c.rounds = [Round(**r) for r in h["rounds"]]
             c.candidates = h.get("candidates", [])
-            c.best = P.Point(**h["best"])
-            c.best_patch = (hdir / "best.patch").read_text() if (hdir / "best.patch").exists() else ""
+            c.set_best(P.Point(**h["best"]),
+                       (hdir / "best.patch").read_text() if (hdir / "best.patch").exists() else "")
             c.measured.update(h.get("measured", {}))
             start = max((r.n for r in c.rounds), default=0) + 1
             print(f"đi tiếp từ {hdir}: {len(c.rounds)} vòng, bản tốt nhất {c.best.name} ({D.fmt(c.best.fmax, 3)} MHz)", flush=True)
@@ -721,13 +925,13 @@ def main():
             for x in rd.reasons[:6]:
                 print("    " + x.splitlines()[0][:300] if x else "", flush=True)
             save(out, a, c)
-        if a.phase == "asic" and not a.gate_each:
-            finish_batch(c)
+        if a.phase == "asic":
+            finish(c)
     except AgentStop as e:
         print(f"\nDỪNG: {e}", flush=True)
-        if c is not None and c.pending:
+        if c is not None and a.phase == "asic" and (c.pending or c.chain):
             print("gate các vòng đã đo (không có agent chẩn đoán)", flush=True)
-            finish_batch(c, debug=False)
+            finish(c, debug=False)
         raise
     except SystemExit as e:
         print(f"\nDỪNG: {e}", flush=True)
