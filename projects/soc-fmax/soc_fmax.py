@@ -174,6 +174,8 @@ def step_rtl(a, d: Path, mw: MemWatch, tm: Timer) -> tuple:
     dirty = S.dirty_paths(state)
     print(f"Chipyard {a.chipyard}: HEAD {state['root_head'][:12]}, {len(state['subs'])} submodule, "
           f"digest {state['digest'][:12]}", flush=True)
+    if state.get("ignored_dirty"):
+        print("  bỏ qua (không ảnh hưởng build Verilator): " + ", ".join(state["ignored_dirty"]), flush=True)
     if dirty:
         print("  cây có thay đổi:\n    " + "\n    ".join(dirty[:40]), flush=True)
         if not a.allow_dirty:

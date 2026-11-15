@@ -32,6 +32,10 @@ TOP = "DigitalTop"
 GATE_VERSION = "g1"                               # đổi khi đổi bộ test / cách chấm gate
 # File chưa track được phép có trong cây Chipyard khi đo baseline (cài bằng scripts/install-chipyard-config.sh).
 ALLOWED_UNTRACKED = (r"generators/chipyard/src/main/scala/config/MinimalSoCConfig\.scala",)
+# Submodule ảnh hưởng tới build Verilator (Chisel/Scala, firtool, Verilog nguồn). Submodule khác (sims/firesim,
+# software/*, toolchains/*, fpga/*, vlsi/*) chỉ được ghi lại, không tính vào kiểm "cây sạch" và digest của build:
+# FireSim/FireMarshal sau build-setup.sh có thể để lại thay đổi không liên quan (15/11/2026: sims/firesim 1 dòng).
+BUILD_SUBMODULE_RE = r"(generators|tools)/.*"
 
 # EICG_wrapper (cổng clock kiểu latch + AND của rocket-chip) thay bằng cell ICG thật của sky130hd,
 # để CTS thấy một clock gate chuẩn.
@@ -79,16 +83,20 @@ def tree_state(cy: str) -> dict:
         if len(parts) == 4:
             subs[parts[0]] = {"head": parts[1], "dirty": int(parts[2]), "diff": parts[3]}
     untracked = {l[3:]: _file_sha(os.path.join(cy, l[3:])) for l in status if l.startswith("?? ")}
+    build_subs = {k: v for k, v in subs.items() if re.fullmatch(BUILD_SUBMODULE_RE, k)}
     blob = "\n".join([root_head, root_diff, *sorted(status), *sorted(f"{k} {v}" for k, v in untracked.items()),
-                      *sorted(f"{k} {v['head']} {v['diff']}" for k, v in subs.items())])
+                      *sorted(f"{k} {v['head']} {v['diff']}" for k, v in build_subs.items())])
     return {"root_head": root_head, "root_status": status, "subs": subs, "untracked_sha": untracked,
+            "ignored_dirty": sorted(f"{k} ({v['dirty']} dòng)" for k, v in subs.items()
+                                    if v["dirty"] and k not in build_subs),
             "digest": hashlib.sha256(blob.encode()).hexdigest()}
 
 
 def dirty_paths(state: dict, allowed=ALLOWED_UNTRACKED) -> list[str]:
     """Những gì làm cây khác bản gốc (trừ file chưa track được phép)."""
     out = [l for l in state["root_status"] if not any(re.fullmatch(p, l[3:]) for p in allowed)]
-    out += [f"{p} ({s['dirty']} dòng thay đổi)" for p, s in sorted(state["subs"].items()) if s["dirty"]]
+    out += [f"{p} ({s['dirty']} dòng thay đổi)" for p, s in sorted(state["subs"].items())
+            if s["dirty"] and re.fullmatch(BUILD_SUBMODULE_RE, p)]
     return out
 
 
