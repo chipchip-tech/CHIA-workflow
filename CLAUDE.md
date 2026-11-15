@@ -225,8 +225,9 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   ORFS đỉnh 2,4 GB; chạy lại toàn bộ từ cache. Sửa khi chạy: clock phụ bất đồng bộ cho serial TL/JTAG, `tapcell.tcl`
   riêng (PDN-0179), slack vùng trên mọi endpoint (bỏ chân clock macro). Chi tiết ở mục Trạng thái kiểm chứng của README.
   M2 (duyệt 15/11/2026 "như đề xuất"): `func_check.py` (vết commit `+verbose`, taint bộ đếm, dừng ở `tohost`),
-  `policy.py`, `loop.py` (agent bypass, patch áp lên `~/tools/chipyard` rồi hoàn nguyên), `soc_fmax.py --noise`; code
-  xong, mới kiểm bằng mock, chờ log `m2-noise` và `m2-loop`. Patch giả sinh lúc chạy (không có thư mục `bypass/`).
+  `policy.py`, `loop.py` (agent bypass, patch áp lên `~/tools/chipyard` rồi hoàn nguyên), `soc_fmax.py --noise`; chạy
+  thật 15/11/2026: func_check đạt (sửa: bỏ so ghi vào x0, Rocket in rác), mm chỉ phủ 17 % (dừng ở nhánh phụ thuộc bộ
+  đếm); nhiễu place Fmax 64,44..65,47 MHz, ORFS tất định, ngưỡng nhận **±1,546 MHz** / điểm họ ±6,356 ns. Chờ `m2-loop`. Patch giả sinh lúc chạy (không có thư mục `bypass/`).
 - Claude không viết Chisel: mọi sửa thiết kế do agent trong loop làm (từ M3).
 
 ## Việc tiếp theo (gợi ý)

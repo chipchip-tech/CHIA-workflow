@@ -18,7 +18,7 @@ và GDS của mỗi bậc đã đạt.
 | | |
 |---|---|
 | Pha đi qua | **Simulate** (bắt buộc) → **ASIC**. Không làm FPGA. |
-| Pha hiện tại | M1 xong (baseline đo thật sau place 10 ns: **65,42 MHz**). M2 code xong, chờ chạy thật |
+| Pha hiện tại | M1 xong (baseline đo thật sau place 10 ns: **65,42 MHz**). M2: func_check và nhiễu chạy thật (ngưỡng **±1,546 MHz**), chờ `m2-loop` |
 | PDK / corner | sky130hd (`sky130_fd_sc_hd`), `tt_025C_1v80` |
 | SRAM | fakeram (`scripts/fakeram_sky130.py`, `docs/fakeram-sky130.md`): access 1,5 ns, 3 µm²/bit, timing giả định. OpenRAM thật chỉ ở M6 |
 | Bậc chu kỳ | 10 → 9 → 8 → 7 → 6 → 5 ns. Bản tốt nhất có WNS ≥ 0 sau place ở bậc hiện tại → CTS + route + GDS cho bản đó → bậc kế |
@@ -228,9 +228,27 @@ tay trong `~/tools/chipyard` khi đang có job.
   - `loop.py` với 6 vòng, cho đủ các kết quả `RTL trùng`, `build lỗi`, `rỗng`, `gate`, `func`, `nhận`.
   - `--history-from` đi tiếp đúng: vòng sau thấy `best.patch`, RTL trùng vòng 6, patch xung đột ra `patch lỗi`.
   - Cây về sạch sau mọi vòng.
+- **M2 chạy thật 15/11/2026 (`m2-noise`, chạy lại `m2-noise3` từ cache, mọi bước HIT):**
+  - Vết `+verbose` của Chipyard 1.15.0 đọc được hết, không dòng lỗi. Ghi vết 4 benchmark mất 9,4 phút sim, so vết
+    8,8 phút. dhrystone 215 377 lệnh, qsort 226 768, mm 207 806, spmv 71 910, đều dừng ở ghi `tohost`.
+  - Lỗi lần đầu: Rocket in `W[r0=<rác>]` cho lệnh có rd = x0 (`csrw fcsr, zero` ở lệnh 40), giá trị khác giữa hai
+    seed. Từ `CHECK_VERSION` `c2`: không so giá trị ghi khi rd = 0.
+  - Baseline so với chính nó (seed 7): cả 4 benchmark đạt. Riêng **mm** dừng ở nhánh phụ thuộc bộ đếm tại lệnh
+    35 678/207 806, nên func chỉ phủ khoảng 17 % mm; phần còn lại của mm chỉ có gate (kết quả đúng, minstret bằng).
+  - Nhiễu sau place, 5 lần đo:
+
+    | lần | Fmax (MHz) | điểm họ | logic (um2) |
+    |---|---|---|---|
+    | baseline | 65,423 | −13,300 | 2 232 856 |
+    | rerun | 65,423 | −13,300 | 2 232 856 |
+    | density 0,54 | 64,443 | −16,715 | 2 225 518 |
+    | density 0,56 | 64,960 | −12,478 | 2 217 927 |
+    | util 41 | 65,474 | −14,935 | 2 229 313 |
+
+    ORFS tất định: chạy lại y hệt cho cùng số. Synth không đổi theo biến place (52,39 MHz cả 5 lần). Ngưỡng nhận:
+    Fmax **±1,546 MHz** (khoảng 1,031 × 1,5), điểm họ **±6,356 ns**. Điểm họ nhiễu gần bằng nửa giá trị baseline,
+    nên trên thực tế vòng chỉ được nhận nhờ Fmax.
 - **Chưa chạy thật:**
-  - định dạng vết `+verbose` của Rocket trong Chipyard 1.15.0 (đã đối chiếu `RocketCore.scala` bản master);
-  - thời gian sim có `+verbose`;
   - `git apply` trên submodule thật;
   - build sau patch (sbt biên dịch lại).
 - Đường nhận vòng thật (gate/func/ORFS của ứng viên có RTL khác) chỉ có ở mock: session không viết thay đổi thiết
@@ -241,7 +259,7 @@ tay trong `~/tools/chipyard` khi đang có job.
 | Mốc | Nội dung | Trạng thái |
 |---|---|---|
 | M1 | build → gate → fakeram → ORFS place 10 ns → Fmax/WNS, vùng, diện tích, thời gian/RAM, `results.csv`; lần hai từ cache | **xong 15/11/2026** (chạy thật, kể cả kiểm cache) |
-| M2 | `func_check.py` vào gate, đo nhiễu place, chốt ngưỡng nhận, orchestration với bypass LLM | code xong, mới kiểm bằng mock |
+| M2 | `func_check.py` vào gate, đo nhiễu place, chốt ngưỡng nhận, orchestration với bypass LLM | func_check + nhiễu chạy thật 15/11/2026; chờ `m2-loop` |
 | M3 | pha sim có agent (tầng pipeline, chỉ đo cycle) → `candidates.json` | chưa |
 | M4 | pha asic có agent, 5 vòng, nhận/loại theo place, tự xuống bậc | chưa |
 | M5 | CTS + route + GDS mỗi bậc đạt, timing sau route | chưa |
