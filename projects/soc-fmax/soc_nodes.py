@@ -213,6 +213,24 @@ def extract_soc_rtl(artifact, top: str = TOP) -> SocRTL:
     return soc_rtl_from_sources(artifact.generated_src_files, top)
 
 
+def sram_instances(rtl: SocRTL) -> dict[str, int]:
+    """{macro SRAM: số instance trong cả cây} (firtool gộp các SyncReadMem cùng hình dạng vào một module)."""
+    from functools import lru_cache
+    kids = {m: [c for c, _i in _INST_RE.findall(t) if c in rtl.modules or c in rtl.srams] for m, t in rtl.modules.items()}
+
+    @lru_cache(maxsize=None)
+    def count(m):
+        out = {}
+        for c in kids.get(m, []):
+            if c in rtl.srams:
+                out[c] = out.get(c, 0) + 1
+            else:
+                for k, v in count(c):
+                    out[k] = out.get(k, 0) + v
+        return tuple(sorted(out.items()))
+    return dict(count(rtl.top))
+
+
 def instance_tree(rtl: SocRTL, depth: int = 2) -> list[tuple[str, str]]:
     """[(đường instance, module)] tới độ sâu `depth` (để in và để chỉnh luật vùng)."""
     kids = {m: [(i, c) for c, i in _INST_RE.findall(t) if c in rtl.modules or c in rtl.srams]
@@ -233,12 +251,13 @@ def instance_tree(rtl: SocRTL, depth: int = 2) -> list[tuple[str, str]]:
 # Vùng (tile / L2 / bus / uncore / I/O) theo tên instance sau synth
 # ---------------------------------------------------------------------------
 
-# Luật theo instance cấp một của DigitalTop (Chipyard 1.15.0). Thứ tự quan trọng: luật đầu tiên khớp thắng.
-# Chưa kiểm trên build thật: M1 in cây instance để chỉnh lại.
+# Luật theo instance cấp một của DigitalTop (Chipyard 1.15.0, MinimalSoCConfig; kiểm trên build thật 15/11/2026:
+# tile_prci_domain, coh_wrapper = CoherenceManagerWrapper chứa L2 InclusiveCache, sbus/mbus/cbus/pbus/fbus).
+# Thứ tự quan trọng: luật đầu tiên khớp thắng. Còn lại (PRCI, CLINT, PLIC, debug, UART, serial-TL, bootROM) là uncore.
 REGION_RULES = (
-    ("tile", r"tile_prci_domain.*|.*rockettile.*|tile\b.*"),
-    ("L2", r".*l2.*|.*inclusive_?cache.*|.*bank_?store.*"),
-    ("bus", r"subsystem_[smcpfo]bus.*|.*_xbar.*|.*coupler.*|.*crossing.*"),
+    ("tile", r"tile_prci_domain"),
+    ("L2", r"coh_wrapper"),
+    ("bus", r"[smcpfo]bus"),
 )
 
 

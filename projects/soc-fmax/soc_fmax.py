@@ -214,7 +214,14 @@ def step_rtl(a, d: Path, mw: MemWatch, tm: Timer) -> tuple:
     print("instance cấp 1 (vùng gán):", flush=True)
     for inst, mod in sorted(rtl.children.items()):
         print(f"  {inst:55s} {mod:40s} {S.region_of(inst + '/x')}", flush=True)
-    print(f"macro SRAM ({len(rtl.srams)}):\n  " + "\n  ".join(rtl.mems_conf.splitlines()), flush=True)
+    inst = S.sram_instances(rtl)
+    print(f"macro SRAM ({len(rtl.srams)} module, {sum(inst.values())} instance):", flush=True)
+    for line in rtl.mems_conf.splitlines():
+        p = line.split()
+        bits = int(p[3]) * int(p[5])
+        n = inst.get(p[1], 0)
+        print(f"  x{n:<2d} {line.strip()}   ({n * bits / 8192:.1f} KiB)", flush=True)
+    write(d / "sram_instances.json", json.dumps(inst, indent=2))
     return state, art, rtl
 
 
