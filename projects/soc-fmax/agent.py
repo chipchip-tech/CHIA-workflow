@@ -297,7 +297,7 @@ def build_prompt(ctx: dict, task: str, roots: list[str], missing: list[str], rea
 
 def run_agent(ctx: dict, task: str, tag: str) -> dict:
     """task: propose | fix | debug. Trả {"patch", "summary", "dropped", "log", "error", "minutes", "roots"}.
-    error khác rỗng: "rate_limit: ..."/"auth: ..." (driver dừng đợt) hoặc lỗi khác của phiên (vòng bị loại)."""
+    error khác rỗng: "rate_limit: ..."/"auth: ..."/"setup: ..." (driver dừng đợt) hoặc lỗi khác của phiên (vòng bị loại)."""
     t0 = time.time()
     cy = ctx["chipyard"]
     a = ctx.get("agent") or {}
@@ -308,7 +308,9 @@ def run_agent(ctx: dict, task: str, tag: str) -> dict:
     out = {"patch": "", "summary": "", "dropped": [], "log": "", "error": "", "minutes": 0.0, "roots": []}
     try:
         if not os.path.isdir(os.path.join(cy, "generators")):
-            raise RuntimeError(f"khối claude không thấy Chipyard ở {cy}: thiếu mount (chia-up-blocks.py từ nhánh setup mới)")
+            out["error"] = (f"setup: khối claude không thấy Chipyard ở {cy} (container {os.uname().nodename}): thiếu mount, "
+                            "dựng lại cluster bằng chia-up-blocks.py của nhánh setup từ 15/11/2026")
+            return out
         orig, roots, missing = copy_sources(cy, ws_cy)
         out["roots"] = roots
         for rel, text in (ctx.get("base_files") or {}).items():

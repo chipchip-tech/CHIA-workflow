@@ -358,7 +358,7 @@ def ask(fn_name: str, fn, ctx_in: dict, kind: str, a, tag: str, d: Path | None =
         print(f"  agent {fn_name}: {r['minutes']:.1f} phút{', lỗi: ' + r['error'] if r.get('error') else ''}"
               f"{', bỏ: ' + '; '.join(r['dropped']) if r.get('dropped') else ''}", flush=True)
     err = r.get("error") or ""
-    if err.startswith(("rate_limit", "auth")):
+    if err.startswith(("rate_limit", "auth", "setup")):
         raise AgentStop(f"agent {fn_name}: {err[:500]}")
     return r
 
