@@ -26,7 +26,7 @@ from chia.base.ChiaFunction import ChiaFunction
 
 import soc_nodes as S
 
-FLOW_VERSION = "o3"                       # đổi khi đổi config.mk/SDC/script báo cáo
+FLOW_VERSION = "o4"                       # đổi khi đổi config.mk/SDC/script báo cáo
 PLATFORM = "sky130hd"
 NICK = "soc_fmax"
 C_ORFS = "/OpenROAD-flow-scripts"          # đường dẫn ORFS trong container asic
@@ -38,7 +38,7 @@ ORFS_DEFAULTS = {
     "ABC_AREA": "0",
     "CORE_UTILIZATION": "40",
     "PLACE_DENSITY": "0.55",
-    "MACRO_PLACE_HALO": "40 40",   # 10 10: PDN-0179 (khe met1 giữa macro không có strap met4/met5)
+    "MACRO_PLACE_HALO": "40 40",   # cũng là halo cắt row quanh macro (tapcell.tcl riêng, xem prepare_design)
     "TNS_END_PERCENT": "100",
 }
 
@@ -116,6 +116,19 @@ def sdc_text(period_ns: float, ports: dict) -> str:
     return "\n".join(t)
 
 
+def tapcell_text(orfs_vars: dict) -> str:
+    """tapcell của sky130hd nhưng cắt row trong cả vùng halo đặt macro (mặc định chỉ ~2 µm). Đo thật o3: row
+    vụn rộng 37,7 µm giữa mép core và macro dcache (vùng cấm đặt cell) vẫn có rail met1, PDN không nối được
+    (PDN-0179). Bỏ thêm mảnh row ngắn hơn 2x halo nếu OpenROAD có -row_min_width."""
+    h = (orfs_vars.get("MACRO_PLACE_HALO") or "2 2").split()
+    hx, hy = float(h[0]), float(h[-1])
+    base = f'tapcell -distance 14 -tapcell_master "$::env(TAP_CELL_NAME)" -halo_width_x {hx:g} -halo_width_y {hy:g}'
+    return (f"# soc-fmax {FLOW_VERSION}: sinh bởi orfs_nodes.py\n"
+            f"if {{[catch {{{base} -row_min_width {2 * max(hx, hy):g}}} e]}} {{\n"
+            f'  puts "tapcell -row_min_width lỗi ($e), chạy lại không có"\n'
+            f"  {base}\n}}\n")
+
+
 def variant_name(rtl_hash: str, period_ns: float, fr_tag: str, orfs_vars: dict) -> str:
     extra = ""
     if orfs_vars != ORFS_DEFAULTS:
@@ -158,6 +171,8 @@ def prepare_design(orfs_dir: str, rtl: "S.SocRTL", period_ns: float, fakeram, fr
         changed.append("constraint.sdc")
     _put(d / "report.tcl", (HERE / "orfs" / "report.tcl").read_text())
     _put(d / "diag_floorplan.tcl", (HERE / "orfs" / "diag_floorplan.tcl").read_text())
+    if _put(d / "tapcell.tcl", tapcell_text(orfs_vars)):
+        changed.append("tapcell.tcl")
     lines = [f"# soc-fmax {FLOW_VERSION}: sinh bởi orfs_nodes.py, variant {variant}",
              f"export PLATFORM = {PLATFORM}", "export DESIGN_NAME = DigitalTop", f"export DESIGN_NICKNAME = {NICK}",
              f"export VERILOG_FILES = {cd}/soc.sv", f"export SDC_FILE = {cd}/constraint.sdc",
@@ -166,6 +181,7 @@ def prepare_design(orfs_dir: str, rtl: "S.SocRTL", period_ns: float, fakeram, fr
         lines += [f"export ADDITIONAL_LEFS = {cd}/fakeram/fakeram_sky130.lef",
                   f"export ADDITIONAL_LIBS = {cd}/fakeram/fakeram_sky130.lib",
                   f"export ADDITIONAL_GDS = {cd}/fakeram/fakeram_sky130.gds"]
+    lines.append(f"export TAPCELL_TCL = {cd}/tapcell.tcl")
     lines += [f"export {k} = {v}" for k, v in orfs_vars.items()]
     if _put(d / "config.mk", "\n".join(lines) + "\n"):
         changed.append("config.mk")
