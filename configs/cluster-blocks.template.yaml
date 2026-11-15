@@ -81,6 +81,11 @@ available_node_types:
             run_options:
                 - "--user $(id -u):$(id -g)"
                 - "-v ~/.claude:/home/ray/.claude:z"
+                # Agent đọc source Chipyard (chỉ đọc, cùng đường dẫn thật như khối chipyard). Agent sửa trên bản
+                # chép trong /tmp của container và trả patch; chỉ driver áp patch lên cây trên host.
+                # label=disable thay cho relabel (:z) cả cây Chipyard.
+                - --security-opt label=disable
+                - "-v ${CHIPYARD_FORK}:${CHIPYARD_FORK}:ro"
             run_setup_commands:
                 - echo "user:x:$(id -u):$(id -g)::/home/ray:/bin/bash" >> /etc/passwd
                 - cp /home/ray/.claude/.claude.json /home/ray/.claude.json
