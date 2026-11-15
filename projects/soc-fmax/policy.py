@@ -9,8 +9,9 @@ Một vòng được nhận khi:
      Fmax tăng hơn ngưỡng nhiễu, hoặc điểm họ (tổng slack các họ endpoint xấu nhất, âm) tăng hơn ngưỡng nhiễu.
 Ngưỡng nhiễu đo bằng các lần place baseline bị nhiễu nhẹ (soc_fmax.py --noise):
   ngưỡng = max(K × (lớn nhất − nhỏ nhất), mức tối thiểu), K = 1,5; tối thiểu 0,3 MHz và 0,2 ns điểm họ.
-Bộ lọc mức 1 (synth): bỏ place khi cả Fmax synth kém hơn bản tốt nhất quá `synth_margin` (5 %) và điểm họ synth
-không tốt hơn. Không nhận vòng nào chỉ dựa trên synth.
+Trong đợt (loop.py --phase asic), vòng được cộng dồn theo cùng luật nhưng trên số sau floorplan và ngưỡng nhiễu
+floorplan (decide_floorplan); chỉ bản cộng dồn cuối đợt mới qua luật đầy đủ ở trên (place + gate). Không dùng synth để
+chọn: đường găng synth khác place.
 """
 from __future__ import annotations
 
@@ -25,7 +26,6 @@ MIN_FAMILY_NS = 0.2
 class Budget:
     cycle: float = 1.03
     area: float = 1.15
-    synth_margin: float = 0.05
 
 
 @dataclass
@@ -51,7 +51,7 @@ class Point:
     fmax: float | None = None          # sau place
     family: float | None = None        # sau place
     area: float | None = None          # diện tích logic sau place (um2)
-    fp_fmax: float | None = None       # sau floorplan (loop.py --batch chain chọn vòng theo số này)
+    fp_fmax: float | None = None       # sau floorplan (loop.py --phase asic chọn vòng theo số này)
     fp_family: float | None = None
     fp_area: float | None = None
     period_ns: float | None = None
@@ -99,21 +99,6 @@ def gate_check(base_gate, gate, known_fail: list) -> tuple[bool, list]:
         elif c.get("minstret") != b.get("minstret"):
             reasons.append(f"benchmark {n}: minstret {c.get('minstret')} ≠ baseline {b.get('minstret')}")
     return not reasons, reasons
-
-
-def synth_filter(best: Point, cand: Point, noise: Noise, budget: Budget) -> tuple[bool, str]:
-    """True = đi tiếp tới place."""
-    if cand.synth_fmax is None:
-        return False, "synth không có Fmax"
-    if best.synth_fmax is None:
-        return True, "bản tốt nhất không có số synth"
-    worse_f = cand.synth_fmax < best.synth_fmax * (1 - budget.synth_margin)
-    fam_better = (cand.synth_family is not None and best.synth_family is not None
-                  and cand.synth_family > best.synth_family + noise.family_ns)
-    if worse_f and not fam_better:
-        return False, (f"synth Fmax {cand.synth_fmax:.2f} < {1 - budget.synth_margin:.2f} × bản tốt nhất "
-                       f"{best.synth_fmax:.2f} MHz, điểm họ synth không tốt hơn")
-    return True, f"synth Fmax {cand.synth_fmax:.2f} MHz (bản tốt nhất {best.synth_fmax:.2f})"
 
 
 def decide(base: Point, best: Point, cand: Point, noise: Noise, budget: Budget) -> Decision:

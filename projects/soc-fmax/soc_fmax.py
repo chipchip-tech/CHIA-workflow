@@ -397,9 +397,8 @@ def step_orfs(a, d: Path, stage: str, rtl, fakeram, mw: MemWatch, tm: Timer, pre
 
 
 def run_orfs_point(a, d: Path, rtl, fakeram, orfs_vars: dict, point: str, until: str, mw: MemWatch, tm: Timer,
-                   fatal: bool = True, stop_after_synth=None) -> tuple[dict, dict]:
+                   fatal: bool = True) -> tuple[dict, dict]:
     """Chuẩn bị design ORFS cho (RTL, chu kỳ, biến ORFS) rồi chạy synth → ... → `until`.
-    stop_after_synth(StageResult) -> str: trả lý do khác rỗng thì dừng sau synth (bộ lọc mức 1 của loop.py).
     Trả (prep, {bước: StageResult}); bước lỗi (fatal=False) là bước cuối trong dict."""
     prm = fakeram.Params(access_ns=a.fakeram_access_ns, um2_per_bit=a.fakeram_um2_per_bit)
     fr_tag = f"{fakeram.VERSION}a{a.fakeram_access_ns:g}u{a.fakeram_um2_per_bit:g}"
@@ -427,11 +426,6 @@ def run_orfs_point(a, d: Path, rtl, fakeram, orfs_vars: dict, point: str, until:
                    "(PLACE_DENSITY, die size, place theo vùng)")
             print("CẢNH BÁO: " + msg, flush=True)
             raise SystemExit(msg)
-        if stage == "synth" and stop_after_synth:
-            why = stop_after_synth(r)
-            if why:
-                print(f"  bộ lọc synth: dừng trước floorplan/place: {why}", flush=True)
-                break
     return prep, stages
 
 

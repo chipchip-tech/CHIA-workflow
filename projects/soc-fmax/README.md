@@ -41,8 +41,8 @@ vvadd, mm, spmv), `minstret` của mọi benchmark bằng baseline; thêm `func_
 
 | Mức | Công cụ | Dùng để |
 |---|---|---|
-| 1 | `make synth` của ORFS (Yosys phân cấp `SYNTH_HIERARCHICAL=1`, ABC ở chu kỳ mục tiêu) + OpenSTA với Liberty fakeram | lọc rẻ |
-| 2 | `make place` (global place + `repair_design` + detailed place), RC ước lượng từ placement | nhận/loại vòng |
+| 1 | `make synth` + `make floorplan` của ORFS (Yosys phân cấp `SYNTH_HIERARCHICAL=1`, ABC ở chu kỳ mục tiêu; floorplan sửa timing) + OpenSTA với Liberty fakeram | chọn vòng cộng dồn trong đợt (theo floorplan) |
+| 2 | `make place` (global place + `repair_design` + detailed place), RC ước lượng từ placement | nhận/loại bản cộng dồn cuối đợt |
 | 3 | CTS + route + GDS (M5) | khi đạt một bậc |
 
 - Fmax = 1000 / (chu kỳ − slack xấu nhất **không kể đường chạm cổng I/O**). Cổng I/O trễ 0 so với clock; đường I/O báo
@@ -82,7 +82,7 @@ vvadd, mm, spmv), `minstret` của mọi benchmark bằng baseline; thêm `func_
   - chi phí cycle ≤ 1,03 và diện tích logic ≤ 1,15 × baseline;
   - so với **bản tốt nhất hiện tại**: Fmax không giảm quá ngưỡng nhiễu, **và** Fmax hoặc điểm họ tăng hơn ngưỡng
     nhiễu.
-- Bộ lọc synth: bỏ floorplan và place khi Fmax synth kém bản tốt nhất quá 5 % và điểm họ synth không tốt hơn.
+- Trong đợt (pha asic) vòng được cộng dồn theo số sau floorplan và ngưỡng nhiễu floorplan; synth không dùng để chọn (đường găng synth khác place). Chỉ bản cộng dồn cuối đợt qua luật nhận đầy đủ sau place.
 - Ngưỡng nhiễu lấy từ `soc_fmax.py --noise`. Baseline chạy lại 4 lần: một lần y hệt (chỉ đổi tên variant),
   `PLACE_DENSITY` ±0,01 và `CORE_UTILIZATION` +1, mỗi lần đi từ synth tới place.
   Ngưỡng = max(1,5 × khoảng chênh, 0,3 MHz); với điểm họ thì tối thiểu là 0,2 ns.
@@ -97,8 +97,8 @@ vvadd, mm, spmv), `minstret` của mọi benchmark bằng baseline; thêm `func_
 | `orfs/report.tcl` | báo cáo trên kết quả một bước: WNS/TNS, 5000 đường xấu nhất (mỗi endpoint một đường), slack theo instance cấp 1 trên mọi endpoint, đếm thanh ghi theo clock, nhóm thanh ghi không clock, diện tích logic/macro |
 | `orfs/diag_floorplan.tcl` | chẩn đoán tay: macro (bbox, halo), blockage, và inst/pin/row trong một hộp (`SOCFMAX_BOX`) |
 | `func_check.py` | vết commit (`+verbose`) của 4 benchmark: ghi vết baseline, so ứng viên (taint bộ đếm, dừng ở `tohost`) |
-| `policy.py` | luật nhận/loại, bộ lọc synth, ngưỡng nhiễu (hàm thuần) |
-| `loop.py` | đợt N vòng: agent đề xuất patch → áp lên `~/tools/chipyard` → build (lỗi thì agent sửa, tối đa `--fix-retries`) → `--phase sim`: gate + func → ứng viên vào `candidates.json`; `--phase asic`: synth (lọc) → place → `chờ gate`, cuối đợt gate theo thứ tự Fmax, nhận vòng đầu tiên qua gate (`--gate-each`: gate từng vòng) → hoàn nguyên cây; `history.md`, `history.json`, `best.patch`, `results.csv`, log agent ở `runs/r<N>/`. Cuối job dọn ORFS, chỉ giữ bản tốt nhất. `--bypass empty,comment,broken,file:<patch>` thay agent (M2) |
+| `policy.py` | luật nhận/loại (place, và floorplan cho cộng dồn trong đợt), ngưỡng nhiễu (hàm thuần) |
+| `loop.py` | đợt N vòng: áp đầu chuỗi → agent đề xuất patch → build (lỗi thì agent sửa, tối đa `--fix-retries`) → `--phase sim`: gate + func → ứng viên vào `candidates.json`; `--phase asic` (mặc định): synth → floorplan → so đầu chuỗi → gate nhanh → cộng dồn; cuối đợt place + gate đủ bản cộng dồn, hỏng thì lùi → hoàn nguyên cây; `history.md`, `history.json`, `best.patch`, `results.csv`, log agent ở `runs/r<N>/`. Cuối job dọn ORFS, chỉ giữ bản tốt nhất. `--bypass empty,comment,broken,file:<patch>` thay agent |
 | `agent.py` | agent Claude Code trên khối claude: chép `.scala` của các submodule được sửa từ mount Chipyard chỉ đọc sang `/tmp`, viết `TASK.md` + `context/` (báo cáo ORFS baseline, lịch sử, lỗi build), chạy `claude --print` (`ClaudeCodeLLM`, có timeout), diff bản chép ra patch |
 | `memwatch.py` | RAM đỉnh từng container theo bước (`docker stats` mỗi 5 s, trên host) |
 | `exp.yaml` | cache/bypass: `ChiselBuildNode.build`, `extract_soc_rtl`, `run_gate`, `run_func`, `orfs_stage`; bypass agent (`agent_bypass_*`) |
@@ -206,39 +206,39 @@ func. r1 retiming `dfma` (dời tầng thanh ghi thừa sau round lên giữa pr
 func: lệch ở lệnh load đọc lại `mcycle` đã lưu (taint của `func_check` không theo giá trị bộ đếm qua bộ nhớ), nên mọi
 patch đổi số chu kỳ trước vùng đo đều hỏng func dù đúng chức năng. Chưa có số ORFS cho các ứng viên.
 
-## Gate cuối đợt (pha asic, từ M4; duyệt 15/11/2026)
+## Chạy M4: pha asic, đợt cộng dồn (duyệt 15/11/2026)
 
-`loop.py --phase asic` (mặc định) không gate từng vòng nữa. Mỗi vòng: agent → build (sửa build nếu lỗi) → RTL trùng thì
-bỏ → ORFS synth (lọc) → floorplan → place → so với bản tốt nhất (`policy.decide_place`: diện tích ≤ +15 %, Fmax hoặc
-điểm họ vượt ngưỡng nhiễu). Vòng tốt hơn ghi `chờ gate`; báo cáo place của nó (`context/r<N>_place.txt`) và Fmax trong
-`history.md` được đưa cho agent ở các vòng sau. Cuối đợt, các vòng `chờ gate` xếp theo Fmax sau place (rồi điểm họ):
-áp lại `tree.patch`, build (cache HIT), gate + func + ngân sách cycle; hỏng thì agent chẩn đoán và thử vòng kế tiếp;
-vòng đầu tiên qua được **nhận** (`best.patch`), các vòng còn lại ghi `chưa gate`. Mọi vòng trong đợt đi từ cùng bản tốt
-nhất đầu đợt; đợt sau (`--history-from`) đi tiếp từ bản được nhận. Hết lượt dùng agent giữa đợt thì vẫn gate các vòng
-đã đo (không chẩn đoán). `--gate-each` trả lại cách cũ (gate trước ORFS ở mọi vòng). Một vòng tốn khoảng agent + build +
-ORFS 14 phút; gate + func (khoảng 15 phút) chỉ chạy cho 1 vòng nếu vòng đo tốt nhất qua gate.
+`loop.py` chỉ còn hai pha: `--phase sim` (M3, gate mọi vòng, không ORFS) và `--phase asic` (mặc định), luôn chạy theo
+đợt cộng dồn:
 
-**Dọn ORFS sau mỗi job** (`soc_fmax.py` và `loop.py`): cuối job chỉ giữ `flow/{results,logs,reports,objects}` của bản
-tốt nhất (`loop.py`: bản tốt nhất của đợt; `soc_fmax.py`: baseline, vì lần chạy nhiễu là đo lại cùng RTL). Các variant
-khác mà job đã dùng bị xoá. Thư mục design (nhỏ) và cache CHIA (số đo) giữ nguyên, nên RTL đã đo vẫn không đo lại.
-`--keep-orfs` để giữ hết.
+1. Mỗi vòng: áp đầu chuỗi (bản tốt nhất + các vòng đã cộng dồn trong đợt) → agent sửa → build (lỗi thì agent sửa, tối
+   đa 2 lần) → RTL trùng thì bỏ → ORFS synth → floorplan (không lọc synth: đường găng synth `tlMasterXbar → btb` khác
+   place, còn floorplan đã thấy đúng FPU `dfma` như place) → so với đầu chuỗi theo ngưỡng nhiễu **floorplan** (tính từ
+   `results.csv` cạnh `noise.json`, các điểm `baseline`/`noise:*`; hoặc `--fp-noise FMAX,FAMILY`) → tốt hơn thì
+   **gate nhanh** (`--quick-gate isa`: riscv-tests ISA; `full`: ISA + benchmark + ngân sách cycle; `none`) → qua thì
+   **cộng dồn**, vòng sau xây trên đó. Agent nhận `context/r<N>_floorplan.txt` của các vòng trước.
+2. Cuối đợt: bản cộng dồn dài nhất chạy tới place, so với bản tốt nhất (ngưỡng nhiễu place), rồi gate đủ (gate + func
+   + cycle ≤ +3 %). Qua → **nhận** (`best.patch`), các vòng trong nó ghi `trong bản nhận`. Place không tốt hơn hoặc gate
+   hỏng → agent chẩn đoán, bỏ vòng cuối chuỗi rồi thử lại, tối đa `--max-backtrack` (2) lần lùi.
+3. Hết lượt dùng agent giữa đợt thì vẫn chạy bước 2 cho chuỗi đã có (không chẩn đoán). Đợt sau:
+   `--history-from ~/soc-fmax-runs/<run>`.
 
-## Đợt cộng dồn `--batch chain` (mặc định của pha asic; duyệt 15/11/2026)
-
-Mỗi vòng: agent sửa trên cây đã có các vòng cộng dồn trước của đợt → build → RTL trùng thì bỏ → ORFS synth → floorplan
-(không lọc synth: đường găng synth `tlMasterXbar → btb` khác place, còn floorplan đã thấy đúng FPU `dfma` như place) →
-so với đầu chuỗi theo ngưỡng nhiễu **floorplan** (tính từ `results.csv` cạnh `noise.json`, các điểm `baseline`/`noise:*`;
-hoặc `--fp-noise FMAX,FAMILY`) → tốt hơn thì **gate nhanh** (`--quick-gate isa`: riscv-tests ISA, tag `gate_q_*`; `full`:
-ISA + benchmark + ngân sách cycle; `none`) → qua thì **cộng dồn**, vòng sau xây trên đó. Agent nhận
-`context/r<N>_floorplan.txt` của các vòng trước. Cuối đợt: bản cộng dồn dài nhất chạy tới place, so với bản tốt nhất
-(ngưỡng nhiễu place), rồi gate đủ (gate + func + ngân sách cycle); place không tốt hơn hoặc gate hỏng thì bỏ vòng cuối
-chuỗi và thử lại, tối đa `--max-backtrack` (2) lần lùi. Bản qua được → `best.patch`; các vòng trong nó ghi
-`trong bản nhận`. Ước lượng một đợt 5 vòng: 5 × (agent 2 + floorplan 5 + gate nhanh ?) + place 14 + gate 15 phút (thời gian
-gate nhanh chưa đo). `--batch best`: mỗi vòng tới place, cuối đợt gate vòng đo tốt nhất (mục trên); `--batch each`: gate
-từng vòng như trước.
+Ước lượng một đợt 5 vòng: 5 × (agent 2 + build + floorplan 5 + gate nhanh) + place 9 + gate đủ 23 phút; thời gian
+build vòng và gate nhanh chưa đo; mỗi lần lùi thêm khoảng 32 phút.
 
 ```bash
 cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-id m4-a --working-dir . -- python loop.py --run-name m4-a --noise-json ~/soc-fmax-runs/m2-noise/noise.json --rounds 5
+```
+
+## Chạy lại từ đầu (xoá cache và mọi lần chạy)
+
+Xoá cache CHIA (`~/chia_cache/soc-fmax`), kết quả (`~/soc-fmax-runs`) và thư mục ORFS của project
+(`flow/{designs,results,logs,reports,objects}/sky130hd/soc_fmax`), khi cluster đã tắt (actor cache giữ chỉ mục trong
+bộ nhớ). Sau đó một job `soc_fmax.py --noise` làm lại baseline (build, gate, vết func, ORFS tới place) và đo nhiễu (4
+lần place), khoảng 2 giờ; rồi mới chạy loop (`--noise-json` trỏ tới `noise.json` mới).
+
+```bash
+rm -rf ~/chia_cache/soc-fmax ~/soc-fmax-runs && for d in designs results logs reports objects; do rm -rf ~/tools/OpenROAD-flow-scripts/flow/$d/sky130hd/soc_fmax; done
 ```
 
 ## Trạng thái kiểm chứng
@@ -330,17 +330,13 @@ cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-i
   - Vòng 1: patch rỗng 3 lần, ra `rỗng`. Vòng 2: `git apply` vào submodule `rocket-chip` thật, build thật 1,3 phút
     (sbt biên dịch lại), RTL hash vẫn `d2607fe708db`, ra `RTL trùng`, không đo lại. Vòng 3: sbt báo
     `RocketCore.scala:1389:1: expected class or object definition` sau 0,2 phút, agent sửa build (bypass) không sửa,
-    ra `build lỗi`.
   - Sau job, `generators/rocket-chip` sạch. Còn lại là trạng thái có sẵn từ trước, digest baseline đã tính cùng nó:
     `generators/gemmini` và `software/gemmini-rocc-tests` (`m`), `sims/firesim` (bỏ qua),
     `MinimalSoCConfig.scala` chưa track.
   - Dung lượng: mỗi variant ORFS tới place chiếm **2,3 GB** trong `flow/results` (5 variant nhiễu khoảng 11,5 GB), còn
-    `runs/<vòng>` chỉ 2–14 MB. Một đợt 5 vòng có thể thêm khoảng 11 GB: M4 cần dọn `flow/results` của vòng bị loại.
-- **`--batch chain` mới kiểm bằng mock (15/11/2026):** ngưỡng nhiễu floorplan đọc từ `results.csv`; 4 vòng agent giả:
+    `runs/<vòng>` chỉ 2–14 MB. Cuối mỗi job chỉ giữ variant của bản tốt nhất (`prune_orfs`).
+- **Pha asic cộng dồn mới kiểm bằng mock (15/11/2026, cả sau khi bỏ `--batch each/best`):** ngưỡng nhiễu floorplan đọc từ `results.csv`; 4 vòng agent giả:
   r1, r2, r4 cộng dồn, r3 hỏng gate nhanh; cuối đợt lùi r1+r2+r4 (hỏng func) → r1+r2 (hỏng func) → r1 nhận; cây sạch.
-- **Gate cuối đợt mới kiểm bằng mock (15/11/2026):** 3 patch đo tốt hơn baseline + 1 vòng rỗng → gate theo thứ tự Fmax
-  r2 (hỏng gate) → r1 (hỏng func) → r3 nhận; dọn ORFS giữ variant r3. Với agent giả: vòng 2 thấy `r1_place.txt`, RTL
-  trùng bị bỏ, cây sạch sau job.
 - Đường nhận vòng thật (gate/func/ORFS của ứng viên có RTL khác) chỉ có ở mock: session không viết thay đổi thiết
   kế, nên lần chạy thật đầu tiên của đường này là ở M3/M4.
 
@@ -351,6 +347,6 @@ cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-i
 | M1 | build → gate → fakeram → ORFS place 10 ns → Fmax/WNS, vùng, diện tích, thời gian/RAM, `results.csv`; lần hai từ cache | **xong 15/11/2026** (chạy thật, kể cả kiểm cache) |
 | M2 | `func_check.py` vào gate, đo nhiễu place, chốt ngưỡng nhận, orchestration với bypass LLM | **xong 15/11/2026** (chạy thật: func_check, nhiễu, loop bypass 3 vòng) |
 | M3 | pha sim có agent (tầng pipeline, chỉ đo cycle) → `candidates.json` | **xong 15/11/2026** (`m3-b` chạy thật: 4 ứng viên / 5 vòng) |
-| M4 | pha asic có agent, đợt 5 vòng cộng dồn theo floorplan, cuối đợt place + gate (hỏng thì lùi), tự xuống bậc | mã `--batch chain` xong, chạy mock 15/11/2026 |
+| M4 | pha asic có agent, đợt 5 vòng cộng dồn theo floorplan, cuối đợt place + gate (hỏng thì lùi), tự xuống bậc | mã xong, chạy mock 15/11/2026; chờ chạy lại từ đầu rồi `m4-a` |
 | M5 | CTS + route + GDS mỗi bậc đạt, timing sau route | chưa |
 | M6 | OpenRAM sky130 thật cho bản tốt nhất, GDS thật, so fakeram/OpenRAM | chưa |
