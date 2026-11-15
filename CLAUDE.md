@@ -78,6 +78,8 @@ Từ sandbox của Claude Code thường không resolve được domain này, n�
 - `chia down` không xoá được container asic (`scoped ray stop ... psutil`): `python3` trên PATH của image là
   `/opt/orfs-python` (3.14), không có `psutil`. Dockerfile đã cài `psutil`; kiểm chứng 09/11/2026:
   `ok=True`, container bị xoá sạch.
+- `python scripts/chia-up-blocks.py --down` (tự dò `THIS_MACHINE`; gọi thẳng `chia down` khi thiếu biến này thì `Head:` rỗng,
+  mọi `scoped ray stop` báo `psutil` và không xoá gì): kiểm chứng 15/11/2026, 4 container + Ray head `ok=True`, `docker ps` rỗng.
 
 **Đã chạy thật trên Chipyard 1.15.0** (14/11/2026; các mục có fork ở trên là với 1.10.0): toàn bộ `docs/reinstall.md`
 (bước 0–8): `scripts/setup-chipyard.sh --verify` (`VERIFY_OK`; bước 8–9 của `build-setup.sh` chạy riêng sau với `--privileged`),
