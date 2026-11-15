@@ -92,5 +92,37 @@ if {[catch {
 
 puts "@@NOCLOCK"
 if {[catch {check_setup -no_clock} e]} { puts "ERROR check_setup: $e" }
+
+# Thanh ghi không nhận clock `clk`, gộp theo 3 cấp instance đầu; kèm net ở chân clock của một thanh ghi mẫu
+# để biết nguồn clock (jtag TCK, clock chia, clock qua cổng gate...). Dòng: <nhóm> <số thanh ghi> <net mẫu>
+puts "@@NOCLOCK_GROUPS"
+if {[catch {
+  array set onclk {}
+  foreach c [all_registers -edge_triggered -clock clk] { set onclk([get_full_name $c]) 1 }
+  array set grp {}
+  array set smp {}
+  foreach c [all_registers -edge_triggered] {
+    set n [get_full_name $c]
+    if {[info exists onclk($n)]} { continue }
+    set parts [split $n /]
+    set last [expr {[llength $parts] - 2}]
+    if {$last > 2} { set last 2 }
+    set k [expr {$last < 0 ? "<top>" : [join [lrange $parts 0 $last] /]}]
+    if {[info exists grp($k)]} { incr grp($k) } else {
+      set grp($k) 1
+      set net "?"
+      catch {
+        foreach p [get_pins -of_objects $c] {
+          if {[get_property $p direction] eq "input" && [get_property $p lib_pin_name] in {CLK CLK_N GATE GATE_N}} {
+            set net [get_full_name [get_nets -of_objects $p]]
+            break
+          }
+        }
+      }
+      set smp($k) $net
+    }
+  }
+  foreach k [lsort [array names grp]] { puts "$k $grp($k) $smp($k)" }
+} e]} { puts "ERROR noclock_groups: $e" }
 puts "@@END"
 exit

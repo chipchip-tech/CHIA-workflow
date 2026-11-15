@@ -285,6 +285,11 @@ def print_stage(r: "O.StageResult"):
               f"({r.n_macro}), core {fmt(r.core_area_um2, 0)} um2", flush=True)
     if r.counts:
         print(f"  {r.counts}", flush=True)
+    if getattr(r, "noclock", ""):
+        rows = r.noclock.splitlines()
+        print(f"  thanh ghi không có clock clk, theo nhóm ({len(rows)} nhóm; số, nhóm, net clock mẫu):", flush=True)
+        for line in rows[:20]:
+            print("    " + line, flush=True)
     for s in r.steps:
         print(f"    {s['log']:32s} {s['elapsed_s'] / 60:7.1f} phút  RAM đỉnh {s['peak_mb'] / 1024:6.2f} GB", flush=True)
     if r.error:
@@ -309,6 +314,7 @@ def step_orfs(a, d: Path, stage: str, rtl, fakeram, mw: MemWatch, tm: Timer, pre
     write(d / f"endpoints_{stage}.txt", r.endpoints + "\n")
     write(d / f"paths_{stage}.rpt", r.paths + "\n")
     write(d / f"report_{stage}.log", r.report_log + "\n")
+    write(d / f"noclock_{stage}.txt", getattr(r, "noclock", "") + "\n")
     write(d / f"make_{stage}.tail", r.make_tail + "\n")
     print_stage(r)
     append_csv(Path(a.out) / "results.csv", stage_row(a, "baseline", r, minutes, peak, hit))

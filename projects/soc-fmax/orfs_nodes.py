@@ -26,7 +26,7 @@ from chia.base.ChiaFunction import ChiaFunction
 
 import soc_nodes as S
 
-FLOW_VERSION = "o1"                       # đổi khi đổi config.mk/SDC/script báo cáo
+FLOW_VERSION = "o2"                       # đổi khi đổi config.mk/SDC/script báo cáo
 PLATFORM = "sky130hd"
 NICK = "soc_fmax"
 C_ORFS = "/OpenROAD-flow-scripts"          # đường dẫn ORFS trong container asic
@@ -199,6 +199,7 @@ class StageResult:
     n_macro: int | None = None
     core_area_um2: float | None = None
     counts: dict = dataclasses.field(default_factory=dict)  # async pins, sync cells, unclocked...
+    noclock: str = ""   # "<nhóm instance> <số thanh ghi> <net clock mẫu>" mỗi dòng, xếp theo số giảm dần
     report_log: str = ""
 
 
@@ -287,6 +288,12 @@ def analyze_report(log: str, period_ns: float, r: StageResult) -> StageResult:
         p = line.split()
         if len(p) == 2 and re.fullmatch(r"-?\d+", p[1]):
             r.counts[p[0]] = int(p[1])
+    rows = []
+    for line in _section(log, "NOCLOCK_GROUPS").splitlines():
+        p = line.split()
+        if len(p) >= 2 and p[1].isdigit():
+            rows.append((int(p[1]), p[0], " ".join(p[2:])))
+    r.noclock = "\n".join(f"{n:6d}  {g}  {net}" for n, g, net in sorted(rows, reverse=True))
     errs = [l for l in log.splitlines() if l.startswith(("ERROR", "[ERROR"))]
     if errs:
         r.counts["report_errors"] = len(errs)
