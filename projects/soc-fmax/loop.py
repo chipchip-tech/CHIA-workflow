@@ -3,7 +3,9 @@ agent bằng câu trả lời dựng sẵn (M2).
 
 --phase sim (M3): chỉ đo đúng/cycle, không ORFS; vòng qua gate + func + ngân sách cycle thành ỨNG VIÊN
   (candidates.json), không cộng dồn (vòng nào cũng đi từ baseline).
---phase asic (M2, M4): đủ các bước dưới.
+--phase asic (M2, M4): đủ các bước dưới. Mặc định gate ở CUỐI ĐỢT: mỗi vòng chỉ build + ORFS; vòng nào sau place tốt
+  hơn bản tốt nhất (vượt nhiễu) thì `chờ gate`; cuối đợt xếp theo Fmax, gate vòng đầu, hỏng thì vòng kế tiếp; vòng
+  đầu tiên qua gate + func + ngân sách được nhận, các vòng sau ghi `chưa gate`. --gate-each: gate mọi vòng trước ORFS.
 
 Mỗi vòng:
   1. agent đề xuất một patch (unified diff, đường dẫn tính từ gốc Chipyard, có thể trải qua nhiều submodule);
@@ -11,8 +13,8 @@ Mỗi vòng:
   2. áp best.patch (các vòng đã nhận) + patch của vòng lên ~/tools/chipyard, build (tag theo digest cây);
      build lỗi -> agent sửa build (tối đa --fix-retries lần) -> vẫn lỗi thì loại;
   3. RTL hash đã đo (baseline hoặc vòng trước) -> bỏ, không đo lại;
-  4. gate (policy.gate_check) + func_check (so vết với baseline) + chi phí cycle; gate hỏng -> agent debug (ghi
-     lại chẩn đoán), loại;
+  4. (--gate-each / --phase sim) gate (policy.gate_check) + func_check (so vết với baseline) + chi phí cycle; gate
+     hỏng -> agent debug (ghi lại chẩn đoán), loại; mặc định bước này dời xuống cuối đợt (xem trên);
   5. synth (bộ lọc mức 1, policy.synth_filter) -> floorplan -> place -> policy.decide (so với bản tốt nhất,
      ngưỡng nhiễu từ noise.json);
   6. hoàn nguyên cây (git apply -R theo từng submodule), kiểm digest cây bằng digest baseline: khác thì dừng đợt.
@@ -247,9 +249,10 @@ class Round:
     summary: str = ""
     patch_stat: str = ""
     status: str = ""              # rỗng | agent lỗi | patch lỗi | build lỗi | RTL trùng | gate | cycle | func |
-                                  # ứng viên (sim) | synth | place | nhận | lỗi
+                                  # ứng viên (sim) | synth | place | chờ gate | chưa gate | nhận | lỗi
     accepted: bool = False
     candidate: bool = False       # --phase sim: qua gate + func + ngân sách cycle
+    pending: bool = False         # --phase asic (gate cuối đợt): đã đo ORFS, tốt hơn bản tốt nhất, chờ gate
     agent_minutes: float = 0.0
     reasons: list = dataclasses.field(default_factory=list)
     point: dict = dataclasses.field(default_factory=dict)
@@ -257,6 +260,8 @@ class Round:
     diagnosis: str = ""
     minutes: float = 0.0
     attempts: int = 1
+    gate_rank: int = 0            # thứ tự được gate ở cuối đợt (1 = đo tốt nhất)
+    gate_minutes: float = 0.0
 
 
 def patch_stat(patch: str) -> str:
@@ -277,6 +282,8 @@ def history_md(a, base: P.Point, best: P.Point, noise: P.Noise, rounds: list[Rou
         p = r.point or {}
         who = ("file:" + os.path.basename(r.bypass[5:])) if r.bypass.startswith("file:") else (r.bypass or "agent")
         res = "**NHẬN**" if r.accepted else ("**ỨNG VIÊN**" if r.candidate else r.status)
+        if r.gate_rank:
+            res += f" (gate #{r.gate_rank})"
         L.append(f"| {r.n} | {who} | {r.patch_stat} | {res} | "
                  f"{D.fmt(p.get('fmax'), 3)} | {D.fmt(p.get('family'))} | {D.fmt(p.get('cycle_cost'), 4)} | "
                  f"{D.fmt(p.get('area'), 0)} | {r.minutes:.1f} |")
@@ -312,6 +319,7 @@ class Ctx:
         self.measured = {base_rtl.hash: "baseline"}
         self.rounds: list[Round] = []
         self.candidates: list[dict] = []
+        self.pending: dict[int, dict] = {}     # vòng chờ gate cuối đợt: patch cây, patch agent, Point
         self.untracked = sorted(base_state.get("untracked_sha", {}))
         self.ctx_files = {"baseline_place.txt": stage_text(base_stages["place"]),
                           "baseline_synth.txt": stage_text(base_stages["synth"])}
@@ -396,10 +404,7 @@ def run_round(c: Ctx, n: int, kind: str) -> Round:
         return _round_body(c, n, kind, rd, d, tag_base, ctx_in, applied)
     finally:
         applied.revert()
-        after = get(S.tree_state.chia_remote(a.chipyard))
-        if after["digest"] != c.base_state["digest"]:
-            raise SystemExit(f"cây Chipyard sau khi hoàn nguyên vòng {n} KHÁC baseline (digest {after['digest'][:12]} ≠ "
-                             f"{c.base_state['digest'][:12]}): dừng đợt. Xem `git -C {a.chipyard} submodule foreach git status`.")
+        check_tree(c, f"vòng {n}")
 
 
 def _round_body(c: Ctx, n: int, kind: str, rd: Round, d: Path, tag_base: str, ctx_in: dict, applied: Applied) -> Round:
@@ -475,24 +480,9 @@ def _round_body(c: Ctx, n: int, kind: str, rd: Round, d: Path, tag_base: str, ct
             return rd
         c.measured[rtl.hash] = f"vòng {n}"
         pt = P.Point(name=f"r{n}", rtl_hash=rtl.hash, period_ns=a.period_ns)
-        g = D.step_gate(a, d, art, rtl, c.mw, c.tm, baseline=False, elfs=c.base_gate["elfs"])
-        pt.gate_ok, pt.gate_reasons = P.gate_check(c.base_gate["gate"], g["gate"], c.base_gate["known_fail"])
-        pt.cycle_cost = S.cycle_cost(c.base_gate["gate"], g["gate"])
-        if pt.gate_ok:
-            fr = D.step_func(a, d, art, rtl, c.base_gate["elfs"], c.mw, c.tm, base=c.func_base,
-                             base_hash=c.base_rtl.hash)
-            pt.func_ok = fr.ok
-            pt.func_reasons = [f"{b}: {r.message}" for b, r in fr.benches.items() if not r.ok]
-        rd.point = pt.as_dict()
-        if not pt.gate_ok or not pt.func_ok:
-            dg = ask("agent_debug", agent_debug, {**ctx_in, "patch": patch,
-                                                  "failures": pt.gate_reasons + pt.func_reasons}, kind, a,
-                     f"{tag_base}_dbg", d, rd)
-            rd.diagnosis = dg.get("diagnosis", "")
-        if not pt.gate_ok or not pt.func_ok or pt.cycle_cost is None or pt.cycle_cost > c.budget.cycle:
-            dec = P.decide(c.base, c.best, pt, c.noise, c.budget)
-            rd.status, rd.reasons = dec.stage, dec.reasons
-            return rd
+        if a.phase == "sim" or a.gate_each:
+            if not gate_point(c, d, art, rtl, pt, patch, ctx_in, kind, tag_base, rd):
+                return rd
         if a.phase == "sim":
             rd.candidate, rd.status = True, "ứng viên"
             rd.reasons = [f"gate + func đạt, chi phí cycle {pt.cycle_cost:.4f} ≤ {c.budget.cycle:.2f}"]
@@ -521,11 +511,110 @@ def _round_body(c: Ctx, n: int, kind: str, rd: Round, d: Path, tag_base: str, ct
             return rd
         pt.fmax, pt.family, pt.area = st["place"].fmax_mhz, st["place"].family_score, st["place"].std_area_um2
         rd.point = pt.as_dict()
+        c.ctx_files[f"r{n}_place.txt"] = stage_text(st["place"])
+        if not a.gate_each:
+            dec = P.decide_place(c.base, c.best, pt, c.noise, c.budget)
+            rd.reasons = dec.reasons
+            if dec.accept:
+                rd.pending, rd.status = True, "chờ gate"
+                c.pending[n] = {"tree_patch": cand_patch, "patch": patch, "point": pt, "tag_base": tag_base,
+                                "kind": kind}
+            else:
+                rd.status = dec.stage
+            return rd
         dec = P.decide(c.base, c.best, pt, c.noise, c.budget)
         rd.accepted, rd.status, rd.reasons = dec.accept, ("nhận" if dec.accept else dec.stage), dec.reasons
         if dec.accept:
             c.best, c.best_patch = pt, cand_patch
         return rd
+
+
+def gate_point(c: Ctx, d: Path, art, rtl, pt: P.Point, patch: str, ctx_in: dict, kind: str, tag_base: str,
+               rd: Round, debug: bool = True) -> bool:
+    """gate + func_check + chi phí cycle; hỏng thì agent chẩn đoán (debug=True) và ghi trạng thái vào rd."""
+    a = c.a
+    g = D.step_gate(a, d, art, rtl, c.mw, c.tm, baseline=False, elfs=c.base_gate["elfs"])
+    pt.gate_ok, pt.gate_reasons = P.gate_check(c.base_gate["gate"], g["gate"], c.base_gate["known_fail"])
+    pt.cycle_cost = S.cycle_cost(c.base_gate["gate"], g["gate"])
+    if pt.gate_ok:
+        fr = D.step_func(a, d, art, rtl, c.base_gate["elfs"], c.mw, c.tm, base=c.func_base,
+                         base_hash=c.base_rtl.hash)
+        pt.func_ok = fr.ok
+        pt.func_reasons = [f"{b}: {r.message}" for b, r in fr.benches.items() if not r.ok]
+    rd.point = pt.as_dict()
+    if (not pt.gate_ok or not pt.func_ok) and debug:
+        dg = ask("agent_debug", agent_debug, {**ctx_in, "patch": patch,
+                                              "failures": pt.gate_reasons + pt.func_reasons}, kind, a,
+                 f"{tag_base}_dbg", d, rd)
+        rd.diagnosis = dg.get("diagnosis", "")
+    if not pt.gate_ok or not pt.func_ok or pt.cycle_cost is None or pt.cycle_cost > c.budget.cycle:
+        dec = P.decide(c.base, c.best, pt, c.noise, c.budget)
+        rd.status, rd.reasons = dec.stage, dec.reasons + rd.reasons
+        return False
+    return True
+
+
+def finish_batch(c: Ctx, debug: bool = True):
+    """Gate cuối đợt (--phase asic, mặc định): xếp các vòng chờ gate theo Fmax sau place (rồi điểm họ), gate lần lượt;
+    vòng đầu tiên qua gate + func + ngân sách cycle được nhận, các vòng sau ghi `chưa gate`."""
+    a = c.a
+    if not c.pending:
+        print("\n== cuối đợt: không vòng nào đo tốt hơn bản tốt nhất, không gate", flush=True)
+        return
+    rounds = {r.n: r for r in c.rounds}
+    order = sorted(c.pending, key=lambda n: (-(c.pending[n]["point"].fmax or 0),
+                                             -(c.pending[n]["point"].family or -1e9)))
+    print("\n== cuối đợt: gate theo thứ tự Fmax sau place: " +
+          ", ".join(f"r{n} {D.fmt(c.pending[n]['point'].fmax, 3)} MHz" for n in order), flush=True)
+    won = None
+    for k, n in enumerate(order, 1):
+        rd, info = rounds[n], c.pending[n]
+        if won is not None:
+            rd.status = "chưa gate"
+            rd.reasons = [f"r{won} đã được nhận trước (Fmax cao hơn)"] + rd.reasons
+            continue
+        print(f"\n######## gate r{n} (hạng {k}/{len(order)})", flush=True)
+        t0 = time.time()
+        d = Path(a.out) / "runs" / f"r{n}"
+        rd.gate_rank, rd.pending = k, False
+        pt = info["point"]
+        applied = Applied(a.chipyard)
+        try:
+            applied.apply(info["tree_patch"], c.subs)      # tree.patch = best.patch + patch của vòng
+            _state, art, rtl = D.step_rtl(a, d, c.mw, c.tm, baseline=False)   # cache HIT (cùng digest cây)
+            if rtl is None or rtl.hash != pt.rtl_hash:
+                rd.status, rd.reasons = "lỗi", [f"build lại r{n} cho gate ra RTL khác ({rtl.hash[:12] if rtl else 'lỗi'})"]
+                continue
+            ok = gate_point(c, d, art, rtl, pt, info["patch"], agent_context(c, n), info["kind"], info["tag_base"],
+                            rd, debug=debug)
+        except AgentStop as e:
+            print(f"  (agent không chẩn đoán được: {e})", flush=True)
+            ok, debug = False, False
+        except Exception as e:      # noqa: BLE001
+            traceback.print_exc()
+            rd.status, rd.reasons = "lỗi", [f"gate cuối đợt: {type(e).__name__}: {e}"[:1500]]
+            ok = False
+        finally:
+            applied.revert()
+            check_tree(c, f"gate r{n}")
+            rd.gate_minutes = (time.time() - t0) / 60
+        if ok:
+            dec = P.decide(c.base, c.best, pt, c.noise, c.budget)
+            rd.point = pt.as_dict()
+            rd.accepted, rd.status = dec.accept, ("nhận" if dec.accept else dec.stage)
+            rd.reasons = [f"gate + func đạt, chi phí cycle {pt.cycle_cost:.4f}"] + dec.reasons
+            if dec.accept:
+                c.best, c.best_patch, won = pt, info["tree_patch"], n
+        print(f"r{n}: {'NHẬN' if rd.accepted else rd.status} (gate {rd.gate_minutes:.1f} phút)", flush=True)
+        save(Path(a.out), a, c)
+    c.pending.clear()
+
+
+def check_tree(c: Ctx, what: str):
+    after = get(S.tree_state.chia_remote(c.a.chipyard))
+    if after["digest"] != c.base_state["digest"]:
+        raise SystemExit(f"cây Chipyard sau khi hoàn nguyên {what} KHÁC baseline (digest {after['digest'][:12]} ≠ "
+                         f"{c.base_state['digest'][:12]}): dừng đợt. Xem `git -C {c.a.chipyard} submodule foreach git status`.")
 
 
 # ---------------------------------------------------------------------------
@@ -542,6 +631,9 @@ def parse_args():
     ap.add_argument("--agent-timeout", type=int, default=1800, help="giây cho mỗi phiên agent")
     ap.add_argument("--agent-keep-workspace", action="store_true", help="giữ /tmp/socfmax-agent/<tag> trên khối claude")
     ap.add_argument("--fix-retries", type=int, default=2, help="số lần agent sửa build mỗi vòng")
+    ap.add_argument("--gate-each", action="store_true",
+                    help="--phase asic: gate mọi vòng trước ORFS (cách cũ). Mặc định: đo ORFS mọi vòng, cuối đợt chỉ "
+                         "gate vòng đo tốt nhất, hỏng thì vòng tốt kế tiếp")
     ap.add_argument("--bypass", default="", help="M2: thay agent bằng câu trả lời dựng sẵn, vd empty,comment,broken")
     ap.add_argument("--empty-retries", type=int, default=2, help="hỏi lại agent bao nhiêu lần khi patch rỗng")
     ap.add_argument("--noise-json", required=True, help="noise.json của soc_fmax.py --noise")
@@ -629,6 +721,14 @@ def main():
             for x in rd.reasons[:6]:
                 print("    " + x.splitlines()[0][:300] if x else "", flush=True)
             save(out, a, c)
+        if a.phase == "asic" and not a.gate_each:
+            finish_batch(c)
+    except AgentStop as e:
+        print(f"\nDỪNG: {e}", flush=True)
+        if c is not None and c.pending:
+            print("gate các vòng đã đo (không có agent chẩn đoán)", flush=True)
+            finish_batch(c, debug=False)
+        raise
     except SystemExit as e:
         print(f"\nDỪNG: {e}", flush=True)
         raise
@@ -648,7 +748,8 @@ def main():
 def save(out: Path, a, c: Ctx):
     D.write(out / "history.json", json.dumps({"rounds": [dataclasses.asdict(r) for r in c.rounds],
                                               "best": c.best.as_dict(), "measured": c.measured,
-                                              "candidates": c.candidates}, indent=2, default=str))
+                                              "candidates": c.candidates,
+                                              "pending": sorted(c.pending)}, indent=2, default=str))
     D.write(out / "best.patch", c.best_patch)
     D.write(out / "candidates.json", json.dumps(c.candidates, indent=2))
     D.write(out / "history.md", history_md(a, c.base, c.best, c.noise, c.rounds))

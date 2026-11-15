@@ -120,6 +120,11 @@ def decide(base: Point, best: Point, cand: Point, noise: Noise, budget: Budget) 
         return Decision(False, "func", list(cand.func_reasons) or ["func_check hỏng"])
     if cand.cycle_cost is None or cand.cycle_cost > budget.cycle:
         return Decision(False, "gate", [f"chi phí cycle {cand.cycle_cost} > {budget.cycle}"])
+    return decide_place(base, best, cand, noise, budget)
+
+
+def decide_place(base: Point, best: Point, cand: Point, noise: Noise, budget: Budget) -> Decision:
+    """Chỉ phần ORFS của decide (diện tích, Fmax, điểm họ); loop.py dùng để xếp hạng trước khi gate."""
     if cand.fmax is None:
         return Decision(False, "place", ["không có Fmax sau place"])
     reasons = []

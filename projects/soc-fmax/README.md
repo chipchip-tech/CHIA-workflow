@@ -98,7 +98,7 @@ vvadd, mm, spmv), `minstret` của mọi benchmark bằng baseline; thêm `func_
 | `orfs/diag_floorplan.tcl` | chẩn đoán tay: macro (bbox, halo), blockage, và inst/pin/row trong một hộp (`SOCFMAX_BOX`) |
 | `func_check.py` | vết commit (`+verbose`) của 4 benchmark: ghi vết baseline, so ứng viên (taint bộ đếm, dừng ở `tohost`) |
 | `policy.py` | luật nhận/loại, bộ lọc synth, ngưỡng nhiễu (hàm thuần) |
-| `loop.py` | đợt N vòng: agent đề xuất patch → áp lên `~/tools/chipyard` → build (lỗi thì agent sửa, tối đa `--fix-retries`) → gate + func → `--phase sim`: ứng viên vào `candidates.json`; `--phase asic`: synth (lọc) → place → nhận/loại → hoàn nguyên cây; `history.md`, `history.json`, `best.patch`, `results.csv`, log agent ở `runs/r<N>/`. Cuối job dọn ORFS, chỉ giữ bản tốt nhất. `--bypass empty,comment,broken,file:<patch>` thay agent (M2) |
+| `loop.py` | đợt N vòng: agent đề xuất patch → áp lên `~/tools/chipyard` → build (lỗi thì agent sửa, tối đa `--fix-retries`) → `--phase sim`: gate + func → ứng viên vào `candidates.json`; `--phase asic`: synth (lọc) → place → `chờ gate`, cuối đợt gate theo thứ tự Fmax, nhận vòng đầu tiên qua gate (`--gate-each`: gate từng vòng) → hoàn nguyên cây; `history.md`, `history.json`, `best.patch`, `results.csv`, log agent ở `runs/r<N>/`. Cuối job dọn ORFS, chỉ giữ bản tốt nhất. `--bypass empty,comment,broken,file:<patch>` thay agent (M2) |
 | `agent.py` | agent Claude Code trên khối claude: chép `.scala` của các submodule được sửa từ mount Chipyard chỉ đọc sang `/tmp`, viết `TASK.md` + `context/` (báo cáo ORFS baseline, lịch sử, lỗi build), chạy `claude --print` (`ClaudeCodeLLM`, có timeout), diff bản chép ra patch |
 | `memwatch.py` | RAM đỉnh từng container theo bước (`docker stats` mỗi 5 s, trên host) |
 | `exp.yaml` | cache/bypass: `ChiselBuildNode.build`, `extract_soc_rtl`, `run_gate`, `run_func`, `orfs_stage`; bypass agent (`agent_bypass_*`) |
@@ -198,6 +198,25 @@ cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-i
 
 Tham số agent: `--agent-model`, `--agent-effort`, `--agent-timeout` (giây), `--agent-max-turns`, `--fix-retries`,
 `--agent-keep-workspace` (giữ bản chép trong `/tmp/socfmax-agent/` của container claude để xem lại).
+
+**Kết quả `m3-b` (chạy thật 15/11/2026, 5 vòng, khoảng 17–18 phút mỗi vòng, agent 1,2–2,7 phút):** 4 ứng viên, 1 hỏng
+func. r1 retiming `dfma` (dời tầng thanh ghi thừa sau round lên giữa preMul và bộ nhân, giữ latency 4) trong
+`FPU.scala`; r2, r4, r5 rút ngắn đường `mshrs → Scheduler request.ready → sinkA putbuffer` của L2 mà không đổi chu kỳ
+(ghi sớm `ListBuffer`, `ready` riêng cho kênh A, so tag tính trước theo MSHR); r3 thêm `Queue(sinkA.io.req, 2)` → hỏng
+func: lệch ở lệnh load đọc lại `mcycle` đã lưu (taint của `func_check` không theo giá trị bộ đếm qua bộ nhớ), nên mọi
+patch đổi số chu kỳ trước vùng đo đều hỏng func dù đúng chức năng. Chưa có số ORFS cho các ứng viên.
+
+## Gate cuối đợt (pha asic, từ M4; duyệt 15/11/2026)
+
+`loop.py --phase asic` (mặc định) không gate từng vòng nữa. Mỗi vòng: agent → build (sửa build nếu lỗi) → RTL trùng thì
+bỏ → ORFS synth (lọc) → floorplan → place → so với bản tốt nhất (`policy.decide_place`: diện tích ≤ +15 %, Fmax hoặc
+điểm họ vượt ngưỡng nhiễu). Vòng tốt hơn ghi `chờ gate`; báo cáo place của nó (`context/r<N>_place.txt`) và Fmax trong
+`history.md` được đưa cho agent ở các vòng sau. Cuối đợt, các vòng `chờ gate` xếp theo Fmax sau place (rồi điểm họ):
+áp lại `tree.patch`, build (cache HIT), gate + func + ngân sách cycle; hỏng thì agent chẩn đoán và thử vòng kế tiếp;
+vòng đầu tiên qua được **nhận** (`best.patch`), các vòng còn lại ghi `chưa gate`. Mọi vòng trong đợt đi từ cùng bản tốt
+nhất đầu đợt; đợt sau (`--history-from`) đi tiếp từ bản được nhận. Hết lượt dùng agent giữa đợt thì vẫn gate các vòng
+đã đo (không chẩn đoán). `--gate-each` trả lại cách cũ (gate trước ORFS ở mọi vòng). Một vòng tốn khoảng agent + build +
+ORFS 14 phút; gate + func (khoảng 15 phút) chỉ chạy cho 1 vòng nếu vòng đo tốt nhất qua gate.
 
 **Dọn ORFS sau mỗi job** (`soc_fmax.py` và `loop.py`): cuối job chỉ giữ `flow/{results,logs,reports,objects}` của bản
 tốt nhất (`loop.py`: bản tốt nhất của đợt; `soc_fmax.py`: baseline, vì lần chạy nhiễu là đo lại cùng RTL). Các variant
@@ -299,6 +318,9 @@ khác mà job đã dùng bị xoá. Thư mục design (nhỏ) và cache CHIA (s�
     `MinimalSoCConfig.scala` chưa track.
   - Dung lượng: mỗi variant ORFS tới place chiếm **2,3 GB** trong `flow/results` (5 variant nhiễu khoảng 11,5 GB), còn
     `runs/<vòng>` chỉ 2–14 MB. Một đợt 5 vòng có thể thêm khoảng 11 GB: M4 cần dọn `flow/results` của vòng bị loại.
+- **Gate cuối đợt mới kiểm bằng mock (15/11/2026):** 3 patch đo tốt hơn baseline + 1 vòng rỗng → gate theo thứ tự Fmax
+  r2 (hỏng gate) → r1 (hỏng func) → r3 nhận; dọn ORFS giữ variant r3. Với agent giả: vòng 2 thấy `r1_place.txt`, RTL
+  trùng bị bỏ, cây sạch sau job.
 - Đường nhận vòng thật (gate/func/ORFS của ứng viên có RTL khác) chỉ có ở mock: session không viết thay đổi thiết
   kế, nên lần chạy thật đầu tiên của đường này là ở M3/M4.
 
@@ -308,7 +330,7 @@ khác mà job đã dùng bị xoá. Thư mục design (nhỏ) và cache CHIA (s�
 |---|---|---|
 | M1 | build → gate → fakeram → ORFS place 10 ns → Fmax/WNS, vùng, diện tích, thời gian/RAM, `results.csv`; lần hai từ cache | **xong 15/11/2026** (chạy thật, kể cả kiểm cache) |
 | M2 | `func_check.py` vào gate, đo nhiễu place, chốt ngưỡng nhận, orchestration với bypass LLM | **xong 15/11/2026** (chạy thật: func_check, nhiễu, loop bypass 3 vòng) |
-| M3 | pha sim có agent (tầng pipeline, chỉ đo cycle) → `candidates.json` | mã xong, chạy mock 15/11/2026; chờ `m3-a` |
-| M4 | pha asic có agent, 5 vòng, nhận/loại theo place, tự xuống bậc | chưa |
+| M3 | pha sim có agent (tầng pipeline, chỉ đo cycle) → `candidates.json` | **xong 15/11/2026** (`m3-b` chạy thật: 4 ứng viên / 5 vòng) |
+| M4 | pha asic có agent, 5 vòng, đo place mọi vòng, gate cuối đợt chỉ bản đo tốt nhất (hỏng thì bản kế), tự xuống bậc | mã gate cuối đợt xong, chạy mock 15/11/2026 |
 | M5 | CTS + route + GDS mỗi bậc đạt, timing sau route | chưa |
 | M6 | OpenRAM sky130 thật cho bản tốt nhất, GDS thật, so fakeram/OpenRAM | chưa |

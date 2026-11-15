@@ -237,8 +237,14 @@ whose cycle cost you can argue is small (e.g. FPU latency, cache/TileLink queue 
 BTB paths). Avoid repeating an idea already listed in `context/history.md` unless you fix why it failed.
 """
 
-PHASE_ASIC = """This is the ASIC phase: the round is measured after place against the current best and accepted only if
-Fmax (or the endpoint-family score) improves beyond the measured noise threshold. Propose ONE focused change.
+PHASE_ASIC = """This is the ASIC phase: the round is measured by ORFS after place against the current best (the tree you
+see). The functional gate (riscv-tests, equal minstret, commit-trace comparison with the baseline, cycle budget) is
+run only at the END of the batch, on the measured rounds ranked by Fmax: the best one that passes is accepted, the
+rest are discarded. So a patch that wins on timing but breaks function or changes the cycle count before the
+measured region (the trace compares values loaded from memory, e.g. saved mcycle) wastes the whole batch's best slot:
+prefer cycle-exact changes (retiming, logic restructuring) unless the cycle cost is clearly worth it.
+`context/r<N>_place.txt` are the ORFS reports of rounds already measured in this batch; `context/history.md` lists
+their Fmax. Propose ONE focused change, different from the rounds already in this batch.
 """
 
 FIX = """The previous patch of this round FAILED TO BUILD. Your copy already contains that patch (the files as they were
