@@ -315,6 +315,7 @@ def step_orfs(a, d: Path, stage: str, rtl, fakeram, mw: MemWatch, tm: Timer, pre
     write(d / f"paths_{stage}.rpt", r.paths + "\n")
     write(d / f"report_{stage}.log", r.report_log + "\n")
     write(d / f"top_slack_{stage}.txt", getattr(r, "top_slack", "") + "\n")
+    write(d / f"top_worst_{stage}.txt", getattr(r, "top_worst", "") + "\n")
     write(d / f"noclock_{stage}.txt", getattr(r, "noclock", "") + "\n")
     write(d / f"make_{stage}.tail", r.make_tail + "\n")
     print_stage(r)

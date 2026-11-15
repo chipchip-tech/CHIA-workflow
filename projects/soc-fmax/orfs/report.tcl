@@ -76,18 +76,25 @@ if {[catch {
       }
     }
   } e]} { puts "ERROR top_slack macro: $e" }
-  array set ws {}; array set nn {}; array set ng {}
+  array set ws {}; array set nn {}; array set ng {}; array set wp {}
+  set gw ""; set gp ""
   foreach p $pins {
     set sl [get_property $p slack_max]
     if {![string is double -strict $sl]} { continue }
     set k [lindex [split [get_full_name $p] /] 0]
-    if {![info exists ws($k)]} { set ws($k) $sl; set nn($k) 0; set ng($k) 0 }
-    if {$sl < $ws($k)} { set ws($k) $sl }
+    if {![info exists ws($k)]} { set ws($k) $sl; set nn($k) 0; set ng($k) 0; set wp($k) $p }
+    if {$sl < $ws($k)} { set ws($k) $sl; set wp($k) $p }
+    if {$gw eq "" || $sl < $gw} { set gw $sl; set gp $p }
     incr nn($k)
     if {$sl < 0} { incr ng($k) }
   }
-  foreach k [lsort [array names ws]] { puts "$k $ws($k) $nn($k) $ng($k)" }
+  foreach k [lsort [array names ws]] { puts "$k $ws($k) $nn($k) $ng($k) [get_full_name $wp($k)]" }
 } e]} { puts "ERROR top_slack: $e" }
+# Đường tới endpoint xấu nhất theo slack_max của chân (đối chiếu với @@WORST; o4 synth: chân -52 ns, WNS -9 ns)
+puts "@@TOP_WORST"
+if {[info exists gp] && $gp ne ""} {
+  if {[catch {report_checks -path_delay max -to $gp -fields {slew cap fanout} -digits 3} e]} { puts "ERROR top_worst: $e" }
+}
 
 puts "@@ENDPOINTS"
 if {[catch {report_checks -path_delay max -group_path_count 3000 -format end -digits 3} e]} {

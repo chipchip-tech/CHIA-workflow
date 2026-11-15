@@ -27,7 +27,7 @@ from chia.base.ChiaFunction import ChiaFunction
 import soc_nodes as S
 
 FLOW_VERSION = "o4"                       # đổi khi đổi config.mk/SDC/tapcell (chạy lại ORFS từ synth)
-REPORT_VERSION = "r2"                     # đổi khi chỉ đổi report.tcl/cách đọc (make không chạy lại, chỉ báo cáo)
+REPORT_VERSION = "r3"                     # đổi khi chỉ đổi report.tcl/cách đọc (make không chạy lại, chỉ báo cáo)
 PLATFORM = "sky130hd"
 NICK = "soc_fmax"
 C_ORFS = "/OpenROAD-flow-scripts"          # đường dẫn ORFS trong container asic
@@ -229,6 +229,7 @@ class StageResult:
     core_area_um2: float | None = None
     counts: dict = dataclasses.field(default_factory=dict)  # async pins, sync cells, unclocked...
     top_slack: str = ""  # "<instance cấp 1> <vùng> <slack> <số endpoint> <số âm>" mỗi dòng (mọi endpoint)
+    top_worst: str = ""  # report_checks tới chân có slack_max xấu nhất
     noclock: str = ""   # "<nhóm instance> <số thanh ghi> <net clock mẫu>" mỗi dòng, xếp theo số giảm dần
     report_log: str = ""
 
@@ -307,11 +308,11 @@ def analyze_report(log: str, period_ns: float, r: StageResult) -> StageResult:
     agg, rows = {}, []
     for line in _section(log, "TOP_SLACK").splitlines():
         p = line.split()
-        if len(p) != 4 or not re.fullmatch(r"-?[\d.]+(?:e[-+]?\d+)?", p[1]):
+        if len(p) not in (4, 5) or not re.fullmatch(r"-?[\d.]+(?:e[-+]?\d+)?", p[1]):
             continue
         top, sl, n, neg = p[0], float(p[1]), int(p[2]), int(p[3])
         reg = S.region_of(top + "/x")
-        rows.append(f"{top:40s} {reg:7s} {sl:9.3f} {n:7d} {neg:7d}")
+        rows.append(f"{top:40s} {reg:7s} {sl:9.3f} {n:7d} {neg:7d}  {p[4] if len(p) > 4 else ''}")
         a = agg.setdefault(reg, {"slack": sl, "count": 0, "neg": 0})
         a["slack"] = min(a["slack"], sl)
         a["count"] += n
@@ -325,6 +326,7 @@ def analyze_report(log: str, period_ns: float, r: StageResult) -> StageResult:
         else:
             cur["slack"] = min(cur["slack"], a["slack"])
             cur["count"], cur["neg"] = a["count"], a["neg"]
+    r.top_worst = _section(log, "TOP_WORST")[:20000]
     r.endpoints = _section(log, "ENDPOINTS")
     r.families = S.endpoint_families(r.endpoints, 25)
     r.family_score = S.family_score(r.endpoints) if r.endpoints else None
