@@ -5,9 +5,15 @@
 Timing và diện tích là **giả định**, giống nhau cho mọi lần đo: dùng để so các bản RTL với nhau, không
 phải số sign-off.
 
-**Trạng thái:** sinh file và đọc lại được trong sandbox (GDS đọc bằng `gdstk`, Liberty bằng
-`liberty-parser`, tên/độ rộng chân khớp header `*_ext` mẫu). **Chưa chạy với OpenROAD/ORFS**: lần đầu là
-bước `fakeram` + floorplan của `project/soc-fmax-sky130` (M1).
+**Trạng thái:** đã chạy thật qua ORFS sky130hd tới place (15/11/2026, project `soc-fmax-sky130`, 10 macro của
+`MinimalSoCConfig`): Yosys đọc Liberty/blackbox, macro placement, PDN, OpenSTA đều chạy. Chưa qua CTS/route/GDS.
+
+Hai điều gặp khi chạy:
+- Chân clock của macro (`*_clk`) có `slack_max` trước CTS mà không phải endpoint dữ liệu (`report_checks -to` báo
+  `No paths found`, OpenSTA cho −52 ns ở synth). Khi tính slack trên mọi chân vào của macro, bỏ các chân này.
+- Tapcell mặc định của sky130hd (`tapcell -distance 14`) đặt tapcell lên mảnh row hẹp giữa mép core và macro, nằm
+  trong halo, làm PDN lỗi `PDN-0179` (kênh met1 hẹp). Tăng `MACRO_PLACE_HALO` không sửa được; cần `TAPCELL_TCL` riêng
+  với `-halo_width_x/-halo_width_y` bằng halo macro và `-row_min_width` (project dùng 40 µm và 80 µm).
 
 ## Macro nào được sinh
 
