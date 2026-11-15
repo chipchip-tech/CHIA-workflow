@@ -113,7 +113,22 @@ Tuỳ chọn hay dùng: `--orfs-var PLACE_DENSITY=0.5` (hoặc `CORE_UTILIZATION
   `EICG_wrapper`, hash không đổi khi chỉ dịch dòng Scala), SDC, chuẩn bị design (lần hai không ghi lại file nào), đọc báo
   cáo (vùng, đường găng không I/O, họ endpoint, diện tích), đọc log `Elapsed/Peak memory`; toàn bộ `soc_fmax.py` trên
   cluster Ray cục bộ với node giả: lần 1 chạy hết, lần 2 mọi bước `cache HIT`, bước lỗi không bị giữ trong cache.
-- **Chưa chạy thật:** mọi thứ trên máy người dùng. Chỗ dễ lỗi nhất: tên file/cổng của Chipyard 1.15.0 (`*.top.mems.conf`,
+- **Chạy thật (15/11/2026, run `m1`):**
+  - `--until rtl`: build `MinimalSoCConfig` (đã build sẵn nên 0,6 phút), `DigitalTop` 380 module, RTL hash `d2607fe708db`,
+    không có `EICG_wrapper`. Instance cấp 1: `tile_prci_domain` (tile), `coh_wrapper` (L2), `sbus/mbus/cbus/pbus/fbus`
+    (bus), còn lại uncore. Macro: `cc_banks_0_ext` 4096×64 ×4 (L2 data 128 KiB), `cc_dir_ext` 512×68, dcache data
+    512×256 + tag 64×88, icache data 512×128 ×2 + tag 64×84 (10 instance). `sims/firesim` có `env.sh.backup` chưa track:
+    bỏ qua (chỉ submodule `generators/`, `tools/` phải sạch).
+  - `--until gate`: ISA 106/107 (`rv64ui-p-ma_data` hỏng sẵn, loại khỏi gate), 8 benchmark pass, `mcycle` giống hệt khi đổi
+    seed; 14,1 phút trên 4 slot verilator, RAM đỉnh tổng 2,5 GB. Build/RTL đọc từ cache.
+
+    | dhrystone | median | multiply | qsort | towers | vvadd | mm | spmv |
+    |---|---|---|---|---|---|---|---|
+    | 231 546 | 6 593 | 27 923 | 172 798 | 3 563 | 2 474 | 25 155 | 54 036 |
+  - Log có một lỗi Ray `grpc ... port 10050 Address already in use` của một worker phụ (các container cùng `--net=host`
+    tranh dải cổng worker của Ray); Ray tự thử lại, gate không bị ảnh hưởng. Lặp lại nhiều thì tách dải
+    `--min-worker-port/--max-worker-port` theo khối (sửa trên `setup`).
+- **Chưa chạy thật:** bước synth/floorplan/place. Chỗ dễ lỗi nhất: tên file/cổng của Chipyard 1.15.0 (`*.top.mems.conf`,
   cổng clock `*_clock` của `DigitalTop`), luật vùng, Yosys 0.68 đọc RTL SoC, fakeram với PDN/macro placement của ORFS,
   `make run RUN_SCRIPT=...` của bản ORFS trong image, thời gian và RAM của place.
 
