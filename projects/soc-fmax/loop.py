@@ -1,17 +1,23 @@
-"""loop.py: một đợt vòng tối ưu Fmax (M2: agent bị bypass; M3/M4 thay bằng agent thật).
+"""loop.py: một đợt vòng tối ưu Fmax. Agent thật (agent.py, Claude Code trên khối claude) từ M3; --bypass thay
+agent bằng câu trả lời dựng sẵn (M2).
+
+--phase sim (M3): chỉ đo đúng/cycle, không ORFS; vòng qua gate + func + ngân sách cycle thành ỨNG VIÊN
+  (candidates.json), không cộng dồn (vòng nào cũng đi từ baseline).
+--phase asic (M2, M4): đủ các bước dưới.
 
 Mỗi vòng:
   1. agent đề xuất một patch (unified diff, đường dẫn tính từ gốc Chipyard, có thể trải qua nhiều submodule);
-     patch rỗng thì hỏi lại tối đa --empty-retries lần;
+     patch rỗng thì hỏi lại tối đa --empty-retries lần; không được tạo/xoá file hay sửa file chưa track;
   2. áp best.patch (các vòng đã nhận) + patch của vòng lên ~/tools/chipyard, build (tag theo digest cây);
-     build lỗi -> agent sửa build (một lần) -> vẫn lỗi thì loại;
+     build lỗi -> agent sửa build (tối đa --fix-retries lần) -> vẫn lỗi thì loại;
   3. RTL hash đã đo (baseline hoặc vòng trước) -> bỏ, không đo lại;
   4. gate (policy.gate_check) + func_check (so vết với baseline) + chi phí cycle; gate hỏng -> agent debug (ghi
      lại chẩn đoán), loại;
   5. synth (bộ lọc mức 1, policy.synth_filter) -> floorplan -> place -> policy.decide (so với bản tốt nhất,
      ngưỡng nhiễu từ noise.json);
   6. hoàn nguyên cây (git apply -R theo từng submodule), kiểm digest cây bằng digest baseline: khác thì dừng đợt.
-Kết quả ở ~/soc-fmax-runs/<run>/: history.md, history.json, best.patch, results.csv, runs/r<N>/.
+Kết quả ở ~/soc-fmax-runs/<run>/: history.md, history.json, best.patch, candidates.json, runs/r<N>/ (patch, log
+agent). Cuối job chỉ giữ kết quả ORFS (flow/results|logs|reports|objects) của bản tốt nhất (--keep-orfs để giữ hết).
 
 Agent M2 (--bypass, mỗi vòng một mục, lặp lại nếu ít hơn số vòng):
   empty         patch rỗng (kiểm đường hỏi lại / vòng rỗng)
@@ -20,7 +26,7 @@ Agent M2 (--bypass, mỗi vòng một mục, lặp lại nếu ít hơn số vò
   file:<path>   patch có sẵn (đường dẫn trên host)
 Các patch giả sinh lúc chạy từ nội dung file thật, nên luôn áp được vào cây hiện tại.
 
-Chạy (README.md, mục M2):
+Chạy (README.md, mục M2/M3):
   chia job submit --no-wait --submission-id m2-loop --working-dir . -- python loop.py --run-name m2-loop \\
       --noise-json ~/soc-fmax-runs/m2-noise/noise.json --rounds 3 --bypass empty,comment,broken
 """
@@ -41,6 +47,7 @@ from pathlib import Path
 
 import ray
 
+import agent as A
 import func_check as F
 import orfs_nodes as O
 import policy as P
@@ -57,25 +64,26 @@ AGENT_FNS = ("agent_propose", "agent_fix_build", "agent_debug")
 
 
 # ---------------------------------------------------------------------------
-# Agent (M2: chỉ bypass; thân hàm thật viết ở M3/M4 với ClaudeCodeLLM trên khối claude)
+# Agent: Claude Code trên khối claude (agent.py); --bypass thay bằng bypass_agent_provider
 # ---------------------------------------------------------------------------
 
 @ChiaFunction(resources={"claude_creds": 1}, max_retries=0)
 def agent_propose(ctx: dict) -> dict:
-    """-> {"patch": unified diff, "summary": str}."""
-    raise NotImplementedError("agent thật chưa có (M3/M4): chạy với --bypass")
+    """-> {"patch": unified diff, "summary": str, "log", "error", ...}."""
+    return A.run_agent(ctx, "propose", ctx["tag"])
 
 
 @ChiaFunction(resources={"claude_creds": 1}, max_retries=0)
 def agent_fix_build(ctx: dict) -> dict:
-    """ctx có patch và lỗi build. -> {"patch": patch thay thế (rỗng = bỏ cuộc), "summary"}."""
-    raise NotImplementedError("agent thật chưa có (M3/M4): chạy với --bypass")
+    """ctx có patch, lỗi build, base_files. -> {"patch": patch thay thế (rỗng = bỏ cuộc), "summary", ...}."""
+    return A.run_agent(ctx, "fix", ctx["tag"])
 
 
 @ChiaFunction(resources={"claude_creds": 1}, max_retries=0)
 def agent_debug(ctx: dict) -> dict:
     """ctx có patch và lý do gate/func hỏng. -> {"diagnosis": str} (chỉ ghi vào history, không sửa)."""
-    raise NotImplementedError("agent thật chưa có (M3/M4): chạy với --bypass")
+    r = A.run_agent(ctx, "debug", ctx["tag"])
+    return {**r, "diagnosis": r.get("summary") or r.get("error", "")}
 
 
 def bypass_agent_provider(tag, data_path, ctx, *args, **kwargs) -> dict:
@@ -188,6 +196,34 @@ class PatchError(Exception):
     pass
 
 
+def patch_files(patch: str) -> list[str]:
+    """File mà patch đụng tới (đường dẫn từ gốc Chipyard)."""
+    out = []
+    for m in re.finditer(r"^(?:diff --git a/(\S+) b/|\+\+\+ b/(\S+)|--- a/(\S+))", patch, re.M):
+        f = next(g for g in m.groups() if g)
+        if f not in out:
+            out.append(f)
+    return out
+
+
+def check_patch(patch: str, untracked: list[str]) -> None:
+    """Không tạo/xoá/đổi tên file (tree_diff chỉ thấy file đã track) và không sửa file chưa track."""
+    if re.search(r"^(new file mode|deleted file mode|rename from|--- /dev/null|\+\+\+ /dev/null)", patch, re.M):
+        raise PatchError("patch tạo, xoá hoặc đổi tên file: không được phép (chỉ sửa file đã có)")
+    bad = [f for f in patch_files(patch) if f in set(untracked)]
+    if bad:
+        raise PatchError(f"patch sửa file chưa track trong Chipyard: {bad}")
+
+
+def read_files(cy: str, files: list[str]) -> dict:
+    """Nội dung hiện tại của các file (None nếu không có): bản gốc để agent sửa build so patch thay thế."""
+    out = {}
+    for f in files:
+        p = Path(cy) / f
+        out[f] = p.read_text(errors="surrogateescape") if p.is_file() else None
+    return out
+
+
 def tree_diff(cy: str, subs: list[str]) -> str:
     """Patch tổng của cây hiện tại so với HEAD (mọi submodule build), đường dẫn tính từ gốc Chipyard."""
     out = []
@@ -210,8 +246,11 @@ class Round:
     bypass: str = ""
     summary: str = ""
     patch_stat: str = ""
-    status: str = ""              # rỗng | patch lỗi | build lỗi | RTL trùng | gate | func | synth | place | lỗi
+    status: str = ""              # rỗng | agent lỗi | patch lỗi | build lỗi | RTL trùng | gate | cycle | func |
+                                  # ứng viên (sim) | synth | place | nhận | lỗi
     accepted: bool = False
+    candidate: bool = False       # --phase sim: qua gate + func + ngân sách cycle
+    agent_minutes: float = 0.0
     reasons: list = dataclasses.field(default_factory=list)
     point: dict = dataclasses.field(default_factory=dict)
     rtl_hash: str = ""
@@ -237,12 +276,15 @@ def history_md(a, base: P.Point, best: P.Point, noise: P.Noise, rounds: list[Rou
     for r in rounds:
         p = r.point or {}
         who = ("file:" + os.path.basename(r.bypass[5:])) if r.bypass.startswith("file:") else (r.bypass or "agent")
-        L.append(f"| {r.n} | {who} | {r.patch_stat} | {'**NHẬN**' if r.accepted else r.status} | "
+        res = "**NHẬN**" if r.accepted else ("**ỨNG VIÊN**" if r.candidate else r.status)
+        L.append(f"| {r.n} | {who} | {r.patch_stat} | {res} | "
                  f"{D.fmt(p.get('fmax'), 3)} | {D.fmt(p.get('family'))} | {D.fmt(p.get('cycle_cost'), 4)} | "
                  f"{D.fmt(p.get('area'), 0)} | {r.minutes:.1f} |")
     for r in rounds:
-        L += ["", f"## Vòng {r.n}: {'NHẬN' if r.accepted else r.status}", "", f"- Agent: {r.summary}",
-              f"- Patch: {r.patch_stat or '-'} (lần hỏi: {r.attempts})", f"- RTL hash: `{r.rtl_hash[:12] or '-'}`"]
+        L += ["", f"## Vòng {r.n}: {'NHẬN' if r.accepted else ('ỨNG VIÊN' if r.candidate else r.status)}", "",
+              "- Agent:", "", *[f"  > {x}" for x in (r.summary or "-").splitlines()[-12:]], "",
+              f"- Patch: {r.patch_stat or '-'} (lần hỏi: {r.attempts}, agent {r.agent_minutes:.1f} phút)",
+              f"- RTL hash: `{r.rtl_hash[:12] or '-'}`"]
         L += [f"- {x}" for x in r.reasons]
         if r.diagnosis:
             L.append(f"- Chẩn đoán: {r.diagnosis}")
@@ -269,22 +311,72 @@ class Ctx:
         self.best, self.best_patch = self.base, ""
         self.measured = {base_rtl.hash: "baseline"}
         self.rounds: list[Round] = []
+        self.candidates: list[dict] = []
+        self.untracked = sorted(base_state.get("untracked_sha", {}))
+        self.ctx_files = {"baseline_place.txt": stage_text(base_stages["place"]),
+                          "baseline_synth.txt": stage_text(base_stages["synth"])}
 
 
-def ask(fn_name: str, fn, ctx_in: dict, kind: str, a, tag: str) -> dict:
+def stage_text(r) -> str:
+    """Báo cáo ORFS một bước (StageResult) dạng chữ cho agent."""
+    L = [f"stage {r.stage}, variant {r.variant}, period {r.period_ns} ns",
+         f"Fmax {D.fmt(r.fmax_mhz, 2)} MHz (internal slack {D.fmt(r.internal_slack_ns)} ns, I/O paths excluded), "
+         f"WNS all paths {D.fmt(r.worst_slack_ns)}, TNS {D.fmt(r.tns_ns)}",
+         f"worst path: {r.crit_start} -> {r.crit_end}",
+         f"std-cell area {D.fmt(r.std_area_um2, 0)} um2 ({r.n_std} cells), macros {D.fmt(r.macro_area_um2, 0)} um2", "",
+         "## per region (endpoint region): slack, negative endpoints / endpoints, worst path"]
+    for k, v in (r.regions or {}).items():
+        L.append(f"  {k:8s} {D.fmt(v.get('slack'))}  ({v.get('neg')}/{v.get('count')})  {v.get('start')} -> {v.get('end')}")
+    if r.region_pairs:
+        L += ["", "## worst slack per start region -> end region"]
+        L += [f"  {k}: {D.fmt(v)}" for k, v in r.region_pairs.items()]
+    for title, body in (("endpoint families (score = sum of worst family slacks)", r.families),
+                        ("worst slack per top-level instance (instance region slack endpoints negative)", r.top_slack),
+                        ("report_checks of the worst endpoint", r.top_worst),
+                        ("worst endpoints", r.endpoints), ("worst paths", r.paths)):
+        if body:
+            L += ["", f"## {title}", body.strip()]
+    return "\n".join(L) + "\n"
+
+
+class AgentStop(SystemExit):
+    pass
+
+
+def ask(fn_name: str, fn, ctx_in: dict, kind: str, a, tag: str, d: Path | None = None, rd: Round | None = None) -> dict:
+    """Gọi agent; ghi log phiên vào d/<tag>.log. Hết lượt dùng/đăng nhập hỏng -> dừng đợt."""
     if a.bypass:
         ctx_in = {**ctx_in, "bypass_reply": bypass_reply(kind, a.chipyard, fn_name)}
-    return get(fn.chia_remote(ctx_in, _chia_tag=tag))
+    print(f"  agent {fn_name} ({tag}) ...", flush=True)
+    r = get(fn.chia_remote({**ctx_in, "tag": tag}, _chia_tag=tag))
+    if d is not None and (r.get("log") or r.get("summary")):
+        D.write(d / f"{tag}.log", f"# {fn_name} {tag}\n\n## tóm tắt\n{r.get('summary', '')}\n\n## lỗi\n{r.get('error', '')}\n"
+                f"\n## bỏ khỏi patch\n" + "\n".join(r.get("dropped") or []) + f"\n\n## luồng sự kiện\n{r.get('log', '')}")
+    if rd is not None:
+        rd.agent_minutes += r.get("minutes") or 0.0
+    if r.get("minutes"):
+        print(f"  agent {fn_name}: {r['minutes']:.1f} phút{', lỗi: ' + r['error'] if r.get('error') else ''}"
+              f"{', bỏ: ' + '; '.join(r['dropped']) if r.get('dropped') else ''}", flush=True)
+    err = r.get("error") or ""
+    if err.startswith(("rate_limit", "auth")):
+        raise AgentStop(f"agent {fn_name}: {err[:500]}")
+    return r
 
 
 def agent_context(c: Ctx, n: int) -> dict:
-    """Thông tin agent thật sẽ cần (M3/M4); ở M2 chỉ để ghi lại."""
-    return {"round": n, "period_ns": c.a.period_ns, "best": c.best.as_dict(), "baseline": c.base.as_dict(),
+    """Thông tin cho agent: báo cáo ORFS baseline, lịch sử, ngân sách, cấu hình agent."""
+    files = {**c.ctx_files, "history.md": history_md(c.a, c.base, c.best, c.noise, c.rounds)}
+    if c.best_patch:
+        files["best.patch"] = c.best_patch
+    if c.candidates:
+        files["candidates.json"] = json.dumps(c.candidates, indent=2)
+    return {"round": n, "phase": c.a.phase, "period_ns": c.a.period_ns, "chipyard": c.a.chipyard,
+            "best": c.best.as_dict(), "baseline": c.base.as_dict(),
             "noise": {"fmax_mhz": c.noise.fmax_mhz, "family_ns": c.noise.family_ns},
-            "budget": dataclasses.asdict(c.budget), "best_patch": c.best_patch,
-            "history": [{"n": r.n, "status": r.status, "accepted": r.accepted, "reasons": r.reasons[:4],
-                         "patch_stat": r.patch_stat} for r in c.rounds],
-            "families": c.base_stages["place"].families}
+            "budget": dataclasses.asdict(c.budget), "best_patch": c.best_patch, "untracked": c.untracked,
+            "context_files": files,
+            "agent": {"model": c.a.agent_model, "effort": c.a.agent_effort, "max_turns": c.a.agent_max_turns,
+                      "timeout_s": c.a.agent_timeout, "keep_workspace": c.a.agent_keep_workspace}}
 
 
 def run_round(c: Ctx, n: int, kind: str) -> Round:
@@ -315,13 +407,17 @@ def _round_body(c: Ctx, n: int, kind: str, rd: Round, d: Path, tag_base: str, ct
     prop = {}
     for attempt in range(1, a.empty_retries + 2):
         rd.attempts = attempt
-        prop = ask("agent_propose", agent_propose, {**ctx_in, "attempt": attempt}, kind, a, f"{tag_base}_p{attempt}")
-        if (prop.get("patch") or "").strip():
+        prop = ask("agent_propose", agent_propose, {**ctx_in, "attempt": attempt}, kind, a, f"{tag_base}_p{attempt}",
+                   d, rd)
+        if (prop.get("patch") or "").strip() or prop.get("error"):
             break
         print(f"  agent trả patch rỗng (lần {attempt})", flush=True)
     rd.summary = prop.get("summary", "")
     patch = prop.get("patch") or ""
     D.write(d / "proposal.patch", patch)
+    if prop.get("error") and not patch.strip():
+        rd.status, rd.reasons = "agent lỗi", [f"agent: {prop['error'][:1500]}"]
+        return rd
     if not patch.strip():
         rd.status = "rỗng"
         rd.reasons = [f"patch rỗng sau {rd.attempts} lần hỏi"]
@@ -329,35 +425,47 @@ def _round_body(c: Ctx, n: int, kind: str, rd: Round, d: Path, tag_base: str, ct
     rd.patch_stat = patch_stat(patch)
     print(f"  patch: {rd.patch_stat}", flush=True)
     if True:
+        def apply_round(p: str) -> dict:
+            """Cây đang ở trạng thái best: ghi nội dung trước patch (cho agent sửa build) rồi áp."""
+            check_patch(p, c.untracked)
+            pre = read_files(a.chipyard, patch_files(p))
+            applied.apply(p, c.subs)
+            return pre
+
         try:
-            applied.apply(patch, c.subs)
+            pre = apply_round(patch)
         except PatchError as e:
             rd.status, rd.reasons = "patch lỗi", [str(e)[:1500]]
             return rd
         state, art, rtl = D.step_rtl(a, d, c.mw, c.tm, baseline=False)
-        if rtl is None:
+        fixes = 0
+        while rtl is None:
             err = D.build_errors(art)
             print("  build lỗi:\n    " + "\n    ".join(err.splitlines()[:15]), flush=True)
-            fix = ask("agent_fix_build", agent_fix_build, {**ctx_in, "patch": patch, "build_errors": err}, kind, a,
-                      f"{tag_base}_fix")
+            if fixes >= a.fix_retries:
+                rd.status, rd.reasons = "build lỗi", [f"build vẫn lỗi sau {fixes} lần agent sửa", err[-1500:]]
+                return rd
+            fixes += 1
+            fix = ask("agent_fix_build", agent_fix_build,
+                      {**ctx_in, "patch": patch, "build_errors": err, "base_files": pre}, kind, a,
+                      f"{tag_base}_fix{fixes}" if fixes > 1 else f"{tag_base}_fix", d, rd)
             if not (fix.get("patch") or "").strip():
-                rd.status, rd.reasons = "build lỗi", ["build lỗi, agent không sửa", err[-1500:]]
+                rd.status, rd.reasons = "build lỗi", ["build lỗi, agent không sửa" + (f" ({fix['error']})" if fix.get("error") else ""),
+                                                      err[-1500:]]
                 return rd
             applied.revert()
             if c.best_patch:
                 applied.apply(c.best_patch, c.subs)
             try:
-                applied.apply(fix["patch"], c.subs)
+                pre = apply_round(fix["patch"])
             except PatchError as e:
                 rd.status, rd.reasons = "build lỗi", [f"patch sửa build không áp được: {e}"[:1500]]
                 return rd
             patch = fix["patch"]
-            rd.patch_stat = patch_stat(patch) + " (sau sửa build)"
-            D.write(d / "proposal_fixed.patch", patch)
+            rd.summary += f"\n[sửa build {fixes}] " + (fix.get("summary") or "")
+            rd.patch_stat = patch_stat(patch) + f" (sau {fixes} lần sửa build)"
+            D.write(d / f"proposal_fix{fixes}.patch", patch)
             state, art, rtl = D.step_rtl(a, d, c.mw, c.tm, baseline=False)
-            if rtl is None:
-                rd.status, rd.reasons = "build lỗi", ["build vẫn lỗi sau khi agent sửa", D.build_errors(art)[-1500:]]
-                return rd
         rd.rtl_hash = rtl.hash
         cand_patch = tree_diff(a.chipyard, c.subs)
         D.write(d / "tree.patch", cand_patch)
@@ -378,11 +486,20 @@ def _round_body(c: Ctx, n: int, kind: str, rd: Round, d: Path, tag_base: str, ct
         rd.point = pt.as_dict()
         if not pt.gate_ok or not pt.func_ok:
             dg = ask("agent_debug", agent_debug, {**ctx_in, "patch": patch,
-                                                  "failures": pt.gate_reasons + pt.func_reasons}, kind, a, f"{tag_base}_dbg")
+                                                  "failures": pt.gate_reasons + pt.func_reasons}, kind, a,
+                     f"{tag_base}_dbg", d, rd)
             rd.diagnosis = dg.get("diagnosis", "")
         if not pt.gate_ok or not pt.func_ok or pt.cycle_cost is None or pt.cycle_cost > c.budget.cycle:
             dec = P.decide(c.base, c.best, pt, c.noise, c.budget)
             rd.status, rd.reasons = dec.stage, dec.reasons
+            return rd
+        if a.phase == "sim":
+            rd.candidate, rd.status = True, "ứng viên"
+            rd.reasons = [f"gate + func đạt, chi phí cycle {pt.cycle_cost:.4f} ≤ {c.budget.cycle:.2f}"]
+            D.write(d / "candidate.patch", cand_patch)
+            c.candidates.append({"round": n, "rtl_hash": rtl.hash, "cycle_cost": pt.cycle_cost,
+                                 "patch": str(d / "candidate.patch"), "patch_stat": rd.patch_stat,
+                                 "summary": rd.summary[-1500:]})
             return rd
 
         def synth_gate(r):
@@ -417,6 +534,14 @@ def parse_args():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     D.add_common_args(ap)
     ap.add_argument("--rounds", type=int, default=5, help="số vòng của đợt (mặc định 5)")
+    ap.add_argument("--phase", choices=("sim", "asic"), default="asic",
+                    help="sim (M3): chỉ gate/func/cycle, ra candidates.json; asic: đo ORFS sau place, nhận/loại")
+    ap.add_argument("--agent-model", default="opus", help="model của claude --model (mặc định opus)")
+    ap.add_argument("--agent-effort", default="medium", help="claude --effort (rỗng = mặc định của CLI)")
+    ap.add_argument("--agent-max-turns", type=int, default=200)
+    ap.add_argument("--agent-timeout", type=int, default=1800, help="giây cho mỗi phiên agent")
+    ap.add_argument("--agent-keep-workspace", action="store_true", help="giữ /tmp/socfmax-agent/<tag> trên khối claude")
+    ap.add_argument("--fix-retries", type=int, default=2, help="số lần agent sửa build mỗi vòng")
     ap.add_argument("--bypass", default="", help="M2: thay agent bằng câu trả lời dựng sẵn, vd empty,comment,broken")
     ap.add_argument("--empty-retries", type=int, default=2, help="hỏi lại agent bao nhiêu lần khi patch rỗng")
     ap.add_argument("--noise-json", required=True, help="noise.json của soc_fmax.py --noise")
@@ -464,8 +589,6 @@ def main():
             raise SystemExit(f"cluster thiếu resource {missing}: python scripts/chia-up-blocks.py --asic --verilator-slots 4 "
                              f"(khối claude bật mặc định)")
         print(f"verilator_run: {res.get('verilator_run')} slot", flush=True)
-        if not a.bypass_list:
-            raise SystemExit("M2 chưa có agent thật: chạy với --bypass empty,comment,broken")
         print("== baseline (phải có sẵn trong cache: soc_fmax.py --until place)", flush=True)
         state, art, rtl = D.step_rtl(a, d0, mw, tm)
         gate = D.step_gate(a, d0, art, rtl, mw, tm)
@@ -478,12 +601,16 @@ def main():
             hdir = Path(os.path.expanduser(a.history_from))
             h = json.loads((hdir / "history.json").read_text())
             c.rounds = [Round(**r) for r in h["rounds"]]
+            c.candidates = h.get("candidates", [])
             c.best = P.Point(**h["best"])
             c.best_patch = (hdir / "best.patch").read_text() if (hdir / "best.patch").exists() else ""
             c.measured.update(h.get("measured", {}))
             start = max((r.n for r in c.rounds), default=0) + 1
             print(f"đi tiếp từ {hdir}: {len(c.rounds)} vòng, bản tốt nhất {c.best.name} ({D.fmt(c.best.fmax, 3)} MHz)", flush=True)
         print(f"ngưỡng nhiễu: Fmax ±{noise.fmax_mhz:.3f} MHz, điểm họ ±{noise.family_ns:.3f}; ngân sách {c.budget}", flush=True)
+        who = ("bypass " + a.bypass) if a.bypass_list else \
+            f"{a.agent_model}, effort {a.agent_effort or '-'}, {a.agent_timeout} s/phiên, sửa build {a.fix_retries} lần"
+        print(f"pha {a.phase}; agent: {who}", flush=True)
         for i in range(a.rounds):
             n = start + i
             kind = a.bypass_list[i % len(a.bypass_list)] if a.bypass_list else ""
@@ -509,6 +636,7 @@ def main():
         if c is not None:
             save(out, a, c)
         mw.stop()
+        D.prune_orfs(a, [c.best.name] if c is not None else ["baseline"])
         print("\n## Thời gian", flush=True)
         for row in tm.rows:
             print(f"  {row['step']:10s} {row['minutes']:8.2f} phút  {'(cache)' if row['cached'] else '       '}  {row['note']}", flush=True)
@@ -519,8 +647,10 @@ def main():
 
 def save(out: Path, a, c: Ctx):
     D.write(out / "history.json", json.dumps({"rounds": [dataclasses.asdict(r) for r in c.rounds],
-                                              "best": c.best.as_dict(), "measured": c.measured}, indent=2, default=str))
+                                              "best": c.best.as_dict(), "measured": c.measured,
+                                              "candidates": c.candidates}, indent=2, default=str))
     D.write(out / "best.patch", c.best_patch)
+    D.write(out / "candidates.json", json.dumps(c.candidates, indent=2))
     D.write(out / "history.md", history_md(a, c.base, c.best, c.noise, c.rounds))
 
 

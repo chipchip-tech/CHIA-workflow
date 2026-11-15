@@ -227,7 +227,7 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   M2 (duyệt 15/11/2026 "như đề xuất"): `func_check.py` (vết commit `+verbose`, taint bộ đếm, dừng ở `tohost`),
   `policy.py`, `loop.py` (agent bypass, patch áp lên `~/tools/chipyard` rồi hoàn nguyên), `soc_fmax.py --noise`; chạy
   thật 15/11/2026: func_check đạt (sửa: bỏ so ghi vào x0, Rocket in rác), mm chỉ phủ 17 % (dừng ở nhánh phụ thuộc bộ
-  đếm); nhiễu place Fmax 64,44..65,47 MHz, ORFS tất định, ngưỡng nhận **±1,546 MHz** / điểm họ ±6,356 ns. `m2-loop3` (bypass, 15/11/2026): rỗng / RTL trùng (build thật sau `git apply` vào `rocket-chip`) / build lỗi đúng như dự kiến, cây sạch sau job. **M2 xong.** Resource của khối claude là `claude_creds`. Mỗi variant ORFS tới place chiếm 2,3 GB `flow/results`. Patch giả sinh lúc chạy (không có thư mục `bypass/`).
+  đếm); nhiễu place Fmax 64,44..65,47 MHz, ORFS tất định, ngưỡng nhận **±1,546 MHz** / điểm họ ±6,356 ns. `m2-loop3` (bypass, 15/11/2026): rỗng / RTL trùng (build thật sau `git apply` vào `rocket-chip`) / build lỗi đúng như dự kiến, cây sạch sau job. **M2 xong.** Resource của khối claude là `claude_creds`. M3 (duyệt 15/11/2026 "như đề xuất" + chỉ giữ kết quả ORFS tốt nhất sau mỗi job): `agent.py` (Claude Code trên khối claude, mount Chipyard chỉ đọc, sửa bản chép rồi diff), `loop.py --phase sim` → `candidates.json`, sửa build tối đa 2 lần, `prune_orfs` cuối job; mới chạy mock, chờ `m3-a`. Mỗi variant ORFS tới place chiếm 2,3 GB `flow/results`. Patch giả sinh lúc chạy (không có thư mục `bypass/`).
 - Claude không viết Chisel: mọi sửa thiết kế do agent trong loop làm (từ M3).
 
 ## Việc tiếp theo (gợi ý)

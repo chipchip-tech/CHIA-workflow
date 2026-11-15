@@ -29,6 +29,7 @@ import dataclasses
 import importlib.util
 import json
 import os
+import shutil
 import re
 import sys
 import time
@@ -95,6 +96,8 @@ def add_common_args(ap):
     ap.add_argument("--mem-limit-gb", type=float, default=20.0, help="cảnh báo khi RAM đỉnh vượt mức này")
     ap.add_argument("--cache-dir", default=str(home / "chia_cache" / "soc-fmax"))
     ap.add_argument("--cache-gb", type=float, default=8.0)
+    ap.add_argument("--keep-orfs", action="store_true",
+                    help="không dọn: giữ kết quả ORFS của mọi variant job đã dùng (mặc định chỉ giữ bản tốt nhất)")
 
 
 def finish_args(a, ap):
@@ -401,6 +404,7 @@ def run_orfs_point(a, d: Path, rtl, fakeram, orfs_vars: dict, point: str, until:
     prm = fakeram.Params(access_ns=a.fakeram_access_ns, um2_per_bit=a.fakeram_um2_per_bit)
     fr_tag = f"{fakeram.VERSION}a{a.fakeram_access_ns:g}u{a.fakeram_um2_per_bit:g}"
     variant = O.variant_name(rtl.hash, a.period_ns, fr_tag, orfs_vars)
+    a.__dict__.setdefault("orfs_variants", {})[point] = variant      # cho prune_orfs cuối job
     prep = O.prepare_design(a.orfs_dir, rtl, a.period_ns, fakeram, prm, variant, orfs_vars)
     write(d / "prepare.json", json.dumps(prep, indent=2))
     print(f"\ndesign ORFS: {prep['design_dir']} (đổi: {prep['changed_files'] or 'không'}), cổng {prep['ports']}, "
@@ -429,6 +433,49 @@ def run_orfs_point(a, d: Path, rtl, fakeram, orfs_vars: dict, point: str, until:
                 print(f"  bộ lọc synth: dừng trước floorplan/place: {why}", flush=True)
                 break
     return prep, stages
+
+
+def _du(p: Path) -> int:
+    n = 0
+    for dp, _dn, fns in os.walk(p):
+        for f in fns:
+            try:
+                n += os.lstat(os.path.join(dp, f)).st_size
+            except OSError:
+                pass
+    return n
+
+
+def prune_orfs(a, keep_points: list[str]) -> None:
+    """Cuối job: chỉ giữ kết quả ORFS (flow/results|logs|reports|objects/<variant>) của bản tốt nhất; xoá của các
+    variant khác mà job này đã dùng (vòng bị loại, lần chạy nhiễu, baseline khi đã có bản tốt hơn). Thư mục design
+    (nhỏ) và cache CHIA (số đo) giữ nguyên, nên RTL đã đo vẫn không đo lại. --keep-orfs để tắt."""
+    vs = getattr(a, "orfs_variants", {})
+    keep = {vs[p] for p in keep_points if p in vs}
+    drop = sorted(set(vs.values()) - keep)
+    if not drop:
+        return
+    if getattr(a, "keep_orfs", False):
+        print(f"\nORFS: giữ hết {len(vs)} variant (--keep-orfs)", flush=True)
+        return
+    print(f"\n== dọn ORFS: giữ {', '.join(sorted(keep)) or '-'} ({', '.join(keep_points)}), xoá {len(drop)} variant", flush=True)
+    total = 0
+    for v in drop:
+        freed = 0
+        for rel in O.work_dirs_rel(v).values():
+            p = Path(a.orfs_dir) / rel
+            if not p.exists():
+                continue
+            size = _du(p)
+            try:
+                shutil.rmtree(p)
+                freed += size
+            except OSError as e:
+                print(f"  không xoá được {p}: {e}", flush=True)
+        total += freed
+        name = next((k for k, x in vs.items() if x == v), "?")
+        print(f"  {v} ({name}): {freed / 2**30:.2f} GB", flush=True)
+    print(f"  tổng {total / 2**30:.2f} GB", flush=True)
 
 
 def noise_variants(orfs_vars: dict) -> list[tuple[str, dict]]:
@@ -556,6 +603,7 @@ def main():
         mw.stop()
         write(out / "memory.json", json.dumps({"peaks": mw.peaks(), "error": mw.error}, indent=2))
         write(out / "summary.md", summary(a, tm, mw, rtl, gate, prep, stages, report))
+        prune_orfs(a, ["baseline"])     # lần chạy nhiễu là đo lại cùng RTL, không phải bản thiết kế: chỉ giữ baseline
         print("\n## Thời gian và RAM đỉnh (docker stats, GB)", flush=True)
         for row in tm.rows:
             print(f"  {row['step']:10s} {row['minutes']:8.2f} phút  {'(cache)' if row['cached'] else '       '}  {row['note']}", flush=True)

@@ -18,7 +18,7 @@ và GDS của mỗi bậc đã đạt.
 | | |
 |---|---|
 | Pha đi qua | **Simulate** (bắt buộc) → **ASIC**. Không làm FPGA. |
-| Pha hiện tại | M1 xong (baseline đo thật sau place 10 ns: **65,42 MHz**). **M2 xong** (func_check, nhiễu, ngưỡng **±1,546 MHz**, loop bypass chạy thật) |
+| Pha hiện tại | M1 xong (baseline đo thật sau place 10 ns: **65,42 MHz**). **M2 xong** (func_check, nhiễu, ngưỡng **±1,546 MHz**, loop bypass chạy thật). M3 (agent thật, pha sim): mã xong, chạy mock, chờ `m3-a` |
 | PDK / corner | sky130hd (`sky130_fd_sc_hd`), `tt_025C_1v80` |
 | SRAM | fakeram (`scripts/fakeram_sky130.py`, `docs/fakeram-sky130.md`): access 1,5 ns, 3 µm²/bit, timing giả định. OpenRAM thật chỉ ở M6 |
 | Bậc chu kỳ | 10 → 9 → 8 → 7 → 6 → 5 ns. Bản tốt nhất có WNS ≥ 0 sau place ở bậc hiện tại → CTS + route + GDS cho bản đó → bậc kế |
@@ -98,7 +98,8 @@ vvadd, mm, spmv), `minstret` của mọi benchmark bằng baseline; thêm `func_
 | `orfs/diag_floorplan.tcl` | chẩn đoán tay: macro (bbox, halo), blockage, và inst/pin/row trong một hộp (`SOCFMAX_BOX`) |
 | `func_check.py` | vết commit (`+verbose`) của 4 benchmark: ghi vết baseline, so ứng viên (taint bộ đếm, dừng ở `tohost`) |
 | `policy.py` | luật nhận/loại, bộ lọc synth, ngưỡng nhiễu (hàm thuần) |
-| `loop.py` | đợt N vòng: agent đề xuất patch → áp lên `~/tools/chipyard` → build → gate + func → synth (lọc) → place → nhận/loại → hoàn nguyên cây; `history.md`, `history.json`, `best.patch`, `results.csv`. M2: agent bị bypass (`--bypass empty,comment,broken,file:<patch>`) |
+| `loop.py` | đợt N vòng: agent đề xuất patch → áp lên `~/tools/chipyard` → build (lỗi thì agent sửa, tối đa `--fix-retries`) → gate + func → `--phase sim`: ứng viên vào `candidates.json`; `--phase asic`: synth (lọc) → place → nhận/loại → hoàn nguyên cây; `history.md`, `history.json`, `best.patch`, `results.csv`, log agent ở `runs/r<N>/`. Cuối job dọn ORFS, chỉ giữ bản tốt nhất. `--bypass empty,comment,broken,file:<patch>` thay agent (M2) |
+| `agent.py` | agent Claude Code trên khối claude: chép `.scala` của các submodule được sửa từ mount Chipyard chỉ đọc sang `/tmp`, viết `TASK.md` + `context/` (báo cáo ORFS baseline, lịch sử, lỗi build), chạy `claude --print` (`ClaudeCodeLLM`, có timeout), diff bản chép ra patch |
 | `memwatch.py` | RAM đỉnh từng container theo bước (`docker stats` mỗi 5 s, trên host) |
 | `exp.yaml` | cache/bypass: `ChiselBuildNode.build`, `extract_soc_rtl`, `run_gate`, `run_func`, `orfs_stage`; bypass agent (`agent_bypass_*`) |
 
@@ -172,12 +173,49 @@ cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-i
 Chạy tiếp một đợt cũ: `--history-from ~/soc-fmax-runs/<run>`. Cây Chipyard bị sửa trong lúc loop chạy, nên đừng build
 tay trong `~/tools/chipyard` khi đang có job.
 
+## Chạy M3 (agent thật, pha sim)
+
+Agent (Claude Code, `opus`, effort `medium`, tối đa 30 phút mỗi phiên) đọc báo cáo ORFS baseline sau place và đề xuất
+một thay đổi (thường là thêm tầng pipeline trên đường găng). Mỗi vòng: build → gate (14 phút) → func (9 phút); qua cả
+hai và chi phí cycle ≤ +3 % thì thành **ứng viên** (`candidates.json`, `runs/r<N>/candidate.patch`). Ở pha này không
+chạy ORFS, và vòng nào cũng đi từ baseline. Agent sửa trên bản chép, không build được, không được tạo/xoá file hay sửa
+file chưa track (`MinimalSoCConfig.scala`). Build lỗi thì agent sửa tối đa 2 lần; gate/func hỏng thì agent chẩn đoán
+(ghi vào `history.md`). Hết lượt dùng hoặc lỗi đăng nhập thì dừng đợt.
+
+Khối claude cần mount Chipyard chỉ đọc (template trên `setup` từ 15/11/2026), nên phải dựng lại cluster:
+
+```bash
+chia down
+```
+
+```bash
+cd ~/CHIA-workflow && git pull && ASIC_MEM=20g python scripts/chia-up-blocks.py --asic --verilator-slots 4
+```
+
+```bash
+cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-id m3-a --working-dir . -- python loop.py --phase sim --run-name m3-a --noise-json ~/soc-fmax-runs/m2-noise/noise.json --rounds 5
+```
+
+Tham số agent: `--agent-model`, `--agent-effort`, `--agent-timeout` (giây), `--agent-max-turns`, `--fix-retries`,
+`--agent-keep-workspace` (giữ bản chép trong `/tmp/socfmax-agent/` của container claude để xem lại).
+
+**Dọn ORFS sau mỗi job** (`soc_fmax.py` và `loop.py`): cuối job chỉ giữ `flow/{results,logs,reports,objects}` của bản
+tốt nhất (`loop.py`: bản tốt nhất của đợt; `soc_fmax.py`: baseline, vì lần chạy nhiễu là đo lại cùng RTL). Các variant
+khác mà job đã dùng bị xoá. Thư mục design (nhỏ) và cache CHIA (số đo) giữ nguyên, nên RTL đã đo vẫn không đo lại.
+`--keep-orfs` để giữ hết.
+
 ## Trạng thái kiểm chứng
 
 - **Mới kiểm bằng mock (15/11/2026, sandbox):** `py_compile`; tách RTL `DigitalTop` (lọc macro theo `mems.conf`, thay
   `EICG_wrapper`, hash không đổi khi chỉ dịch dòng Scala), SDC, chuẩn bị design (lần hai không ghi lại file nào), đọc báo
   cáo (vùng, đường găng không I/O, họ endpoint, diện tích), đọc log `Elapsed/Peak memory`; toàn bộ `soc_fmax.py` trên
   cluster Ray cục bộ với node giả: lần 1 chạy hết, lần 2 mọi bước `cache HIT`, bước lỗi không bị giữ trong cache.
+- **M3 mới kiểm bằng mock (15/11/2026, sandbox; Ray 2.54, `chialoops` 2.0.1, `claude` giả in stream-json):**
+  - `--phase sim` 3 vòng: ứng viên (cycle 1,01); build lỗi → agent sửa (patch thay thế đúng, so với cây trước patch
+    hỏng) → gate hỏng → agent chẩn đoán; agent tạo file mới 3 lần → bị bỏ khỏi patch → `rỗng`. Cây sạch sau job.
+  - `--agent-timeout 5` với `claude` treo: phiên bị giết, vòng ghi `agent lỗi: hết giờ`.
+  - `--phase asic` 1 vòng được nhận: dọn ORFS giữ variant `r1`, xoá variant baseline.
+  - Chưa chạy thật: mount Chipyard trong khối claude, `claude` thật (`--effort`, đăng nhập, timeout), chất lượng patch.
 - **Chạy thật (15/11/2026, run `m1`):**
   - `--until rtl`: build `MinimalSoCConfig` (đã build sẵn nên 0,6 phút), `DigitalTop` 380 module, RTL hash `d2607fe708db`,
     không có `EICG_wrapper`. Instance cấp 1: `tile_prci_domain` (tile), `coh_wrapper` (L2), `sbus/mbus/cbus/pbus/fbus`
@@ -270,7 +308,7 @@ tay trong `~/tools/chipyard` khi đang có job.
 |---|---|---|
 | M1 | build → gate → fakeram → ORFS place 10 ns → Fmax/WNS, vùng, diện tích, thời gian/RAM, `results.csv`; lần hai từ cache | **xong 15/11/2026** (chạy thật, kể cả kiểm cache) |
 | M2 | `func_check.py` vào gate, đo nhiễu place, chốt ngưỡng nhận, orchestration với bypass LLM | **xong 15/11/2026** (chạy thật: func_check, nhiễu, loop bypass 3 vòng) |
-| M3 | pha sim có agent (tầng pipeline, chỉ đo cycle) → `candidates.json` | chưa |
+| M3 | pha sim có agent (tầng pipeline, chỉ đo cycle) → `candidates.json` | mã xong, chạy mock 15/11/2026; chờ `m3-a` |
 | M4 | pha asic có agent, 5 vòng, nhận/loại theo place, tự xuống bậc | chưa |
 | M5 | CTS + route + GDS mỗi bậc đạt, timing sau route | chưa |
 | M6 | OpenRAM sky130 thật cho bản tốt nhất, GDS thật, so fakeram/OpenRAM | chưa |
