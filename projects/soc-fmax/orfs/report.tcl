@@ -34,9 +34,11 @@ if {[catch {puts "sync0_cells [llength [get_cells -hierarchical -quiet *sync_0*]
 if {[catch {
   set all [llength [all_registers -edge_triggered]]
   set clk [llength [all_registers -edge_triggered -clock clk]]
+  set anyclk [llength [all_registers -edge_triggered -clock [all_clocks]]]
   puts "registers $all"
   puts "registers_on_clk $clk"
-  puts "registers_unclocked [expr {$all - $clk}]"
+  puts "registers_on_aux [expr {$anyclk - $clk}]"
+  puts "registers_unclocked [expr {$all - $anyclk}]"
 } e]} { puts "ERROR registers: $e" }
 
 puts "@@WORST"
@@ -93,12 +95,12 @@ if {[catch {
 puts "@@NOCLOCK"
 if {[catch {check_setup -no_clock} e]} { puts "ERROR check_setup: $e" }
 
-# Thanh ghi không nhận clock `clk`, gộp theo 3 cấp instance đầu; kèm net ở chân clock của một thanh ghi mẫu
+# Thanh ghi không nhận clock nào (clk hay aux*), gộp theo 3 cấp instance đầu; kèm net ở chân clock của một thanh ghi mẫu
 # để biết nguồn clock (jtag TCK, clock chia, clock qua cổng gate...). Dòng: <nhóm> <số thanh ghi> <net mẫu>
 puts "@@NOCLOCK_GROUPS"
 if {[catch {
   array set onclk {}
-  foreach c [all_registers -edge_triggered -clock clk] { set onclk([get_full_name $c]) 1 }
+  foreach c [all_registers -edge_triggered -clock [all_clocks]] { set onclk([get_full_name $c]) 1 }
   array set grp {}
   array set smp {}
   foreach c [all_registers -edge_triggered] {

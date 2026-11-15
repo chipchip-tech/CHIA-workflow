@@ -26,7 +26,7 @@ from chia.base.ChiaFunction import ChiaFunction
 
 import soc_nodes as S
 
-FLOW_VERSION = "o2"                       # đổi khi đổi config.mk/SDC/script báo cáo
+FLOW_VERSION = "o3"                       # đổi khi đổi config.mk/SDC/script báo cáo
 PLATFORM = "sky130hd"
 NICK = "soc_fmax"
 C_ORFS = "/OpenROAD-flow-scripts"          # đường dẫn ORFS trong container asic
@@ -38,7 +38,7 @@ ORFS_DEFAULTS = {
     "ABC_AREA": "0",
     "CORE_UTILIZATION": "40",
     "PLACE_DENSITY": "0.55",
-    "MACRO_PLACE_HALO": "10 10",
+    "MACRO_PLACE_HALO": "40 40",   # 10 10: PDN-0179 (khe met1 giữa macro không có strap met4/met5)
     "TNS_END_PERCENT": "100",
 }
 
@@ -73,10 +73,15 @@ def top_ports(rtl: "S.SocRTL", fakeram) -> dict:
     """Cổng của DigitalTop chia nhóm: clock, reset, vào khác, ra."""
     ports = fakeram.verilog_ports(rtl.modules[rtl.top], rtl.top) or {}
     clk = sorted(p for p, (d, _) in ports.items() if d == "input" and re.search(r"(^|_)clock$", p))
-    rst = sorted(p for p, (d, _) in ports.items() if d == "input" and re.search(r"reset", p, re.I) and p not in clk)
-    ins = sorted(p for p, (d, _) in ports.items() if d == "input" and p not in clk and p not in rst)
+    # Clock ngoài, bất đồng bộ với clk (đo thật ở synth o2: serial_tl_0_clock_in nuôi hàng đợi async của
+    # serial_tl_domain/phy, debug_systemjtag_jtag_TCK nuôi dtm và tlDM/dmOuter).
+    aux = sorted(p for p, (d, _) in ports.items() if d == "input" and p not in clk
+                 and re.search(r"(^|_)(clock_in|TCK)$", p))
+    rst = sorted(p for p, (d, _) in ports.items() if d == "input" and re.search(r"reset", p, re.I)
+                 and p not in clk and p not in aux)
+    ins = sorted(p for p, (d, _) in ports.items() if d == "input" and p not in clk + aux + rst)
     outs = sorted(p for p, (d, _) in ports.items() if d == "output")
-    return {"clock": clk, "reset": rst, "in": ins, "out": outs}
+    return {"clock": clk, "aux_clock": aux, "reset": rst, "in": ins, "out": outs}
 
 
 def _tcl_list(names) -> str:
@@ -92,6 +97,12 @@ def sdc_text(period_ns: float, ports: dict) -> str:
     t = [f"# soc-fmax {FLOW_VERSION}: sinh bởi orfs_nodes.py",
          f"set clk_period {period_ns}",
          f"create_clock -name clk -period $clk_period [get_ports {_tcl_list(ports['clock'])}]"]
+    aux = ports.get("aux_clock", [])
+    for i, p in enumerate(aux):
+        # Miền phụ (JTAG, serial TL): chu kỳ 5x để không bao giờ thành đường găng; không tính vào Fmax.
+        t.append(f"create_clock -name aux{i} -period [expr {{5 * $clk_period}}] [get_ports {_tcl_list([p])}]")
+    if aux:
+        t.append("set_clock_groups -asynchronous -group {clk} " + " ".join(f"-group {{aux{i}}}" for i in range(len(aux))))
     if ports["in"]:
         t.append(f"set_input_delay 0 -clock clk [get_ports {_tcl_list(ports['in'])}]")
     if ports["out"]:
@@ -158,7 +169,7 @@ def prepare_design(orfs_dir: str, rtl: "S.SocRTL", period_ns: float, fakeram, fr
     if _put(d / "config.mk", "\n".join(lines) + "\n"):
         changed.append("config.mk")
     info = {"variant": variant, "design_dir": str(d), "config_mk": f"{cd}/config.mk",
-            "ports": {k: len(v) for k, v in ports.items()}, "clock_ports": ports["clock"],
+            "ports": {k: len(v) for k, v in ports.items()}, "clock_ports": ports["clock"], "aux_clock_ports": ports["aux_clock"],
             "reset_ports": ports["reset"], "sv_casts_rewritten": ncast, "fakeram": fr_info,
             "fakeram_port_issues": issues, "orfs_vars": orfs_vars, "changed_files": changed}
     _put(d / "prepare.json", json.dumps(info, indent=2))

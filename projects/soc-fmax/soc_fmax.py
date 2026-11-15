@@ -287,7 +287,7 @@ def print_stage(r: "O.StageResult"):
         print(f"  {r.counts}", flush=True)
     if getattr(r, "noclock", ""):
         rows = r.noclock.splitlines()
-        print(f"  thanh ghi không có clock clk, theo nhóm ({len(rows)} nhóm; số, nhóm, net clock mẫu):", flush=True)
+        print(f"  thanh ghi không có clock nào, theo nhóm ({len(rows)} nhóm; số, nhóm, net clock mẫu):", flush=True)
         for line in rows[:20]:
             print("    " + line, flush=True)
     for s in r.steps:
@@ -400,7 +400,7 @@ def main():
             prep = O.prepare_design(a.orfs_dir, rtl, a.period_ns, fakeram, prm, variant, a.orfs_vars)
             write(d / "prepare.json", json.dumps(prep, indent=2))
             print(f"\ndesign ORFS: {prep['design_dir']} (đổi: {prep['changed_files'] or 'không'}), cổng {prep['ports']}, "
-                  f"clock {prep['clock_ports']}, {prep['sv_casts_rewritten']} cast viết lại", flush=True)
+                  f"clock {prep['clock_ports']}, clock phụ (bất đồng bộ) {prep.get('aux_clock_ports')}, {prep['sv_casts_rewritten']} cast viết lại", flush=True)
             if prep["fakeram_port_issues"]:
                 print("  CẢNH BÁO chân fakeram khác Verilog:\n    " + "\n    ".join(prep["fakeram_port_issues"]), flush=True)
             for m in prep["fakeram"]["macros"]:
