@@ -213,6 +213,16 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
 - `project/soc-fmax-sky130` (mở 15/11/2026, Chipyard 1.15.0): loop agent tối ưu Fmax cả SoC `MinimalSoCConfig`
   (`DigitalTop`) trên sky130hd đo bằng ORFS sau place, fakeram, bậc chu kỳ 10 → 5 ns; chi tiết trong nhánh đó.
 
+## Project trên nhánh này: soc-fmax (`projects/soc-fmax/`)
+
+- Đọc `projects/soc-fmax/README.md` (mục tiêu, Pha, cách đo, mốc M1–M6). Người dùng duyệt 15/11/2026: tên nhánh
+  `project/soc-fmax-sky130` (vì `project/soc-fmax` là project cũ), Chipyard 1.15.0 ở `~/tools/chipyard`, fakeram bằng
+  script riêng (`setup`: `scripts/fakeram_sky130.py`), bộ lọc mức 1 là `make synth` của ORFS (không dùng script `v3`
+  riêng; `v3` chỉ để dành cho `synth_ab` của agent ở M4).
+- Trạng thái: M1 code xong (`soc_fmax.py`, `soc_nodes.py`, `orfs_nodes.py`, `orfs/report.tcl`, `memwatch.py`), mới kiểm
+  bằng mock; chờ log chạy thật của người dùng, từng bước `--until rtl|gate|synth|floorplan|place`.
+- Claude không viết Chisel: mọi sửa thiết kế do agent trong loop làm (từ M3).
+
 ## Việc tiếp theo (gợi ý)
 
 1. (Xong 14/11/2026) `docs/reinstall.md` chạy hết trên Chipyard 1.15.0.

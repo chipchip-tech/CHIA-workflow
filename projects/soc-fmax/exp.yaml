@@ -1,0 +1,19 @@
+# Cache + bypass cho soc_fmax.py (start_cache và Bypass cùng đọc file này).
+# Cache chỉ phân biệt theo _chia_tag, nên mỗi lần gọi có tag riêng chứa mọi thứ quyết định kết quả:
+#   ChiselBuildNode.build -> build_<digest cây Chipyard>_<config>
+#   extract_soc_rtl       -> rtl_<digest>_<config>_x1
+#   run_gate              -> gate_<rtl hash>_<GATE_VERSION>_s<seed>
+#   orfs_stage            -> orfs_<variant>_<bước>   (variant = rtl hash + chu kỳ + FLOW_VERSION + fakeram + biến ORFS)
+# Lần đầu ghi kết quả thật, các lần sau đọc lại (bypass chỉ khi tag thật sự có trong cache, xem
+# soc_nodes.cache_hit_cond). Kết quả hỏng bị xoá khỏi cache (soc_fmax.cache_evict).
+cache:
+  ChiselBuildNode.build: {cache: true, tags: ["build_.*"]}
+  extract_soc_rtl:       {cache: true, tags: ["rtl_.*"]}
+  run_gate:              {cache: true, tags: ["gate_.*"]}
+  orfs_stage:            {cache: true, tags: ["orfs_.*"]}
+
+bypass:
+  ChiselBuildNode.build: {bypass: true, tags: ["build_.*"]}
+  extract_soc_rtl:       {bypass: true, tags: ["rtl_.*"]}
+  run_gate:              {bypass: true, tags: ["gate_.*"]}
+  orfs_stage:            {bypass: true, tags: ["orfs_.*"]}
