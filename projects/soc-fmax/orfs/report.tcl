@@ -67,15 +67,23 @@ if {[catch {
 puts "@@TOP_SLACK"
 if {[catch {
   set pins [all_registers -edge_triggered -data_pins]
+  set nclk 0
   if {[catch {
     foreach i [[ord::get_db_block] getInsts] {
       if {[[$i getMaster] isBlock]} {
         foreach p [get_pins -quiet -of_objects [get_cells [$i getName]]] {
-          if {[get_property $p direction] eq "input"} { lappend pins $p }
+          if {[get_property $p direction] ne "input"} { continue }
+          # Bỏ chân clock của macro (RW0_clk...): không phải endpoint dữ liệu; r3 synth cho -52 ns
+          # ở cc_dir_ext/RW0_clk mà report_checks -to báo "No paths found".
+          set isclk [regexp {(^|_)clk$} [get_property $p lib_pin_name]]
+          if {!$isclk && ![catch {get_property $p clocks} c] && [llength $c] > 0} { set isclk 1 }
+          if {$isclk} { incr nclk; continue }
+          lappend pins $p
         }
       }
     }
   } e]} { puts "ERROR top_slack macro: $e" }
+  puts "# bỏ $nclk chân clock của macro"
   array set ws {}; array set nn {}; array set ng {}; array set wp {}
   set gw ""; set gp ""
   foreach p $pins {
@@ -90,7 +98,7 @@ if {[catch {
   }
   foreach k [lsort [array names ws]] { puts "$k $ws($k) $nn($k) $ng($k) [get_full_name $wp($k)]" }
 } e]} { puts "ERROR top_slack: $e" }
-# Đường tới endpoint xấu nhất theo slack_max của chân (đối chiếu với @@WORST; o4 synth: chân -52 ns, WNS -9 ns)
+# Đường tới endpoint xấu nhất theo slack_max của chân (đối chiếu với @@WORST)
 puts "@@TOP_WORST"
 if {[info exists gp] && $gp ne ""} {
   if {[catch {report_checks -path_delay max -to $gp -fields {slew cap fanout} -digits 3} e]} { puts "ERROR top_worst: $e" }

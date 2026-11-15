@@ -27,7 +27,7 @@ from chia.base.ChiaFunction import ChiaFunction
 import soc_nodes as S
 
 FLOW_VERSION = "o4"                       # đổi khi đổi config.mk/SDC/tapcell (chạy lại ORFS từ synth)
-REPORT_VERSION = "r3"                     # đổi khi chỉ đổi report.tcl/cách đọc (make không chạy lại, chỉ báo cáo)
+REPORT_VERSION = "r4"                     # đổi khi chỉ đổi report.tcl/cách đọc (make không chạy lại, chỉ báo cáo)
 PLATFORM = "sky130hd"
 NICK = "soc_fmax"
 C_ORFS = "/OpenROAD-flow-scripts"          # đường dẫn ORFS trong container asic
@@ -307,6 +307,9 @@ def analyze_report(log: str, period_ns: float, r: StageResult) -> StageResult:
     # đếm đủ. Đường bắt đầu/kết thúc chỉ có khi vùng đó nằm trong PATHS_LIST.
     agg, rows = {}, []
     for line in _section(log, "TOP_SLACK").splitlines():
+        if line.startswith("#"):
+            rows.append(line)
+            continue
         p = line.split()
         if len(p) not in (4, 5) or not re.fullmatch(r"-?[\d.]+(?:e[-+]?\d+)?", p[1]):
             continue
