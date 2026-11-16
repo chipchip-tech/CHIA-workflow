@@ -237,30 +237,19 @@ whose cycle cost you can argue is small (e.g. FPU latency, cache/TileLink queue 
 BTB paths). Avoid repeating an idea already listed in `context/history.md` unless you fix why it failed.
 """
 
-PHASE_CHAIN = """This is the ASIC phase, ACCUMULATING batch: each round is measured by ORFS up to FLOORPLAN (the floorplan
-stage already repairs timing and shows the same critical path family as place; synth alone does not) and compared
-with the tree you see. If it improves floorplan Fmax (or the endpoint-family score) beyond the noise threshold and
-passes a quick riscv-tests check, it is KEPT and the next round builds on top of it. At the end of the batch the
-accumulated design is run to place and through the full gate (riscv-tests, benchmarks with equal minstret, commit-trace
-comparison against the baseline, cycle budget); if that fails, the last rounds are dropped one by one. So:
-- your copy already contains the rounds kept so far in this batch (`context/best.patch` is the whole accumulated diff);
-- after a change fixes one path family the critical path moves: read `context/r<N>_floorplan.txt` of the latest kept
-  round (if any) instead of only the baseline reports, and attack the NEW worst family;
-- a functional bug or a cycle-count change hides until the end and costs the whole batch: prefer cycle-exact changes
-  (retiming, restructuring logic) and keep behaviour identical cycle by cycle unless the gain clearly needs a stage
-  (the trace comparison also compares values loaded from memory, e.g. a saved mcycle, so extra cycles before the
-  measured region fail it).
+PHASE_CHAIN = """This is the ASIC phase, ACCUMULATING batch: each round is measured by ORFS after PLACE and compared with
+the tree you see (the current head). If it improves place Fmax (or the endpoint-family score) beyond the noise
+threshold and passes a quick riscv-tests check, it is KEPT and the next round builds on top of it. At the end of the
+batch the kept rounds, ranked by place Fmax, go through the full gate (riscv-tests, benchmarks with equal minstret,
+commit-trace comparison against the baseline, cycle budget) one by one; the first that passes is accepted. So:
+- your copy already contains the rounds kept so far (`context/best.patch` is the whole accumulated diff);
+- after a change fixes one path family the critical path moves: read the newest `context/<name>_place.txt` (the
+  latest kept round, or the current best) instead of only the baseline reports, and attack the NEW worst family;
+- a functional bug or a cycle-count change hides until the end and costs every round built on it: prefer cycle-exact
+  changes (retiming, restructuring logic) and keep behaviour identical cycle by cycle unless the gain clearly needs a
+  stage (the trace comparison also compares values loaded from memory, e.g. a saved mcycle, so extra cycles before
+  the measured region fail it).
 Propose ONE focused change.
-"""
-
-PHASE_ASIC = """This is the ASIC phase: the round is measured by ORFS after place against the current best (the tree you
-see). The functional gate (riscv-tests, equal minstret, commit-trace comparison with the baseline, cycle budget) is
-run only at the END of the batch, on the measured rounds ranked by Fmax: the best one that passes is accepted, the
-rest are discarded. So a patch that wins on timing but breaks function or changes the cycle count before the
-measured region (the trace compares values loaded from memory, e.g. saved mcycle) wastes the whole batch's best slot:
-prefer cycle-exact changes (retiming, logic restructuring) unless the cycle cost is clearly worth it.
-`context/r<N>_place.txt` are the ORFS reports of rounds already measured in this batch; `context/history.md` lists
-their Fmax. Propose ONE focused change, different from the rounds already in this batch.
 """
 
 FIX = """The previous patch of this round FAILED TO BUILD. Your copy already contains that patch (the files as they were
@@ -303,7 +292,7 @@ def build_prompt(ctx: dict, task: str, roots: list[str], missing: list[str], rea
                      cycle=b.get("cycle", 1.03), area=b.get("area", 1.15))]
     if task == "propose":
         p.append(PHASE_SIM if ctx.get("phase") == "sim" else
-                 PHASE_CHAIN if ctx.get("batch") == "chain" else PHASE_ASIC)
+                 PHASE_CHAIN)
         if ctx.get("attempt", 1) > 1:
             p.append(f"Your previous answer in this round produced an EMPTY patch (attempt {ctx['attempt']}). This time "
                      "you must actually edit files under chipyard/.")

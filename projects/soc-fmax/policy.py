@@ -9,9 +9,9 @@ Một vòng được nhận khi:
      Fmax tăng hơn ngưỡng nhiễu, hoặc điểm họ (tổng slack các họ endpoint xấu nhất, âm) tăng hơn ngưỡng nhiễu.
 Ngưỡng nhiễu đo bằng các lần place baseline bị nhiễu nhẹ (soc_fmax.py --noise):
   ngưỡng = max(K × (lớn nhất − nhỏ nhất), mức tối thiểu), K = 1,5; tối thiểu 0,3 MHz và 0,2 ns điểm họ.
-Trong đợt (loop.py --phase asic), vòng được cộng dồn theo cùng luật nhưng trên số sau floorplan và ngưỡng nhiễu
-floorplan (decide_floorplan); chỉ bản cộng dồn cuối đợt mới qua luật đầy đủ ở trên (place + gate). Không dùng synth để
-chọn: đường găng synth khác place.
+Trong đợt (loop.py --phase asic), vòng được cộng dồn theo phần ORFS của luật (decide_place, so với đầu chuỗi) + gate
+nhanh ISA; cuối đợt các vòng cộng dồn qua gate đủ theo Fmax place giảm dần. Không dùng synth hay floorplan để chọn:
+đường găng synth khác place, và floorplan bão hoà khi slack ≥ 0 (sửa timing dừng ở chu kỳ mục tiêu).
 """
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ class Point:
     fmax: float | None = None          # sau place
     family: float | None = None        # sau place
     area: float | None = None          # diện tích logic sau place (um2)
-    fp_fmax: float | None = None       # sau floorplan (loop.py --phase asic chọn vòng theo số này)
+    fp_fmax: float | None = None       # sau floorplan (chỉ để tham khảo)
     fp_family: float | None = None
     fp_area: float | None = None
     period_ns: float | None = None
@@ -115,12 +115,6 @@ def decide_place(base: Point, best: Point, cand: Point, noise: Noise, budget: Bu
     """Chỉ phần ORFS của decide (diện tích, Fmax, điểm họ); loop.py dùng để xếp hạng trước khi gate."""
     return decide_metric("place", base.area, (best.fmax, best.family), (cand.fmax, cand.family, cand.area),
                          noise, budget)
-
-
-def decide_floorplan(base: Point, best: Point, cand: Point, noise: Noise, budget: Budget) -> Decision:
-    """Như decide_place nhưng trên số sau floorplan (noise = ngưỡng nhiễu floorplan)."""
-    return decide_metric("floorplan", base.fp_area, (best.fp_fmax, best.fp_family),
-                         (cand.fp_fmax, cand.fp_family, cand.fp_area), noise, budget)
 
 
 def decide_metric(stage: str, base_area, best: tuple, cand: tuple, noise: Noise, budget: Budget) -> Decision:
