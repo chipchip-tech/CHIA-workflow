@@ -12,6 +12,12 @@ Ngưỡng nhiễu đo bằng các lần place nhiễu nhẹ của một điểm 
 tốt nhất mỗi khi xuống bậc chu kỳ): ngưỡng = max(K × (lớn nhất − nhỏ nhất), mức tối thiểu), K = 1,5; tối thiểu
 0,03 ns chu kỳ, 0,3 MHz và 0,2 ns điểm họ. Ngưỡng tính theo ns (từ 16/11/2026), không theo MHz: cùng một dao động
 slack ứng với số MHz lớn hơn khi Fmax cao (0,367 ns là ±1,55 MHz ở 65 MHz nhưng ±3,7 MHz ở 100 MHz).
+Đo lặp (phương án A, duyệt 16/11/2026; ở 9 ns place của cùng RTL dao động 1,5 ns chỉ vì đổi density/util): một lần
+place của ứng viên chỉ để lọc. Ứng viên có chu kỳ đạt được ngắn hơn trung vị của điểm so sánh (hoặc điểm họ tăng quá
+nhiễu) là "hứa hẹn" (Decision.repeat): loop.py place thêm 3 biến thể nhiễu (density ±0,01, util +1) rồi so TRUNG VỊ 4
+lần đo của hai bên: nhận khi chu kỳ đạt được tốt lên ≥ Budget.gain_ns (0,367 ns: dao động do đổi netlist đo ở
+baseline), hoặc trung vị điểm họ tăng quá nhiễu. Điểm chưa đo lặp dùng một lần đo như cũ; giảm quá ngưỡng nhiễu ở một
+lần đo thì loại luôn.
 Trong đợt (loop.py --phase asic), vòng được cộng dồn theo phần ORFS của luật (decide_place, so với đầu chuỗi) + gate
 nhanh ISA; cuối đợt các vòng cộng dồn qua gate đủ theo Fmax place giảm dần. Không dùng synth hay floorplan để chọn:
 đường găng synth khác place, và floorplan bão hoà khi slack ≥ 0 (sửa timing dừng ở chu kỳ mục tiêu).
@@ -24,6 +30,15 @@ NOISE_K = 1.5
 MIN_FMAX_MHZ = 0.3
 MIN_FAMILY_NS = 0.2
 MIN_PERIOD_NS = 0.03
+GAIN_NS = 0.367                 # đo lặp: trung vị chu kỳ đạt được phải tốt lên ít nhất chừng này
+
+
+def median(xs: list) -> float | None:
+    v = sorted(x for x in xs if x is not None)
+    if not v:
+        return None
+    m = len(v) // 2
+    return v[m] if len(v) % 2 else (v[m - 1] + v[m]) / 2
 
 
 def period_of(fmax: float | None) -> float | None:
@@ -35,6 +50,7 @@ def period_of(fmax: float | None) -> float | None:
 class Budget:
     cycle: float = 1.03
     area: float = 1.15
+    gain_ns: float = GAIN_NS
 
 
 @dataclass
@@ -74,9 +90,24 @@ class Point:
     fp_family: float | None = None
     fp_area: float | None = None
     period_ns: float | None = None
+    fmax_samples: list = field(default_factory=list)     # đo lặp ở period_ns (gồm lần đo chính); rỗng = một lần đo
+    family_samples: list = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return asdict(self)
+
+    def eff(self) -> tuple:
+        """(Fmax, điểm họ, số lần đo) dùng để so: trung vị chu kỳ đạt được khi đã đo lặp, không thì lần đo chính."""
+        fs = [f for f in self.fmax_samples if f]
+        if len(fs) >= 2:
+            fam = median(self.family_samples) if self.family_samples else self.family
+            return 1000.0 / median([1000.0 / f for f in fs]), fam, len(fs)
+        return self.fmax, self.family, 1
+
+    def eff_wns(self) -> float | None:
+        """WNS (không I/O) theo trung vị khi đã đo lặp (= chu kỳ − trung vị chu kỳ đạt được), không thì None."""
+        f, _g, n = self.eff()
+        return self.period_ns - 1000.0 / f if n >= 2 and f and self.period_ns else None
 
 
 @dataclass
@@ -86,6 +117,7 @@ class Decision:
     reasons: list = field(default_factory=list)
     d_fmax: float | None = None
     d_family: float | None = None
+    repeat: bool = False               # hứa hẹn nhưng mới một lần đo: cần đo lặp rồi quyết lại
 
 
 def noise_from(samples: list[dict], k: float = NOISE_K, min_fmax: float = MIN_FMAX_MHZ,
@@ -136,12 +168,20 @@ def decide(base: Point, best: Point, cand: Point, noise: Noise, budget: Budget) 
 
 def decide_place(base: Point, best: Point, cand: Point, noise: Noise, budget: Budget) -> Decision:
     """Chỉ phần ORFS của decide (diện tích, Fmax, điểm họ); loop.py dùng để xếp hạng trước khi gate."""
-    return decide_metric("place", base.area, (best.fmax, best.family), (cand.fmax, cand.family, cand.area),
-                         noise, budget)
+    bf, bg, bn = best.eff()
+    cf, cg, cn = cand.eff()
+    return decide_metric("place", base.area, (bf, bg, bn), (cf, cg, cand.area, cn), noise, budget)
 
 
 def decide_metric(stage: str, base_area, best: tuple, cand: tuple, noise: Noise, budget: Budget) -> Decision:
-    (bf, bg), (cf, cg, ca) = best, cand
+    """best = (Fmax, điểm họ[, số lần đo]), cand = (Fmax, điểm họ, diện tích[, số lần đo]); Fmax/điểm họ là trung vị khi
+    số lần đo ≥ 2. Ứng viên một lần đo: loại khi xấu đi quá ngưỡng nhiễu, "hứa hẹn" (repeat) khi tốt hơn điểm so sánh
+    hoặc điểm họ tăng quá nhiễu, còn lại trong nhiễu. Ứng viên đã đo lặp: nhận khi tốt lên ≥ budget.gain_ns hoặc điểm họ
+    tăng quá nhiễu."""
+    bf, bg = best[0], best[1]
+    bn = best[2] if len(best) > 2 else 1
+    cf, cg, ca = cand[0], cand[1], cand[2]
+    cn = cand[3] if len(cand) > 3 else 1
     if cf is None:
         return Decision(False, stage, [f"không có Fmax sau {stage}"])
     reasons = []
@@ -150,14 +190,23 @@ def decide_metric(stage: str, base_area, best: tuple, cand: tuple, noise: Noise,
     d_f = cf - bf
     d_p = 1000.0 / bf - 1000.0 / cf          # > 0: chu kỳ đạt được ngắn hơn (tốt hơn)
     d_g = (cg - bg) if cg is not None and bg is not None else None
-    reasons.append(f"{stage}: Fmax {cf:.3f} vs {bf:.3f} MHz (Δ {d_f:+.3f}); chu kỳ đạt được {1000 / cf:.3f} vs "
-                   f"{1000 / bf:.3f} ns (tốt lên {d_p:+.3f} ns, nhiễu ±{noise.period_ns:.3f})")
+
+    def how(n):
+        return f" (trung vị {n} lần)" if n >= 2 else ""
+    thr = f"cần ≥ {budget.gain_ns:.3f}" if cn >= 2 else f"nhiễu ±{noise.period_ns:.3f}"
+    reasons.append(f"{stage}: Fmax {cf:.3f}{how(cn)} vs {bf:.3f}{how(bn)} MHz (Δ {d_f:+.3f}); chu kỳ đạt được "
+                   f"{1000 / cf:.3f} vs {1000 / bf:.3f} ns (tốt lên {d_p:+.3f} ns, {thr})")
     if d_g is not None:
         reasons.append(f"{stage}: điểm họ {cg:.3f} vs {bg:.3f} (Δ {d_g:+.3f}, nhiễu ±{noise.family_ns:.3f})")
+    fam_up = d_g is not None and d_g > noise.family_ns
+    if cn >= 2:
+        if d_p >= budget.gain_ns:
+            return Decision(True, stage, ["Fmax tăng (đo lặp)"] + reasons, d_f, d_g)
+        if fam_up:
+            return Decision(True, stage, ["điểm họ tăng (đo lặp, Fmax chưa đủ)"] + reasons, d_f, d_g)
+        return Decision(False, stage, ["không đủ sau đo lặp"] + reasons, d_f, d_g)
     if d_p < -noise.period_ns:
         return Decision(False, stage, ["Fmax giảm quá nhiễu"] + reasons, d_f, d_g)
-    if d_p > noise.period_ns:
-        return Decision(True, stage, ["Fmax tăng"] + reasons, d_f, d_g)
-    if d_g is not None and d_g > noise.family_ns:
-        return Decision(True, stage, ["điểm họ tăng (Fmax trong nhiễu)"] + reasons, d_f, d_g)
+    if d_p > 0 or fam_up:
+        return Decision(False, stage, ["hứa hẹn: cần đo lặp"] + reasons, d_f, d_g, repeat=True)
     return Decision(False, stage, ["trong nhiễu"] + reasons, d_f, d_g)

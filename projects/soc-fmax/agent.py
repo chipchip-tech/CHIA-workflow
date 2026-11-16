@@ -238,10 +238,13 @@ BTB paths). Avoid repeating an idea already listed in `context/history.md` unles
 """
 
 PHASE_CHAIN = """This is the ASIC phase, ACCUMULATING batch: each round is measured by ORFS after PLACE and compared with
-the tree you see (the current head). If it improves place Fmax (or the endpoint-family score) beyond the noise
-threshold (`noise.period_ns` in `context/round.json`: nanoseconds of achievable period = clock period - WNS, measured
-by perturbed placements; place results move by that much even in regions you did not touch) and passes a quick
-riscv-tests check, it is KEPT and the next round builds on top of it. Period ladder (`ladder_ns`): once the accepted
+the tree you see (the current head). Place results are noisy: the same RTL placed with slightly different density or
+utilization moves by `noise.period_ns` (in `context/round.json`; nanoseconds of achievable period = clock period - WNS),
+even in regions you did not touch. So one placement only filters: a round whose achievable period is better than the
+head's MEDIAN (or whose endpoint-family score rises beyond the noise) and that passes a quick riscv-tests check is
+placed 3 more times with perturbed settings, and it is KEPT only if the median of its 4 placements beats the head's
+median by at least `budget.gain_ns`; then the next round builds on top of it. A change that clears several near-critical
+families at once is far more likely to show through the noise than a tiny fix of one path. Period ladder (`ladder_ns`): once the accepted
 design has WNS >= 0 after place at the current period, the loop moves to the next shorter period (current: `period_ns`);
 every report states the period it was measured at, so compare slacks only within one period. At the end of the
 batch the kept rounds, ranked by place Fmax, go through the full gate (riscv-tests, benchmarks with equal minstret,
