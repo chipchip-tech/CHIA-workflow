@@ -383,6 +383,11 @@ cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-i
   3,88 GB: `GRT-0116 Global routing finished with congestion`. Tổng tài nguyên chỉ dùng 22 % (met1 27,6 %, met2 31,6 %,
   met3–5 dưới 15 %), nhưng tràn cục bộ tối đa 11 track mỗi ô lưới, tổng tràn 38 557, gần hết ở **met1/met2** (23 105 và
   15 053): nghẽn chân/ô cục bộ chứ không thiếu tài nguyên toàn die.
+- `congestion_summary.py` (chạy thật): `congestion.rpt` bị cắt ở 20 000 ô (10 000 ngang + 10 000 dọc); **99 % là net của
+  L2 `bankedStore`** (19 864), dồn ở góc trên bên trái die (x 0..2200, y 2000..4000 um), nơi có thể là 4 macro
+  `cc_banks` (fakeram 4096×64, chưa đối chiếu toạ độ macro). Còn lại: 144 ô trên clock net, vài ô quanh dcache/icache.
+  Chưa rõ baseline có nghẽn như vậy không. ORFS cài sẵn **không có biến `ALLOW_CONGESTION`** (grep `flow/scripts/`
+  rỗng), nên `--allow-congestion` như hiện tại không có tác dụng.
 - Đã thêm (mới mock): `route_check.py --allow-congestion` (`ALLOW_CONGESTION=1` chỉ cho `make route`, không đổi variant,
   place/cts lấy từ cache; `summary.md` ghi tổng tràn global route và số vi phạm DRC cuối detailed route) và
   `orfs/congestion_summary.py` (đọc `congestion.rpt`: số ô tràn theo lớp, lưới 8×8 trên die, theo khối thiết kế).
