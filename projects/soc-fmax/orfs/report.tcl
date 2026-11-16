@@ -23,8 +23,27 @@ if {[string match *.odb $db]} {
 }
 if {$sdc ne ""} { read_sdc $sdc } else { read_sdc $::env(SDC_FILE) }
 
-if {[lsearch -exact {place cts} $stage] >= 0} {
-  if {[file exists $::env(PLATFORM_DIR)/setRC.tcl]} { source $::env(PLATFORM_DIR)/setRC.tcl }
+if {[lsearch -exact {place cts route} $stage] >= 0 && [file exists $::env(PLATFORM_DIR)/setRC.tcl]} {
+  source $::env(PLATFORM_DIR)/setRC.tcl
+}
+if {[lsearch -exact {cts route} $stage] >= 0} {
+  # sau CTS: clock thật (trễ + skew của cây clock)
+  set_propagated_clock [all_clocks]
+}
+if {$stage eq "route"} {
+  # sau route: RC trích xuất từ dây thật (OpenRCX, như báo cáo cuối của ORFS); không có luật RCX thì ước lượng
+  if {[info exists ::env(RCX_RULES)] && [file exists $::env(RCX_RULES)]} {
+    define_process_corner -ext_model_index 0 X
+    extract_parasitics -ext_model_file $::env(RCX_RULES)
+    set spef "[file dirname $db]/soc_fmax_5_route.spef"
+    write_spef $spef
+    read_spef $spef
+    puts "parasitics: OpenRCX $::env(RCX_RULES)"
+  } else {
+    estimate_parasitics -placement
+    puts "WARNING parasitics: không có RCX_RULES, dùng ước lượng theo placement"
+  }
+} elseif {[lsearch -exact {place cts} $stage] >= 0} {
   estimate_parasitics -placement
 }
 

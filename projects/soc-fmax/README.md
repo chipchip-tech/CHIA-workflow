@@ -103,6 +103,7 @@ vvadd, mm, spmv), `minstret` của mọi benchmark bằng baseline; thêm `func_
 | `func_check.py` | vết commit (`+verbose`) của 4 benchmark: ghi vết baseline, so ứng viên (taint bộ đếm, dừng ở `tohost`) |
 | `policy.py` | luật nhận/loại (place, ngưỡng theo ns chu kỳ đạt được), ngưỡng nhiễu (hàm thuần) |
 | `loop.py` | đợt N vòng: áp đầu chuỗi → agent đề xuất patch → build (lỗi thì agent sửa, tối đa `--fix-retries`) → `--phase sim`: gate + func → ứng viên vào `candidates.json`; `--phase asic` (mặc định): synth → floorplan → so đầu chuỗi → gate nhanh → cộng dồn; cuối đợt place + gate đủ bản cộng dồn, hỏng thì lùi → hoàn nguyên cây; `history.md`, `history.json`, `best.patch`, `results.csv`, log agent ở `runs/r<N>/`. Cuối job dọn ORFS, chỉ giữ bản tốt nhất. `--bypass empty,comment,broken,file:<patch>` thay agent |
+| `route_check.py` | hiệu chỉnh một lần: một patch qua place → `make cts` → `make route`, so Fmax/đường găng place với CTS (clock thật) và route (RC OpenRCX); không thuộc loop |
 | `agent.py` | agent Claude Code trên khối claude: chép `.scala` của các submodule được sửa từ mount Chipyard chỉ đọc sang `/tmp`, viết `TASK.md` + `context/` (báo cáo ORFS baseline, lịch sử, lỗi build), chạy `claude --print` (`ClaudeCodeLLM`, có timeout), diff bản chép ra patch |
 | `memwatch.py` | RAM đỉnh từng container theo bước (`docker stats` mỗi 5 s, trên host) |
 | `exp.yaml` | cache/bypass: `ChiselBuildNode.build`, `extract_soc_rtl`, `run_gate`, `run_func`, `orfs_stage`; bypass agent (`agent_bypass_*`) |
@@ -309,6 +310,30 @@ Nhận xét:
   place tăng. Hướng B đo bằng place là đúng.
 - Synth vẫn không dùng được (51,4–52,5 MHz).
 
+## Hiệu chỉnh place với route (`route_check.py`, duyệt 16/11/2026)
+
+Câu hỏi: Fmax sau place (số loop dùng để chọn) có đáng tin không. Place chưa có cây clock (clock lý tưởng), chưa có dây
+thật (RC ước lượng từ vị trí cell), chưa `repair_timing`; SRAM là fakeram; một corner `tt`. Hai chiều lệch bù trừ một
+phần nên phải đo. Người dùng chọn: **sau job loop đang chạy, nếu bản tốt nhất có timing tốt (WNS ≥ 0 ở một bậc), chạy
+thử một lần riêng cho đúng patch đó**, rồi loop chạy tiếp bình thường tới 5 ns. M5 (CTS + route + GDS cho mọi bậc) vẫn
+để tới khi đạt 5 ns.
+
+- `route_check.py --from-run <job>`: áp `best.patch` của job, build/RTL và ORFS tới place từ cache, rồi `make cts`,
+  `make route` trên cùng variant (lỗi/quá giờ thì ghi lại, không dừng; giới hạn 3 giờ / 8 giờ). Không gate/func, không
+  dọn ORFS. `--period-ns` để đo ở bậc khác chu kỳ của bản tốt nhất (vd r8 của `m4-b` ở 10 ns).
+- `orfs/report.tcl`: sau `cts` và `route` dùng `set_propagated_clock`; sau `route` trích RC bằng OpenRCX (`RCX_RULES`
+  của platform, như báo cáo cuối của ORFS), không có thì ước lượng theo placement và in `WARNING`. Báo cáo synth,
+  floorplan, place không đổi (`REPORT_VERSION` giữ `r4`, cache cũ vẫn dùng).
+- Kết quả: `~/soc-fmax-runs/<run>/summary.md`: bảng place / cts / route (Fmax, WNS, TNS, diện tích, đường găng),
+  chênh so với place, slack theo vùng, họ endpoint, thời gian, RAM từng bước ORFS.
+- Chạy khi không có job nào khác (một khối asic). RAM và thời gian route của thiết kế này chưa biết.
+
+```bash
+cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-id route-m4c --working-dir . -- python route_check.py --run-name route-m4c --from-run ~/soc-fmax-runs/m4-c
+```
+
+Bản tốt nhất của `m4-c` chưa đạt 9 ns thì kiểm r8 ở 10 ns (đã đạt) bằng `--from-run ~/soc-fmax-runs/m4-b --period-ns 10`.
+
 ## Chạy lại từ đầu (xoá cache và mọi lần chạy)
 
 Xoá cache CHIA (`~/chia_cache/soc-fmax`), kết quả (`~/soc-fmax-runs`) và thư mục ORFS của project
@@ -426,6 +451,9 @@ rm -rf ~/chia_cache/soc-fmax ~/soc-fmax-runs && for d in designs results logs re
   `m5-2 --history-from m5-1`: tự chạy ở 9 ns, ngưỡng lấy từ lịch sử, r2 dựng lại từ cache. `m5-3 --history-from m4b-2`
   (`history.json` kiểu cũ, không có bậc/nhiễu): r5 đạt 10 ns ngay đầu job → xuống 9 ns + đo nhiễu; `m5-4` cùng thế với
   `--on-met stop` dừng job, báo cách chạy tiếp.
+- **`route_check.py` mới kiểm bằng mock (16/11/2026):** từ `m5-1` (r2) ở 10 ns: place, floorplan, synth `cache HIT`,
+  `cts` và `route` chạy, `summary.md` có bảng và chênh so với place, cây sạch sau job. Chưa chạy thật: `make cts` /
+  `make route` của thiết kế này, OpenRCX trong `report.tcl`, RAM/thời gian.
 - **Hướng B chạy thật 16/11/2026 (`m4-b`):** dựng lại bản tốt nhất cũ từ cache, mỗi vòng tới place, gate nhanh rồi
   cộng dồn, gate đủ cuối đợt (bản Fmax cao nhất qua ngay), `summary.md`, dọn ORFS (chỉ còn variant r8) đều chạy đúng.
   Chưa gặp trên máy thật: lùi sang bản kế khi gate đủ hỏng (mới có ở mock).

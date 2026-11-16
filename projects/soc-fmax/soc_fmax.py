@@ -367,7 +367,8 @@ def step_orfs(a, d: Path, stage: str, rtl, fakeram, mw: MemWatch, tm: Timer, pre
     variant = prep["variant"]
     tag = f"orfs_{variant}_{O.REPORT_VERSION}_{stage}"
     hit = cache_has(tag)
-    timeout = {"synth": a.synth_timeout, "floorplan": a.floorplan_timeout, "place": a.place_timeout}[stage]
+    timeout = {"synth": a.synth_timeout, "floorplan": a.floorplan_timeout, "place": a.place_timeout,
+               "cts": getattr(a, "cts_timeout", 3 * 3600), "route": getattr(a, "route_timeout", 8 * 3600)}[stage]
     print(f"\n== {stage} @ {a.period_ns} ns, variant {variant} ({'cache HIT' if hit else f'chạy thật, giới hạn {timeout / 60:.0f} phút'})",
           flush=True)
     t0 = time.time()
