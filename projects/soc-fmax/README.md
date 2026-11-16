@@ -18,10 +18,10 @@ và GDS của mỗi bậc đã đạt.
 | | |
 |---|---|
 | Pha đi qua | **Simulate** (bắt buộc) → **ASIC**. Không làm FPGA. |
-| Pha hiện tại | M1 xong (baseline đo thật sau place 10 ns: **65,42 MHz**). **M2 xong** (func_check, nhiễu, ngưỡng **±1,546 MHz**, loop bypass chạy thật). M3 (agent thật, pha sim): mã xong, chạy mock, chờ `m3-a` |
+| Pha hiện tại | M1–M3 xong. M4 đang chạy: `m4-b` đạt bậc 10 ns sau place (**101,98 MHz**, WNS +0,194); `loop.py` tự xuống bậc (mới mock), chờ `m4-c` ở 9 ns |
 | PDK / corner | sky130hd (`sky130_fd_sc_hd`), `tt_025C_1v80` |
 | SRAM | fakeram (`scripts/fakeram_sky130.py`, `docs/fakeram-sky130.md`): access 1,5 ns, 3 µm²/bit, timing giả định. OpenRAM thật chỉ ở M6 |
-| Bậc chu kỳ | 10 → 9 → 8 → 7 → 6 → 5 ns. Bản tốt nhất có WNS ≥ 0 sau place ở bậc hiện tại → CTS + route + GDS cho bản đó → bậc kế |
+| Bậc chu kỳ | 10 → 9 → 8 → 7 → 6 → 5 ns. Bản tốt nhất có WNS ≥ 0 sau place ở bậc hiện tại → bậc kế (`loop.py` tự xuống bậc, giữ variant ORFS của bậc đã đạt). CTS + route + GDS (M5) làm khi đạt 5 ns (người dùng chọn 16/11/2026) |
 | Ngân sách (so với baseline `MinimalSoCConfig`) | chi phí cycle (trung bình nhân `mcycle / mcycle_baseline`) ≤ +3 %; diện tích logic (không SRAM) ≤ +15 % |
 
 **Simulate.** Gate: riscv-tests `rv64ui/um/ua/uf/ud-p-*` + 8 benchmark (dhrystone, median, multiply, qsort, towers,
@@ -80,12 +80,16 @@ vvadd, mm, spmv), `minstret` của mọi benchmark bằng baseline; thêm `func_
   - gate pass (trừ test hỏng sẵn) và `minstret` bằng baseline;
   - `func_check` đạt;
   - chi phí cycle ≤ 1,03 và diện tích logic ≤ 1,15 × baseline;
-  - so với **bản tốt nhất hiện tại**: Fmax không giảm quá ngưỡng nhiễu, **và** Fmax hoặc điểm họ tăng hơn ngưỡng
-    nhiễu.
-- Trong đợt (pha asic) vòng được cộng dồn theo số sau floorplan và ngưỡng nhiễu floorplan; synth không dùng để chọn (đường găng synth khác place). Chỉ bản cộng dồn cuối đợt qua luật nhận đầy đủ sau place.
+  - so với **bản tốt nhất hiện tại** (cùng chu kỳ ràng buộc): chu kỳ đạt được sau place (1000 / Fmax = chu kỳ − WNS)
+    không xấu đi quá ngưỡng nhiễu, **và** nó hoặc điểm họ tốt lên hơn ngưỡng nhiễu.
+- Trong đợt (pha asic) vòng được cộng dồn theo số sau place (hướng B) + gate nhanh; synth và floorplan không dùng để
+  chọn. Cuối đợt các vòng cộng dồn qua luật nhận đầy đủ theo Fmax place giảm dần.
 - Ngưỡng nhiễu lấy từ `soc_fmax.py --noise`. Baseline chạy lại 4 lần: một lần y hệt (chỉ đổi tên variant),
-  `PLACE_DENSITY` ±0,01 và `CORE_UTILIZATION` +1, mỗi lần đi từ synth tới place.
-  Ngưỡng = max(1,5 × khoảng chênh, 0,3 MHz); với điểm họ thì tối thiểu là 0,2 ns.
+  `PLACE_DENSITY` ±0,01 và `CORE_UTILIZATION` +1, mỗi lần đi từ synth tới place. Mỗi khi xuống bậc, `loop.py` đo lại
+  trên bản tốt nhất ở bậc mới (3 lần nhiễu, bỏ lần chạy y hệt vì ORFS tất định).
+  Ngưỡng = max(1,5 × khoảng chênh, mức sàn). **Từ 16/11/2026 ngưỡng tính theo ns chu kỳ đạt được** (sàn 0,03 ns), không
+  theo MHz: `noise.json` của baseline cho ±0,367 ns (bằng ±1,546 MHz ở 65 MHz, nhưng ±3,7 MHz ở 100 MHz). Điểm họ:
+  sàn 0,2 ns.
 
 ## File
 
@@ -97,7 +101,7 @@ vvadd, mm, spmv), `minstret` của mọi benchmark bằng baseline; thêm `func_
 | `orfs/report.tcl` | báo cáo trên kết quả một bước: WNS/TNS, 5000 đường xấu nhất (mỗi endpoint một đường), slack theo instance cấp 1 trên mọi endpoint, đếm thanh ghi theo clock, nhóm thanh ghi không clock, diện tích logic/macro |
 | `orfs/diag_floorplan.tcl` | chẩn đoán tay: macro (bbox, halo), blockage, và inst/pin/row trong một hộp (`SOCFMAX_BOX`) |
 | `func_check.py` | vết commit (`+verbose`) của 4 benchmark: ghi vết baseline, so ứng viên (taint bộ đếm, dừng ở `tohost`) |
-| `policy.py` | luật nhận/loại (place, và floorplan cho cộng dồn trong đợt), ngưỡng nhiễu (hàm thuần) |
+| `policy.py` | luật nhận/loại (place, ngưỡng theo ns chu kỳ đạt được), ngưỡng nhiễu (hàm thuần) |
 | `loop.py` | đợt N vòng: áp đầu chuỗi → agent đề xuất patch → build (lỗi thì agent sửa, tối đa `--fix-retries`) → `--phase sim`: gate + func → ứng viên vào `candidates.json`; `--phase asic` (mặc định): synth → floorplan → so đầu chuỗi → gate nhanh → cộng dồn; cuối đợt place + gate đủ bản cộng dồn, hỏng thì lùi → hoàn nguyên cây; `history.md`, `history.json`, `best.patch`, `results.csv`, log agent ở `runs/r<N>/`. Cuối job dọn ORFS, chỉ giữ bản tốt nhất. `--bypass empty,comment,broken,file:<patch>` thay agent |
 | `agent.py` | agent Claude Code trên khối claude: chép `.scala` của các submodule được sửa từ mount Chipyard chỉ đọc sang `/tmp`, viết `TASK.md` + `context/` (báo cáo ORFS baseline, lịch sử, lỗi build), chạy `claude --print` (`ClaudeCodeLLM`, có timeout), diff bản chép ra patch |
 | `memwatch.py` | RAM đỉnh từng container theo bước (`docker stats` mỗi 5 s, trên host) |
@@ -226,6 +230,16 @@ patch đổi số chu kỳ trước vùng đo đều hỏng func dù đúng ch�
 4. Đợt sau: `--history-from ~/soc-fmax-runs/<run>`: bản tốt nhất cũ được dựng lại từ cache (build + ORFS tới place) để
    agent có báo cáo place của nó.
 
+5. **Bậc chu kỳ** (`--ladder 10,9,8,7,6,5`, duyệt 16/11/2026):
+   - một vòng cộng dồn có WNS ≥ 0 sau place ở bậc hiện tại → **kết thúc đợt sớm** (gate đủ cuối đợt ngay);
+   - bản được nhận có WNS ≥ 0 → **bậc đạt**: ghi vào `history.json`/`summary.md`, giữ variant ORFS của nó (cho M5),
+     rồi `--on-met next` (mặc định) xuống bậc kế ngay trong job: đo lại bản tốt nhất ở bậc mới, đo nhiễu trên nó
+     (3 lần place, khoảng 45 phút; `--rung-noise keep` để dùng lại ngưỡng cũ), các vòng còn lại chạy ở bậc mới.
+     `--on-met stop`: dừng job;
+   - đạt bậc cuối (5 ns) → dừng job, sang M5;
+   - baseline luôn đo ở 10 ns (cache). Đi tiếp bằng `--history-from`: bậc bắt đầu là chu kỳ của bản tốt nhất cũ (hoặc
+     `--period-ns`), ngưỡng nhiễu lấy từ lịch sử nếu cùng bậc; bản tốt nhất cũ đã đạt bậc đó thì xuống bậc ngay đầu job.
+
 Ước lượng một đợt 5 vòng: 5 × (agent 2–5 + build + synth 4 + floorplan 1–2 + place 9,5 + gate nhanh) ≈ 2 giờ, cộng gate
 đủ khoảng 23 phút cho mỗi bản thử ở cuối đợt. Trong đợt có thể có tới 5 variant tới place (2,3 GB mỗi cái) trước khi dọn.
 
@@ -235,10 +249,16 @@ patch đổi số chu kỳ trước vùng đo đều hỏng func dù đúng ch�
 cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-id m4-a --working-dir . -- python loop.py --run-name m4-a --noise-json ~/soc-fmax-runs/m2-noise/noise.json --rounds 5
 ```
 
-Đợt kế, đi tiếp từ `m4-a`:
+Đợt kế, đi tiếp từ `m4-a` (đã chạy):
 
 ```bash
 cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-id m4-b --working-dir . -- python loop.py --run-name m4-b --noise-json ~/soc-fmax-runs/m2-noise/noise.json --history-from ~/soc-fmax-runs/m4-a --rounds 5
+```
+
+Đi tiếp từ `m4-b` (r8 đã đạt 10 ns → đầu job xuống 9 ns, đo r8 và nhiễu ở 9 ns, rồi 5 vòng):
+
+```bash
+cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-id m4-c --working-dir . -- python loop.py --run-name m4-c --noise-json ~/soc-fmax-runs/m2-noise/noise.json --history-from ~/soc-fmax-runs/m4-b --rounds 5
 ```
 
 **Kết quả `m4-a` (chạy thật 16/11/2026, 10 ns, sau khi chạy lại từ đầu: `m2-noise` cho lại đúng baseline 65,423 MHz và
@@ -400,6 +420,12 @@ rm -rf ~/chia_cache/soc-fmax ~/soc-fmax-runs && for d in designs results logs re
   cộng dồn (place tăng dần); cuối đợt gate r4 (func hỏng) → r3 (func hỏng) → r1 nhận; dọn ORFS giữ mỗi r1.
   `m4b-2 --history-from m4b-1`: r1 dựng lại từ cache (build + synth/floorplan/place `cache HIT`), agent thấy
   `r1_place.txt`, r5 cộng dồn rồi nhận, dọn ORFS xoá cả variant r1 cũ; `summary.md` đúng ở cả hai; cây sạch sau job.
+- **Bậc chu kỳ + ngưỡng ns mới kiểm bằng mock (16/11/2026, sandbox, Fmax place giả 95 MHz):** `m5-1` từ baseline:
+  r1, r2 cộng dồn, r2 WNS +0,099 ở 10 ns → kết thúc đợt sớm, r2 nhận → bậc 10 đạt → đo r2 + 3 lần nhiễu ở 9 ns
+  (`noise_p9.json`) → r3 cộng dồn, r4 hỏng gate nhanh, cuối đợt r3 hỏng func; dọn ORFS giữ r2 @ 10 ns và @ 9 ns.
+  `m5-2 --history-from m5-1`: tự chạy ở 9 ns, ngưỡng lấy từ lịch sử, r2 dựng lại từ cache. `m5-3 --history-from m4b-2`
+  (`history.json` kiểu cũ, không có bậc/nhiễu): r5 đạt 10 ns ngay đầu job → xuống 9 ns + đo nhiễu; `m5-4` cùng thế với
+  `--on-met stop` dừng job, báo cách chạy tiếp.
 - **Hướng B chạy thật 16/11/2026 (`m4-b`):** dựng lại bản tốt nhất cũ từ cache, mỗi vòng tới place, gate nhanh rồi
   cộng dồn, gate đủ cuối đợt (bản Fmax cao nhất qua ngay), `summary.md`, dọn ORFS (chỉ còn variant r8) đều chạy đúng.
   Chưa gặp trên máy thật: lùi sang bản kế khi gate đủ hỏng (mới có ở mock).
@@ -413,6 +439,6 @@ rm -rf ~/chia_cache/soc-fmax ~/soc-fmax-runs && for d in designs results logs re
 | M1 | build → gate → fakeram → ORFS place 10 ns → Fmax/WNS, vùng, diện tích, thời gian/RAM, `results.csv`; lần hai từ cache | **xong 15/11/2026** (chạy thật, kể cả kiểm cache) |
 | M2 | `func_check.py` vào gate, đo nhiễu place, chốt ngưỡng nhận, orchestration với bypass LLM | **xong 15/11/2026** (chạy thật: func_check, nhiễu, loop bypass 3 vòng) |
 | M3 | pha sim có agent (tầng pipeline, chỉ đo cycle) → `candidates.json` | **xong 15/11/2026** (`m3-b` chạy thật: 4 ứng viên / 5 vòng) |
-| M4 | pha asic có agent, đợt cộng dồn đo bằng place (hướng B), gate đủ cuối đợt theo Fmax, tự xuống bậc | đang chạy: `m4-a` thật 16/11/2026 place 65,42 → 86,86 MHz; `m4-b` (hướng B, chạy thật) → **101,98 MHz, WNS +0,194: đạt bậc 10 ns**; chưa xuống bậc 9 ns |
-| M5 | CTS + route + GDS mỗi bậc đạt, timing sau route | chưa |
+| M4 | pha asic có agent, đợt cộng dồn đo bằng place (hướng B), gate đủ cuối đợt theo Fmax, tự xuống bậc tới 5 ns | đang chạy: `m4-a` thật 16/11/2026 place 65,42 → 86,86 MHz; `m4-b` (hướng B, chạy thật) → **101,98 MHz, WNS +0,194: đạt bậc 10 ns**; tự xuống bậc + ngưỡng ns mới mock, chờ `m4-c` (9 ns) |
+| M5 | CTS + route + GDS, timing sau route: làm khi đạt 5 ns (variant ORFS bản tốt nhất của mỗi bậc đạt được giữ lại) | chưa |
 | M6 | OpenRAM sky130 thật cho bản tốt nhất, GDS thật, so fakeram/OpenRAM | chưa |

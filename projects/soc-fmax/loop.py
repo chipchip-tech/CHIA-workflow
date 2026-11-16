@@ -20,6 +20,14 @@ Mỗi vòng, chung cho hai pha:
   cuối đợt: các vòng đã cộng dồn xếp theo Fmax place giảm dần (trong chuỗi, Fmax tăng dần nên đây là thứ tự lùi), lần
   lượt gate đủ (gate + func_check + ngân sách cycle), không agent chẩn đoán; bản đầu tiên qua -> NHẬN (best.patch).
   Hết lượt agent giữa đợt vẫn chạy bước cuối đợt.
+  Ngưỡng nhiễu tính theo ns của chu kỳ đạt được (chu kỳ − WNS), không theo MHz.
+
+Bậc chu kỳ (--ladder 10,9,8,7,6,5): một vòng cộng dồn có WNS ≥ 0 sau place ở bậc hiện tại -> kết thúc đợt sớm (gate đủ
+  cuối đợt). Bản được nhận có WNS ≥ 0 -> bậc đạt: --on-met next (mặc định) xuống bậc kế ngay trong job (đo lại bản tốt
+  nhất ở bậc mới, đo nhiễu trên nó: 3 lần place nhiễu nhẹ, --rung-noise keep để dùng lại ngưỡng cũ), các vòng còn lại
+  chạy ở bậc mới; --on-met stop dừng job. Đạt bậc cuối (5 ns) -> dừng job (sau đó M5). Variant ORFS của bản tốt nhất ở
+  mỗi bậc đã đạt được giữ lại (cho M5). Baseline luôn đo ở bậc đầu (10 ns). Đi tiếp bằng --history-from: bậc bắt đầu
+  là chu kỳ của bản tốt nhất cũ (trừ khi có --period-ns), nếu nó đã đạt bậc đó thì xuống bậc ngay đầu job.
 
 Kết quả ở ~/soc-fmax-runs/<run>/: summary.md (tổng hợp job), history.md, history.json, best.patch, candidates.json
 (sim), results.csv, runs/r<N>/ (patch, log agent, báo cáo). Cuối job chỉ giữ kết quả ORFS (flow/results|logs|reports|
@@ -33,8 +41,8 @@ hết). Đợt sau đi tiếp: --history-from ~/soc-fmax-runs/<run>.
   file:<path>   patch có sẵn (đường dẫn trên host)
 
 Chạy (README.md):
-  chia job submit --no-wait --submission-id m4-a --working-dir . -- python loop.py --run-name m4-a \\
-      --noise-json ~/soc-fmax-runs/m2-noise/noise.json --rounds 5
+  chia job submit --no-wait --submission-id m4-c --working-dir . -- python loop.py --run-name m4-c \\
+      --noise-json ~/soc-fmax-runs/m2-noise/noise.json --history-from ~/soc-fmax-runs/m4-b --rounds 5
 """
 from __future__ import annotations
 
@@ -44,6 +52,7 @@ import difflib
 import json
 import os
 import re
+import sys
 import subprocess
 import time
 import traceback
@@ -273,22 +282,28 @@ def patch_stat(patch: str) -> str:
     return f"{len(files)} file, +{add} −{rem}: " + ", ".join(files[:6]) + (" ..." if len(files) > 6 else "")
 
 
-def history_md(a, base: P.Point, best: P.Point, noise: P.Noise, rounds: list[Round]) -> str:
+def history_md(a, base: P.Point, best: P.Point, noise: P.Noise, rounds: list[Round], rungs: list | None = None) -> str:
     L = [f"# soc-fmax loop {a.run_name}", "",
-         f"- Cập nhật {datetime.now(timezone.utc).isoformat(timespec='seconds')}, chu kỳ {a.period_ns} ns",
-         f"- Baseline: Fmax {D.fmt(base.fmax, 3)} MHz, điểm họ {D.fmt(base.family)}, logic {D.fmt(base.area, 0)} um2",
-         f"- Bản tốt nhất: **{best.name}**, Fmax {D.fmt(best.fmax, 3)} MHz, điểm họ {D.fmt(best.family)}",
+         f"- Cập nhật {datetime.now(timezone.utc).isoformat(timespec='seconds')}, chu kỳ hiện tại {a.period_ns} ns "
+         f"(bậc {', '.join(f'{x:g}' for x in a.ladder_list)})",
+         f"- Baseline (@ {D.fmt(base.period_ns, 1)} ns): Fmax {D.fmt(base.fmax, 3)} MHz, điểm họ {D.fmt(base.family)}, "
+         f"logic {D.fmt(base.area, 0)} um2",
+         f"- Bản tốt nhất: **{best.name}** (@ {D.fmt(best.period_ns, 1)} ns), Fmax {D.fmt(best.fmax, 3)} MHz, "
+         f"điểm họ {D.fmt(best.family)}",
          f"- Pha {a.phase}" + (" (đợt cộng dồn)" if a.phase == "asic" else ""),
-         f"- Ngưỡng nhiễu: Fmax ±{noise.fmax_mhz:.3f} MHz, điểm họ ±{noise.family_ns:.3f} ({noise.note})", "",
-         "| vòng | agent | patch | kết quả | Fmax floorplan | Fmax place | điểm họ place | cycle | logic | phút |",
-         "|---|---|---|---|---|---|---|---|---|---|"]
+         f"- Ngưỡng nhiễu: chu kỳ đạt được ±{noise.period_ns:.3f} ns, điểm họ ±{noise.family_ns:.3f} ({noise.note})"]
+    for x in rungs or []:
+        L.append(f"- Bậc {x['period']:g} ns ĐẠT: {x['best']} WNS {D.fmt(x['wns'])} ns, Fmax {D.fmt(x['fmax'], 3)} MHz "
+                 f"(sau vòng {x['round']}, job {x['run']})")
+    L += ["", "| vòng | agent | patch | kết quả | chu kỳ | Fmax floorplan | Fmax place | điểm họ place | cycle | logic | phút |",
+          "|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in rounds:
         p = r.point or {}
         who = ("file:" + os.path.basename(r.bypass[5:])) if r.bypass.startswith("file:") else (r.bypass or "agent")
         res = "**NHẬN**" if r.accepted else ("**ỨNG VIÊN**" if r.candidate else r.status)
         if r.gate_rank:
             res += f" (cuối đợt, lần {r.gate_rank})"
-        L.append(f"| {r.n} | {who} | {r.patch_stat} | {res} | "
+        L.append(f"| {r.n} | {who} | {r.patch_stat} | {res} | {D.fmt(p.get('period_ns'), 1)} | "
                  f"{D.fmt(p.get('fp_fmax'), 3)} | {D.fmt(p.get('fmax'), 3)} | {D.fmt(p.get('family'))} | {D.fmt(p.get('cycle_cost'), 4)} | "
                  f"{D.fmt(p.get('area'), 0)} | {r.minutes:.1f} |")
     for r in rounds:
@@ -318,7 +333,7 @@ class Ctx:
         self.base = P.Point(name="baseline", rtl_hash=base_rtl.hash, gate_ok=True, func_ok=True, cycle_cost=1.0,
                             synth_fmax=base_stages["synth"].fmax_mhz, synth_family=base_stages["synth"].family_score,
                             fmax=base_stages["place"].fmax_mhz, family=base_stages["place"].family_score,
-                            area=base_stages["place"].std_area_um2, period_ns=a.period_ns,
+                            area=base_stages["place"].std_area_um2, period_ns=base_stages["place"].period_ns,
                             fp_fmax=base_stages["floorplan"].fmax_mhz, fp_family=base_stages["floorplan"].family_score,
                             fp_area=base_stages["floorplan"].std_area_um2)
         self.best, self.best_patch = self.base, ""
@@ -327,6 +342,11 @@ class Ctx:
         self.start_best = self.base                  # bản tốt nhất lúc bắt đầu job (cho summary.md)
         self.first_round = 1                         # vòng đầu tiên của job này (--history-from: tiếp số vòng)
         self.place_info = {"baseline": place_info(base_stages["place"])}   # tên điểm -> WNS, đường găng, vùng
+        self.start_info: dict = {}                   # place_info của bản tốt nhất lúc bắt đầu job (trước khi xuống bậc)
+        self.rungs: list[dict] = []                  # bậc đã đạt (mọi job): period, best, wns, fmax, round, run
+        self.keep_points: list[str] = []             # điểm ORFS giữ lại ngoài bản tốt nhất (bản tốt nhất của bậc đã đạt)
+        self.met_round: int | None = None            # vòng cộng dồn có WNS ≥ 0 ở bậc hiện tại -> kết thúc đợt sớm
+        self.noise_runs: list[dict] = []             # các lần đo nhiễu trong job (cho summary.md)
         self.measured = {base_rtl.hash: "baseline"}
         self.rounds: list[Round] = []
         self.candidates: list[dict] = []
@@ -394,14 +414,16 @@ def ask(fn_name: str, fn, ctx_in: dict, kind: str, a, tag: str, d: Path | None =
 
 def agent_context(c: Ctx, n: int) -> dict:
     """Thông tin cho agent: báo cáo ORFS baseline, lịch sử, ngân sách, cấu hình agent."""
-    files = {**c.ctx_files, "history.md": history_md(c.a, c.base, c.best, c.noise, c.rounds)}
+    files = {**c.ctx_files, "history.md": history_md(c.a, c.base, c.best, c.noise, c.rounds, c.rungs)}
     if c.head_patch:
         files["best.patch"] = c.head_patch
     if c.candidates:
         files["candidates.json"] = json.dumps(c.candidates, indent=2)
     return {"round": n, "phase": c.a.phase, "period_ns": c.a.period_ns, "chipyard": c.a.chipyard,
             "best": c.head.as_dict(), "baseline": c.base.as_dict(), "batch": "chain" if c.a.phase == "asic" else "",
-            "noise": {"fmax_mhz": c.noise.fmax_mhz, "family_ns": c.noise.family_ns},
+            "noise": {"period_ns": c.noise.period_ns, "family_ns": c.noise.family_ns,
+                      "measured_on": c.noise.point, "at_period_ns": c.noise.at_period_ns},
+            "ladder_ns": c.a.ladder_list,
             "budget": dataclasses.asdict(c.budget), "best_patch": c.head_patch, "untracked": c.untracked,
             "context_files": files,
             "agent": {"model": c.a.agent_model, "effort": c.a.agent_effort, "max_turns": c.a.agent_max_turns,
@@ -579,6 +601,9 @@ def chain_round(c: Ctx, n: int, kind: str, rd: Round, d: Path, tag_base: str, pa
     c.chain.append({"n": n, "tree_patch": cand_patch, "patch": patch, "point": pt, "tag_base": tag_base, "kind": kind})
     c.head, c.head_patch = pt, cand_patch
     print(f"  cộng dồn: vòng sau xây trên r{n} (chuỗi {' + '.join('r' + str(x['n']) for x in c.chain)})", flush=True)
+    if pl.internal_slack_ns is not None and pl.internal_slack_ns >= 0:
+        c.met_round = n
+        print(f"  r{n} có WNS {pl.internal_slack_ns:+.3f} ≥ 0 ở {a.period_ns:g} ns: kết thúc đợt sớm", flush=True)
     return rd
 
 
@@ -643,27 +668,98 @@ def finish_chain(c: Ctx):
     save(Path(a.out), a, c)
 
 
-def load_best(c: Ctx, hdir: Path):
-    """--history-from: dựng lại bản tốt nhất cũ (build + ORFS tới place, thường lấy từ cache) để agent có báo cáo place
-    của nó và prune_orfs biết variant của nó (xoá khi job có bản tốt hơn)."""
-    a = c.a
-    if not c.best_patch:
-        return
-    d = Path(a.out) / "runs" / f"best_{c.best.name}"
-    print(f"\n== bản tốt nhất cũ {c.best.name} ({hdir.name}): dựng lại (cache)", flush=True)
+def measure_best(c: Ctx, why: str, noise: bool = False):
+    """Đo bản tốt nhất ở chu kỳ hiện tại (build + ORFS tới place; thường lấy từ cache) và cập nhật số đo của nó; noise:
+    thêm 3 lần place nhiễu nhẹ (PLACE_DENSITY ±0,01, CORE_UTILIZATION +1) -> ngưỡng nhiễu mới (c.noise)."""
+    a, b = c.a, c.best
+    d = Path(a.out) / "runs" / f"best_{b.name}_p{a.period_ns:g}"
+    print(f"\n== bản tốt nhất {b.name} @ {a.period_ns:g} ns: {why}", flush=True)
     applied = Applied(a.chipyard)
+    samples = []
     try:
-        applied.apply(c.best_patch, c.subs)
-        _state, _art, rtl = D.step_rtl(a, d, c.mw, c.tm, baseline=False)
-        if rtl is None or rtl.hash != c.best.rtl_hash:
-            raise SystemExit(f"best.patch của {hdir} build ra RTL khác ({rtl.hash[:12] if rtl else 'build lỗi'} ≠ "
-                             f"{c.best.rtl_hash[:12]})")
-        _prep, st = D.run_orfs_point(a, d, rtl, c.fakeram, a.orfs_vars, c.best.name, "place", c.mw, c.tm)
+        if c.best_patch:
+            applied.apply(c.best_patch, c.subs)
+        _state, _art, rtl = D.step_rtl(a, d, c.mw, c.tm, baseline=not c.best_patch)
+        if rtl is None or rtl.hash != b.rtl_hash:
+            raise SystemExit(f"best.patch build ra RTL khác ({rtl.hash[:12] if rtl else 'build lỗi'} ≠ {b.rtl_hash[:12]})")
+        _prep, st = D.run_orfs_point(a, d, rtl, c.fakeram, a.orfs_vars, b.name, "place", c.mw, c.tm)
+        if noise:
+            pl = st["place"]
+            samples.append({"name": b.name, "fmax": pl.fmax_mhz, "family": pl.family_score, "area": pl.std_area_um2})
+            for name, ov in D.noise_variants(a.orfs_vars):
+                if name == "rerun":          # ORFS tất định (M2): chạy lại y hệt cho cùng số
+                    continue
+                print(f"\n-- nhiễu {name} @ {a.period_ns:g} ns", flush=True)
+                _p, sn = D.run_orfs_point(a, d / f"noise_{name}", rtl, c.fakeram, ov, f"noise@{a.period_ns:g}:{name}",
+                                          "place", c.mw, c.tm)
+                samples.append({"name": name, "fmax": sn["place"].fmax_mhz, "family": sn["place"].family_score,
+                                "area": sn["place"].std_area_um2, "variant": sn["place"].variant})
     finally:
         applied.revert()
-        check_tree(c, "bản tốt nhất cũ")
-    c.ctx_files[f"{c.best.name}_place.txt"] = stage_text(st["place"])
-    c.place_info[c.best.name] = place_info(st["place"])
+        check_tree(c, f"bản tốt nhất {b.name}")
+    pl, fp, sy = st["place"], st["floorplan"], st["synth"]
+    pt = dataclasses.replace(b, period_ns=a.period_ns, fmax=pl.fmax_mhz, family=pl.family_score, area=pl.std_area_um2,
+                             fp_fmax=fp.fmax_mhz, fp_family=fp.family_score, fp_area=fp.std_area_um2,
+                             synth_fmax=sy.fmax_mhz, synth_family=sy.family_score)
+    c.set_best(pt, c.best_patch)
+    c.ctx_files[f"{b.name}_p{a.period_ns:g}_place.txt"] = stage_text(pl)
+    c.place_info[info_key(pt)] = place_info(pl)
+    print(f"  {b.name} @ {a.period_ns:g} ns: Fmax {D.fmt(pt.fmax, 3)} MHz, WNS {D.fmt(pl.internal_slack_ns)}", flush=True)
+    if noise:
+        c.noise = P.noise_from(samples, at_period_ns=a.period_ns, point=b.name)
+        D.write(Path(a.out) / f"noise_p{a.period_ns:g}.json", json.dumps(dataclasses.asdict(c.noise), indent=2))
+        c.noise_runs.append({"period": a.period_ns, "point": b.name, "samples": samples,
+                             "period_thr": c.noise.period_ns, "family_thr": c.noise.family_ns, "note": c.noise.note})
+        print(f"  NGƯỠNG NHIỄU MỚI: chu kỳ đạt được ±{c.noise.period_ns:.3f} ns, điểm họ ±{c.noise.family_ns:.3f} "
+              f"({c.noise.note})", flush=True)
+
+
+def info_key(pt: P.Point) -> str:
+    """Khoá place_info của một lần đo bản tốt nhất (khác khoá r<N> của vòng: cùng điểm có thể đo ở nhiều bậc)."""
+    return f"{pt.name}@{pt.period_ns:g}" if pt.period_ns else pt.name
+
+
+def best_info(c: Ctx, pt: P.Point | None = None) -> dict:
+    pt = pt or c.best
+    return c.place_info.get(info_key(pt)) or c.place_info.get(pt.name, {})
+
+
+def best_met(c: Ctx) -> bool:
+    wns = best_info(c).get("wns")
+    return (wns is not None and wns >= 0 and c.best.period_ns is not None
+            and abs(c.best.period_ns - c.a.period_ns) < 1e-9)
+
+
+def next_period(a) -> float | None:
+    return next((p for p in a.ladder_list if p < a.period_ns - 1e-9), None)
+
+
+def step_down(c: Ctx, last_round: int) -> bool:
+    """Bản tốt nhất đạt bậc hiện tại: ghi bậc, giữ variant ORFS của nó (M5), xuống bậc kế (đo lại bản tốt nhất và
+    nhiễu). Lặp nếu bản tốt nhất đạt luôn bậc mới. Trả False khi dừng job (--on-met stop hoặc hết bậc)."""
+    a = c.a
+    while best_met(c):
+        b = c.best
+        c.rungs.append({"period": a.period_ns, "best": b.name, "wns": best_info(c)["wns"], "fmax": b.fmax,
+                        "round": last_round, "run": a.run_name})
+        key = f"{b.name}@{a.period_ns:g}ns"
+        v = getattr(a, "orfs_variants", {}).get(b.name)
+        if v:
+            a.orfs_variants[key] = v
+            c.keep_points.append(key)
+        print(f"\n######## BẬC {a.period_ns:g} ns ĐẠT: {b.name} WNS {D.fmt(best_info(c)['wns'])} ns "
+              f"(giữ variant ORFS {v or '-'} cho M5)", flush=True)
+        nxt = next_period(a)
+        if nxt is None:
+            print("đã đạt bậc cuối: dừng job (bước tiếp theo: M5)", flush=True)
+            return False
+        if a.on_met == "stop":
+            print(f"--on-met stop: dừng job; job sau chạy ở {nxt:g} ns", flush=True)
+            return False
+        a.period_ns = nxt
+        measure_best(c, f"xuống bậc {nxt:g} ns", noise=a.rung_noise == "measure")
+        save(Path(a.out), a, c)
+    return True
 
 
 def gate_point(c: Ctx, d: Path, art, rtl, pt: P.Point, patch: str, ctx_in: dict, kind: str, tag_base: str,
@@ -721,8 +817,15 @@ def parse_args():
     ap.add_argument("--history-from", default="", help="thư mục run trước (history.json, best.patch) để đi tiếp")
     ap.add_argument("--cycle-budget", type=float, default=1.03)
     ap.add_argument("--area-budget", type=float, default=1.15)
+    ap.add_argument("--ladder", default="10,9,8,7,6,5", help="bậc chu kỳ (ns), giảm dần; baseline đo ở bậc đầu")
+    ap.add_argument("--on-met", choices=("next", "stop"), default="next",
+                    help="bản được nhận đạt bậc (WNS ≥ 0 sau place): next = xuống bậc kế trong job, stop = dừng job")
+    ap.add_argument("--rung-noise", choices=("measure", "keep"), default="measure",
+                    help="khi xuống bậc: measure = đo nhiễu trên bản tốt nhất ở bậc mới (3 lần place), keep = giữ ngưỡng")
     a = ap.parse_args()
+    a.period_explicit = any(x == "--period-ns" or x.startswith("--period-ns=") for x in sys.argv[1:])
     D.finish_args(a, ap)
+    a.ladder_list = sorted({float(x) for x in a.ladder.split(",") if x.strip()}, reverse=True)
     a.bypass_list = [x.strip() for x in a.bypass.split(",") if x.strip()]
     return a
 
@@ -767,7 +870,9 @@ def main():
         gate = D.step_gate(a, d0, art, rtl, mw, tm)
         func_base = D.step_func(a, d0, art, rtl, gate["elfs"], mw, tm)
         fakeram = D.load_fakeram(a.repo)
+        period0, a.period_ns = a.period_ns, a.ladder_list[0]       # baseline luôn ở bậc đầu
         _prep, stages = D.run_orfs_point(a, d0, rtl, fakeram, a.orfs_vars, "baseline", "place", mw, tm)
+        a.period_ns = period0
         c = Ctx(a, mw, tm, fakeram, state, art, rtl, gate, func_base, stages, noise)
         if a.phase == "asic":
             print(f"pha asic: mỗi vòng tới place; gate nhanh: {a.quick_gate}; cuối đợt gate đủ theo Fmax place", flush=True)
@@ -780,13 +885,32 @@ def main():
             c.set_best(P.Point(**h["best"]),
                        (hdir / "best.patch").read_text() if (hdir / "best.patch").exists() else "")
             c.measured.update(h.get("measured", {}))
+            c.rungs = h.get("rungs", [])
             start = max((r.n for r in c.rounds), default=0) + 1
-            c.start_best = c.best
-            print(f"đi tiếp từ {hdir}: {len(c.rounds)} vòng, bản tốt nhất {c.best.name} ({D.fmt(c.best.fmax, 3)} MHz)", flush=True)
-            if a.phase == "asic":
-                load_best(c, hdir)
+            if not a.period_explicit and c.best.period_ns:
+                a.period_ns = c.best.period_ns
+            hn = h.get("noise")
+            if hn and abs((hn.get("at_period_ns") or 0) - a.period_ns) < 1e-9:
+                c.noise = P.Noise(**hn)
+                print(f"ngưỡng nhiễu lấy từ {hdir.name} (đo trên {c.noise.point} @ {a.period_ns:g} ns)", flush=True)
+            print(f"đi tiếp từ {hdir}: {len(c.rounds)} vòng, bản tốt nhất {c.best.name} ({D.fmt(c.best.fmax, 3)} MHz "
+                  f"@ {D.fmt(c.best.period_ns, 1)} ns)", flush=True)
+            if a.phase == "asic" and c.best_patch:
+                measure_best(c, f"dựng lại từ {hdir.name} (cache)")
+        c.start_best = c.best
+        c.start_info = dict(best_info(c))
         c.first_round = start
-        print(f"ngưỡng nhiễu: Fmax ±{noise.fmax_mhz:.3f} MHz, điểm họ ±{noise.family_ns:.3f}; ngân sách {c.budget}", flush=True)
+        if a.phase == "asic":
+            if not step_down(c, start - 1):
+                raise SystemExit("bản tốt nhất đã đạt bậc cuối (sang M5)" if next_period(a) is None else
+                                 f"bản tốt nhất đã đạt {a.period_ns:g} ns và --on-met stop: chạy lại với --on-met next "
+                                 f"hoặc --period-ns {next_period(a):g}")
+            if (a.rung_noise == "measure" and abs(c.noise.at_period_ns - a.period_ns) > 1e-9):
+                measure_best(c, f"đo nhiễu ở {a.period_ns:g} ns (ngưỡng hiện có đo ở {c.noise.at_period_ns:g} ns)",
+                             noise=True)
+        print(f"chu kỳ {a.period_ns:g} ns (bậc {', '.join(f'{x:g}' for x in a.ladder_list)}, --on-met {a.on_met}); "
+              f"ngưỡng nhiễu: chu kỳ đạt được ±{c.noise.period_ns:.3f} ns, điểm họ ±{c.noise.family_ns:.3f} "
+              f"(đo trên {c.noise.point} @ {c.noise.at_period_ns:g} ns); ngân sách {c.budget}", flush=True)
         who = ("bypass " + a.bypass) if a.bypass_list else \
             f"{a.agent_model}, effort {a.agent_effort or '-'}, {a.agent_timeout} s/phiên, sửa build {a.fix_retries} lần"
         print(f"pha {a.phase}; agent: {who}", flush=True)
@@ -808,6 +932,12 @@ def main():
             for x in rd.reasons[:6]:
                 print("    " + x.splitlines()[0][:300] if x else "", flush=True)
             save(out, a, c)
+            if a.phase == "asic" and c.met_round is not None:
+                print(f"\n== r{c.met_round} đạt {a.period_ns:g} ns: kết thúc đợt sớm", flush=True)
+                c.met_round = None
+                finish_chain(c)
+                if not step_down(c, n):
+                    break
         if a.phase == "asic":
             finish_chain(c)
     except AgentStop as e:
@@ -823,7 +953,7 @@ def main():
         if c is not None:
             save(out, a, c)
         mw.stop()
-        D.prune_orfs(a, [c.best.name] if c is not None else ["baseline"])
+        D.prune_orfs(a, ([c.best.name] + c.keep_points) if c is not None else ["baseline"])
         if c is not None:
             D.write(out / "summary.md", summary_md(a, c, tm, mw, t_start))
         print("\n## Thời gian", flush=True)
@@ -842,9 +972,9 @@ def summary_md(a, c: Ctx, tm, mw, t_start: datetime) -> str:
     def pct(x, y):
         return f"{(x / y - 1) * 100:+.1f} %" if x and y else "-"
 
-    def row(label, pt):
-        pi = c.place_info.get(pt.name, {})
-        return (f"| {label} | {D.fmt(pt.fmax, 3)} | {D.fmt(pi.get('wns'))} | {D.fmt(pt.family)} | "
+    def row(label, pt, pi=None):
+        pi = pi if pi is not None else c.place_info.get(pt.name, {})
+        return (f"| {label} | {D.fmt(pt.period_ns, 1)} | {D.fmt(pt.fmax, 3)} | {D.fmt(pi.get('wns'))} | {D.fmt(pt.family)} | "
                 f"{D.fmt(pt.area, 0)} ({pct(pt.area, base.area)}) | {D.fmt(pt.cycle_cost, 4)} | `{pi.get('crit', '-')}` |")
 
     L = [f"# soc-fmax job {a.run_name}", "",
@@ -853,43 +983,59 @@ def summary_md(a, c: Ctx, tm, mw, t_start: datetime) -> str:
          f"- {'Đi tiếp từ `' + a.history_from + '`' if a.history_from else 'Bắt đầu từ baseline'}; "
          f"agent {a.bypass and 'bypass ' + a.bypass or a.agent_model + ', effort ' + (a.agent_effort or '-')}; "
          f"{a.rounds} vòng, gate nhanh {getattr(a, 'quick_gate', '-')}",
-         f"- Ngưỡng nhận (place): Fmax ±{c.noise.fmax_mhz:.3f} MHz, điểm họ ±{c.noise.family_ns:.3f}; "
-         f"ngân sách cycle {c.budget.cycle}, diện tích {c.budget.area}", ""]
+         f"- Ngưỡng nhận (place): chu kỳ đạt được ±{c.noise.period_ns:.3f} ns, điểm họ ±{c.noise.family_ns:.3f} "
+         f"(đo trên {c.noise.point} @ {c.noise.at_period_ns:g} ns); ngân sách cycle {c.budget.cycle}, diện tích {c.budget.area}",
+         f"- Bậc: {', '.join(f'{x:g}' for x in a.ladder_list)} ns, --on-met {a.on_met}, --rung-noise {a.rung_noise}; "
+         f"cuối job ở {a.period_ns:g} ns", ""]
     if b1.name != b0.name:
         L.append(f"**Có bản tốt hơn: {b1.name}**, place {D.fmt(b1.fmax, 3)} MHz: "
                  f"{(b1.fmax or 0) - (b0.fmax or 0):+.3f} MHz so với đầu job ({b0.name}), "
                  f"{(b1.fmax or 0) - (base.fmax or 0):+.3f} MHz ({pct(b1.fmax, base.fmax)}) so với baseline.")
     else:
         L.append(f"**Không có bản tốt hơn**: giữ {b1.name} ({D.fmt(b1.fmax, 3)} MHz).")
-    L += ["", "| điểm | Fmax place (MHz) | WNS (ns) | điểm họ | logic (um2) | cycle | đường găng place |",
-          "|---|---|---|---|---|---|---|", row("baseline", base)]
+    L += ["", "| điểm | chu kỳ (ns) | Fmax place (MHz) | WNS (ns) | điểm họ | logic (um2) | cycle | đường găng place |",
+          "|---|---|---|---|---|---|---|---|", row("baseline", base)]
     if b0.name != base.name:
-        L.append(row(f"đầu job ({b0.name})", b0))
-    if b1.name != b0.name:
-        L.append(row(f"**cuối job ({b1.name})**", b1))
-    regions = c.place_info.get(b1.name, {}).get("regions") or {}
+        L.append(row(f"đầu job ({b0.name})", b0, c.start_info))
+    if b1 is not b0:
+        L.append(row(f"**cuối job ({b1.name})**", b1, best_info(c)))
+    new_rungs = [x for x in c.rungs if x.get("run") == a.run_name]
+    if new_rungs or c.rungs:
+        L += ["", "## Bậc chu kỳ", ""]
+        L += [f"- {x['period']:g} ns ĐẠT: {x['best']}, WNS {D.fmt(x['wns'])} ns, Fmax {D.fmt(x['fmax'], 3)} MHz "
+              f"(sau vòng {x['round']}, job {x['run']}){' **(job này)**' if x.get('run') == a.run_name else ''}"
+              for x in c.rungs]
+        if not next_period(a) and best_met(c):
+            L.append("- Đã đạt bậc cuối: bước tiếp theo là M5.")
+    for nr in c.noise_runs:
+        L += ["", f"Nhiễu đo trên {nr['point']} @ {nr['period']:g} ns: "
+              + ", ".join(f"{s_['name']} {D.fmt(s_['fmax'], 3)} MHz" for s_ in nr["samples"])
+              + f" → ngưỡng ±{nr['period_thr']:.3f} ns chu kỳ, điểm họ ±{nr['family_thr']:.3f}"]
+    regions = best_info(c).get("regions") or {}
     if regions:
         L += ["", f"Slack theo vùng của {b1.name} (place): " + ", ".join(f"{k} {D.fmt(v)}" for k, v in regions.items())]
     rs = [r for r in c.rounds if r.n >= c.first_round]
     L += ["", "## Các vòng của job", "",
-          "| vòng | kết quả | Fmax floorplan | Fmax place | WNS place | cycle | logic | phút | patch |",
-          "|---|---|---|---|---|---|---|---|---|"]
+          "| vòng | kết quả | chu kỳ | Fmax floorplan | Fmax place | WNS place | cycle | logic | phút | patch |",
+          "|---|---|---|---|---|---|---|---|---|---|"]
     for r in rs:
         p = r.point or {}
         res = "**NHẬN**" if r.accepted else ("**ỨNG VIÊN**" if r.candidate else r.status)
-        L.append(f"| r{r.n} | {res} | {D.fmt(p.get('fp_fmax'), 3)} | {D.fmt(p.get('fmax'), 3)} | "
+        L.append(f"| r{r.n} | {res} | {D.fmt(p.get('period_ns'), 1)} | {D.fmt(p.get('fp_fmax'), 3)} | {D.fmt(p.get('fmax'), 3)} | "
                  f"{D.fmt(c.place_info.get(f'r{r.n}', {}).get('wns'))} | {D.fmt(p.get('cycle_cost'), 4)} | "
                  f"{D.fmt(p.get('area'), 0)} | {r.minutes:.1f} | {r.patch_stat.split(':')[0] or '-'} |")
-    gated = sorted((r for r in rs if r.gate_rank), key=lambda r: r.gate_rank)
+    gated = sorted((r for r in rs if r.gate_rank), key=lambda r: (-((r.point or {}).get("period_ns") or 0), r.gate_rank))
     if gated:
         L += ["", "## Gate đủ cuối đợt (theo Fmax place giảm dần)", ""]
         for r in gated:
-            L.append(f"{r.gate_rank}. r{r.n} ({D.fmt((r.point or {}).get('fmax'), 3)} MHz): "
+            L.append(f"- r{r.n} (@ {D.fmt((r.point or {}).get('period_ns'), 1)} ns, lần {r.gate_rank} của đợt, "
+                     f"{D.fmt((r.point or {}).get('fmax'), 3)} MHz): "
                      f"{'**NHẬN**' if r.accepted else r.status}, {r.gate_minutes:.1f} phút"
                      + (f"; {r.reasons[0].splitlines()[0][:300]}" if r.reasons and not r.accepted else ""))
     agg: dict = {}
     for row_ in tm.rows:
-        x = agg.setdefault(re.sub(r" r\d+$", "", row_["step"]), [0, 0.0, 0])
+        k_ = re.sub(r" noise@\S+$", " (nhiễu)", re.sub(r" r\d+(@\S+)?$", "", row_["step"]))
+        x = agg.setdefault(k_, [0, 0.0, 0])
         x[0] += 1
         x[1] += row_["minutes"]
         x[2] += row_["cached"]
@@ -901,8 +1047,9 @@ def summary_md(a, c: Ctx, tm, mw, t_start: datetime) -> str:
     if peaks:
         k = max(peaks, key=peaks.get)
         L += ["", f"RAM đỉnh {peaks[k]:.1f} GB (bước {k})."]
-    v = getattr(a, "orfs_variants", {}).get(b1.name)
-    L += ["", f"ORFS giữ lại: `{v or '(không có variant trong job)'}` ({b1.name}); variant khác của job đã xoá"
+    vs_ = getattr(a, "orfs_variants", {})
+    kept = ", ".join(f"`{vs_[k]}` ({k})" for k in [b1.name] + c.keep_points if k in vs_)
+    L += ["", f"ORFS giữ lại: {kept or '(không có variant trong job)'}; variant khác của job đã xoá"
           + (" (--keep-orfs: giữ hết)" if getattr(a, "keep_orfs", False) else "") + ".",
           "", "Chi tiết: `history.md`, patch: `best.patch`, số đo: `results.csv`."]
     return "\n".join(L) + "\n"
@@ -911,10 +1058,11 @@ def summary_md(a, c: Ctx, tm, mw, t_start: datetime) -> str:
 def save(out: Path, a, c: Ctx):
     D.write(out / "history.json", json.dumps({"rounds": [dataclasses.asdict(r) for r in c.rounds],
                                               "best": c.best.as_dict(), "measured": c.measured,
-                                              "candidates": c.candidates}, indent=2, default=str))
+                                              "candidates": c.candidates, "rungs": c.rungs,
+                                              "noise": dataclasses.asdict(c.noise)}, indent=2, default=str))
     D.write(out / "best.patch", c.best_patch)
     D.write(out / "candidates.json", json.dumps(c.candidates, indent=2))
-    D.write(out / "history.md", history_md(a, c.base, c.best, c.noise, c.rounds))
+    D.write(out / "history.md", history_md(a, c.base, c.best, c.noise, c.rounds, c.rungs))
 
 
 if __name__ == "__main__":

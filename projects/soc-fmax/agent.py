@@ -239,7 +239,11 @@ BTB paths). Avoid repeating an idea already listed in `context/history.md` unles
 
 PHASE_CHAIN = """This is the ASIC phase, ACCUMULATING batch: each round is measured by ORFS after PLACE and compared with
 the tree you see (the current head). If it improves place Fmax (or the endpoint-family score) beyond the noise
-threshold and passes a quick riscv-tests check, it is KEPT and the next round builds on top of it. At the end of the
+threshold (`noise.period_ns` in `context/round.json`: nanoseconds of achievable period = clock period - WNS, measured
+by perturbed placements; place results move by that much even in regions you did not touch) and passes a quick
+riscv-tests check, it is KEPT and the next round builds on top of it. Period ladder (`ladder_ns`): once the accepted
+design has WNS >= 0 after place at the current period, the loop moves to the next shorter period (current: `period_ns`);
+every report states the period it was measured at, so compare slacks only within one period. At the end of the
 batch the kept rounds, ranked by place Fmax, go through the full gate (riscv-tests, benchmarks with equal minstret,
 commit-trace comparison against the baseline, cycle budget) one by one; the first that passes is accepted. So:
 - your copy already contains the rounds kept so far (`context/best.patch` is the whole accumulated diff);
@@ -278,8 +282,8 @@ def write_context(ws: Path, ctx: dict, task: str) -> None:
         (c / "patch.patch").write_text(ctx.get("patch", ""))
         (c / "failures.txt").write_text(_clip("\n".join(ctx.get("failures", []))))
     (c / "round.json").write_text(json.dumps({k: ctx.get(k) for k in
-                                              ("round", "attempt", "phase", "period_ns", "budget", "noise",
-                                               "baseline", "best", "batch")}, indent=2, default=str))
+                                              ("round", "attempt", "phase", "period_ns", "ladder_ns", "budget",
+                                               "noise", "baseline", "best", "batch")}, indent=2, default=str))
 
 
 def build_prompt(ctx: dict, task: str, roots: list[str], missing: list[str], readonly: list[str]) -> str:
