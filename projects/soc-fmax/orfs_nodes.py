@@ -395,16 +395,18 @@ STAGE_INPUTS = {
 
 @ChiaFunction(resources={"asic": 1}, max_retries=0)
 def orfs_stage(config_mk: str, variant: str, stage: str, period_ns: float, timeout_s: int,
-               report_timeout_s: int = 3600, nproc: int | None = None) -> StageResult:
+               report_timeout_s: int = 3600, nproc: int | None = None,
+               make_vars: list | None = None) -> StageResult:
     """`make <stage>` cho variant (bước trước đã xong thì make không chạy lại), rồi report.tcl trên kết quả của
-    bước đó (sau place: RC ước lượng từ placement). Không raise: lỗi nằm trong StageResult.error."""
+    bước đó (sau place: RC ước lượng từ placement). make_vars: biến thêm cho riêng lệnh make của bước này (vd
+    ALLOW_CONGESTION=1), không vào tên variant. Không raise: lỗi nằm trong StageResult.error."""
     flow = f"{C_ORFS}/flow"
     w = {k: f"{C_ORFS}/{v}" for k, v in work_dirs_rel(variant).items()}
     base = ["make", "-C", flow, f"DESIGN_CONFIG={config_mk}", f"FLOW_VARIANT={variant}"]
     if nproc:
         base.append(f"NUM_CORES={nproc}")
     r = StageResult(stage=stage, variant=variant, period_ns=period_ns, ok=False)
-    rc, sec, tail = _run(base + [stage], flow, timeout_s, f"{w['logs']}/soc_fmax_make_{stage}.txt")
+    rc, sec, tail = _run(base + list(make_vars or []) + [stage], flow, timeout_s, f"{w['logs']}/soc_fmax_make_{stage}.txt")
     r.rc, r.seconds, r.make_tail = rc, sec, tail[-6000:]
     r.steps = parse_step_logs(w["logs"])
     if rc != 0:

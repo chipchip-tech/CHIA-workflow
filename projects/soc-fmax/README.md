@@ -379,8 +379,13 @@ cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-i
   **0,129 ns**. Đường găng đổi từ `ifpu` (0,194 ở place) sang `dfma` `mulAddResult_pipe_b` (0,242 ở place → 0,065);
   L2 0,207 → 0,174; uncore 2,782 → 0,816 (clock skew sang các khối nhỏ). Lần đầu thấy đường I/O (`mem_axi4_0_aw_valid`
   +0,097) vì clock giờ là propagated.
-- **Route lỗi** ở `5_1_grt` (global route) sau 19 phút, `make route` rc=2, RAM 3,88 GB. Chưa rõ nguyên nhân (đang chờ
-  log `5_1_grt.log`).
+- **Route lỗi** ở `5_1_grt` (global route) sau 19 phút (12 phút trong đó là pin access của detailed router), RAM
+  3,88 GB: `GRT-0116 Global routing finished with congestion`. Tổng tài nguyên chỉ dùng 22 % (met1 27,6 %, met2 31,6 %,
+  met3–5 dưới 15 %), nhưng tràn cục bộ tối đa 11 track mỗi ô lưới, tổng tràn 38 557, gần hết ở **met1/met2** (23 105 và
+  15 053): nghẽn chân/ô cục bộ chứ không thiếu tài nguyên toàn die.
+- Đã thêm (mới mock): `route_check.py --allow-congestion` (`ALLOW_CONGESTION=1` chỉ cho `make route`, không đổi variant,
+  place/cts lấy từ cache; `summary.md` ghi tổng tràn global route và số vi phạm DRC cuối detailed route) và
+  `orfs/congestion_summary.py` (đọc `congestion.rpt`: số ô tràn theo lớp, lưới 8×8 trên die, theo khối thiết kế).
 
 ## Chạy lại từ đầu (xoá cache và mọi lần chạy)
 

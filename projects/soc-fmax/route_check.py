@@ -10,7 +10,9 @@ Các bước:
   2. ORFS synth -> floorplan -> place ở --period-ns (mặc định: chu kỳ của bản tốt nhất; cache nếu đã đo);
   3. make cts, make route trên cùng variant (lỗi hay quá giờ thì ghi lại, không dừng), báo cáo bằng orfs/report.tcl;
   4. hoàn nguyên cây, kiểm digest bằng lúc đầu.
-Không gate/func (bản thiết kế đã qua gate trong loop). Không dọn ORFS: variant giữ nguyên (cts/route thêm file vào nó).
+--allow-congestion: global route tràn (GRT-0116) vẫn đi tiếp detailed route (ALLOW_CONGESTION=1 chỉ cho lệnh make route,
+không đổi variant, nên place/cts dùng lại); summary.md ghi tổng tràn của global route và số vi phạm DRC cuối detailed
+route. Không gate/func (bản thiết kế đã qua gate trong loop). Không dọn ORFS: variant giữ nguyên (cts/route thêm file vào nó).
 
 Kết quả ở ~/soc-fmax-runs/<run>/: summary.md (bảng place/cts/route), results.csv, runs/check/ (báo cáo từng bước).
 
@@ -23,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import traceback
 from datetime import datetime, timezone
@@ -50,6 +53,8 @@ def parse_args():
     ap.add_argument("--point", default="", help="tên điểm (mặc định: tên bản tốt nhất của --from-run)")
     ap.add_argument("--cts-timeout", type=int, default=3 * 3600)
     ap.add_argument("--route-timeout", type=int, default=8 * 3600)
+    ap.add_argument("--allow-congestion", action="store_true",
+                    help="global route tràn vẫn chạy tiếp detailed route (ALLOW_CONGESTION=1 cho make route)")
     a = ap.parse_args()
     a.period_explicit = any(x == "--period-ns" or x.startswith("--period-ns=") for x in sys.argv[1:])
     D.finish_args(a, ap)
@@ -75,6 +80,28 @@ def load_target(a) -> tuple[str, str, str]:
     return patch, a.point or best["name"], best.get("rtl_hash", "")
 
 
+def route_logs(a, variant: str) -> list[str]:
+    """Vài dòng từ log ORFS của route (trên host): tổng tràn global route, số vi phạm DRC cuối detailed route."""
+    if not variant:
+        return []
+    logs = Path(os.path.expanduser(a.orfs_dir)) / D.O.work_dirs_rel(variant)["logs"]
+    out = []
+    grt = logs / "5_1_grt.log"
+    if grt.exists():
+        t = grt.read_text(errors="replace")
+        m = re.findall(r"^Total\s+(\d+)\s+(\d+)\s+([\d.]+)%\s+(\d+)\s*/\s*(\d+)\s*/\s*(\d+)", t, re.M)
+        if m:
+            x = m[-1]
+            out.append(f"global route: dùng {x[2]} % tài nguyên, tràn tối đa {x[3]} (ngang) / {x[4]} (dọc), "
+                       f"tổng tràn {x[5]}" + (" (GRT-0116: tràn)" if "GRT-0116" in t else ""))
+    drt = logs / "5_2_route.log"
+    if drt.exists():
+        v = re.findall(r"Number of violations = (\d+)", drt.read_text(errors="replace"))
+        if v:
+            out.append(f"detailed route: {v[-1]} vi phạm DRC ở lần lặp cuối (lần đầu {v[0]})")
+    return out
+
+
 def summary_md(a, point: str, rtl_hash: str, st: dict, tm, mw, t0: datetime) -> str:
     now = datetime.now(timezone.utc)
     L = [f"# soc-fmax route_check {a.run_name}", "",
@@ -93,6 +120,8 @@ def summary_md(a, point: str, rtl_hash: str, st: dict, tm, mw, t0: datetime) -> 
         L.append(f"| {s} | {D.fmt(r.fmax_mhz, 3)} | {D.fmt(r.internal_slack_ns)} | {D.fmt(r.worst_slack_ns)} | "
                  f"{D.fmt(r.tns_ns)} | {D.fmt(r.std_area_um2, 0)} | `{r.crit_start} -> {r.crit_end}` | "
                  f"{r.seconds / 60:.1f} |" + (f" LỖI: {r.error.splitlines()[0][:200]}" if not r.ok and r.error else ""))
+    variant = next(iter(st.values())).variant if st else ""
+    L += [""] + [f"- {x}" for x in route_logs(a, variant)] if route_logs(a, variant) else []
     pl = st.get("place")
     for s in ("cts", "route"):
         r = st.get(s)
@@ -170,7 +199,8 @@ def main():
             st["place"] = sp["place"]
             for stage in ("cts", "route"):
                 try:
-                    r = D.step_orfs(a, d, stage, rtl, fakeram, mw, tm, prep, point=point, fatal=False)
+                    mv = ["ALLOW_CONGESTION=1"] if stage == "route" and a.allow_congestion else None
+                    r = D.step_orfs(a, d, stage, rtl, fakeram, mw, tm, prep, point=point, fatal=False, make_vars=mv)
                 except SystemExit as e:          # noqa: PERF203
                     print(f"{stage}: {e}", flush=True)
                     break

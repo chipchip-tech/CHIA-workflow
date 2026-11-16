@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import csv
 import dataclasses
+import hashlib
 import importlib.util
 import json
 import os
@@ -363,9 +364,11 @@ def print_stage(r: "O.StageResult"):
 
 
 def step_orfs(a, d: Path, stage: str, rtl, fakeram, mw: MemWatch, tm: Timer, prep: dict, point: str = "baseline",
-              fatal: bool = True) -> "O.StageResult":
+              fatal: bool = True, make_vars: list | None = None) -> "O.StageResult":
     variant = prep["variant"]
     tag = f"orfs_{variant}_{O.REPORT_VERSION}_{stage}"
+    if make_vars:
+        tag += "_" + hashlib.sha1(" ".join(sorted(make_vars)).encode()).hexdigest()[:6]
     hit = cache_has(tag)
     timeout = {"synth": a.synth_timeout, "floorplan": a.floorplan_timeout, "place": a.place_timeout,
                "cts": getattr(a, "cts_timeout", 3 * 3600), "route": getattr(a, "route_timeout", 8 * 3600)}[stage]
@@ -373,7 +376,8 @@ def step_orfs(a, d: Path, stage: str, rtl, fakeram, mw: MemWatch, tm: Timer, pre
           flush=True)
     t0 = time.time()
     with mw.step(stage):
-        r = get(O.orfs_stage.chia_remote(prep["config_mk"], variant, stage, a.period_ns, timeout, _chia_tag=tag))
+        r = get(O.orfs_stage.chia_remote(prep["config_mk"], variant, stage, a.period_ns, timeout,
+                                         make_vars=list(make_vars or []), _chia_tag=tag))
     minutes = (time.time() - t0) / 60
     peak = mw.peaks().get(stage, {}).get("_tổng")
     tm.add(stage if point == "baseline" else f"{stage} {point}", minutes, hit, f"make {r.seconds / 60:.1f} phút")
