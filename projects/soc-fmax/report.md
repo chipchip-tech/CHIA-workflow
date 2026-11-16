@@ -1,6 +1,6 @@
 # Báo cáo: Tối ưu Fmax của SoC RISC-V trên sky130 bằng vòng lặp agent AI
 
-*Project `soc-fmax-sky130` · nhánh `project/soc-fmax-sky130` · cập nhật 16/11/2026 (sau `m4-c` và `route-r8`; đang chờ `m4-d`)*
+*Project `soc-fmax-sky130` · nhánh `project/soc-fmax-sky130` · cập nhật 17/11/2026 (sau `m4-c`, `route-r8`, `route-r8b`; đang chờ `m4-d`)*
 
 > Báo cáo này tóm tắt phương pháp và kết quả. Nhật ký kỹ thuật đầy đủ (lệnh chạy, lỗi đã gỡ, kiểm chứng bằng mock) nằm
 > trong `README.md` cùng thư mục. Mọi số liệu ở đây đều **đo thật** trên máy người dùng, trừ chỗ ghi rõ là chưa chạy thật.
@@ -158,7 +158,9 @@ thấy Fmax place là đại lượng chọn lọc chấp nhận được ít nh
 
 Global route thất bại dù chỉ dùng 22 % tài nguyên dây: tràn cục bộ ở met1/met2 (tổng 38 557). 99 % ô tràn thuộc net
 của L2 `bankedStore`, dồn ở góc trên trái die, có thể quanh 4 macro `cc_banks`. Đây là vấn đề floorplan và chân
-fakeram, không phải timing. Lần chạy kế dùng cờ `-allow_congestion` để có số liệu sau route; chưa chạy thật.
+fakeram, không phải timing. Lần chạy lại với cờ `-allow_congestion` (cho global route đi tiếp dù tràn) xác nhận điều này:
+tràn vẫn y hệt (38 557), và detailed route sau khoảng 7 giờ, 12 vòng tối ưu vẫn còn **12 705 vi phạm DRC** (từ 400 027;
+từ vòng 5 mỗi vòng chỉ giảm 2–8 %), nên được dừng tay. Vì vậy chưa có Fmax sau route; số đáng tin nhất hiện có là sau CTS.
 
 ## 6. Thảo luận
 
@@ -188,7 +190,7 @@ fakeram, không phải timing. Lần chạy kế dùng cờ `-allow_congestion` 
 | Việc | Trạng thái |
 |---|---|
 | `m4-d`: luật đo lặp ở 9 ns | đang chạy |
-| `route-r8b`: route với `-allow_congestion`, số liệu sau route và DRC | chờ `m4-d` xong |
+| `route-r8b`: route với `-allow_congestion` | dừng sau ~7 giờ, còn 12 705 vi phạm DRC: cần sửa floorplan trước |
 | Xử lý nghẽn quanh `cc_banks` (halo/kênh macro, chân fakeram, `CORE_UTILIZATION`) | đề xuất cho M5 |
 | Tiếp tục bậc 8 → 5 ns | M4 |
 | M5: CTS + route + GDS cho mọi bậc đã đạt | sau khi đạt 5 ns |
@@ -200,5 +202,5 @@ fakeram, không phải timing. Lần chạy kế dùng cờ `-allow_congestion` 
 |---|---|
 | Baseline, nhiễu 10 ns | `~/soc-fmax-runs/m1`, `m2-noise` (`noise.json`) |
 | Các vòng loop | `~/soc-fmax-runs/m4-a`, `m4-b`, `m4-c` (`history.md`, `results.csv`, `summary.md`) |
-| CTS/route | `~/soc-fmax-runs/route-r8/summary.md`, `orfs/congestion_summary.py` |
+| CTS/route | `~/soc-fmax-runs/route-r8/summary.md`, `route-r8b` (log `5_1_grt.log`, `5_2_route.log`), `orfs/congestion_summary.py` |
 | Patch được nhận | `~/soc-fmax-runs/m4-b/best.patch` (RTL hash `2370465e8eb7`) |

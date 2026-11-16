@@ -395,6 +395,13 @@ cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-i
   place/cts lấy từ cache; `summary.md` ghi tổng tràn global route và số vi phạm DRC cuối detailed route) và
   `orfs/congestion_summary.py` (đọc `congestion.rpt`: số ô tràn theo lớp, lưới 8×8 trên die, theo khối thiết kế).
 
+**Kết quả `route-r8b` (chạy thật 16–17/11/2026, `--allow-congestion`, người dùng dừng tay sau khoảng 7 giờ):** global
+route đi qua (không dừng ở GRT-0116) nhưng tràn y hệt `route-r8`: dùng 22,21 %, tối đa 11/11, tổng tràn **38 557**, dây
+17,87 m. Detailed route: vi phạm theo vòng tối ưu 400 027 → 200 730 → 184 007 → 38 878 → 18 561 → 16 474 → 15 685 →
+14 920 → 14 576 → 14 336 → 13 858 → **12 705** (vòng 11), đang ở vòng 12 khi dừng. Từ vòng 5 mỗi vòng chỉ giảm 2–8 %:
+không về 0 trong giới hạn 8 giờ. Kết luận: route bị chặn bởi nghẽn met1/met2 quanh L2 `bankedStore` (floorplan, chân
+fakeram), không phải thời gian chạy; chưa có Fmax sau route. Báo cáo DRC trung gian: `5_route_drc.rpt-5.rpt`, `-10.rpt`.
+
 ## Chạy lại từ đầu (xoá cache và mọi lần chạy)
 
 Xoá cache CHIA (`~/chia_cache/soc-fmax`), kết quả (`~/soc-fmax-runs`) và thư mục ORFS của project
