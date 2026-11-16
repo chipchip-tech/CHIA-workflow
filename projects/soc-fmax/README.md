@@ -373,6 +373,15 @@ Bản tốt nhất của `m4-c` chưa đạt 9 ns (đúng như kết quả thậ
 cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-id route-r8 --working-dir . -- python route_check.py --run-name route-r8 --from-run ~/soc-fmax-runs/m4-b --period-ns 10
 ```
 
+**Kết quả `route-r8` (chạy thật 16/11/2026, r8 @ 10 ns, 22 phút):** place, floorplan, synth `cache HIT`.
+- **CTS chạy được** (`make cts` 2,5 phút, RAM 2,15 GB): Fmax **100,658 MHz**, WNS **+0,065** (vẫn đạt 10 ns), TNS 0,
+  logic 2,428 mm² (+6,3 % so với place: cây clock + sửa timing). So với place: −1,32 MHz, chu kỳ đạt được chậm hơn
+  **0,129 ns**. Đường găng đổi từ `ifpu` (0,194 ở place) sang `dfma` `mulAddResult_pipe_b` (0,242 ở place → 0,065);
+  L2 0,207 → 0,174; uncore 2,782 → 0,816 (clock skew sang các khối nhỏ). Lần đầu thấy đường I/O (`mem_axi4_0_aw_valid`
+  +0,097) vì clock giờ là propagated.
+- **Route lỗi** ở `5_1_grt` (global route) sau 19 phút, `make route` rc=2, RAM 3,88 GB. Chưa rõ nguyên nhân (đang chờ
+  log `5_1_grt.log`).
+
 ## Chạy lại từ đầu (xoá cache và mọi lần chạy)
 
 Xoá cache CHIA (`~/chia_cache/soc-fmax`), kết quả (`~/soc-fmax-runs`) và thư mục ORFS của project
