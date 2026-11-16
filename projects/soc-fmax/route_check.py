@@ -10,8 +10,8 @@ Các bước:
   2. ORFS synth -> floorplan -> place ở --period-ns (mặc định: chu kỳ của bản tốt nhất; cache nếu đã đo);
   3. make cts, make route trên cùng variant (lỗi hay quá giờ thì ghi lại, không dừng), báo cáo bằng orfs/report.tcl;
   4. hoàn nguyên cây, kiểm digest bằng lúc đầu.
---allow-congestion: global route tràn (GRT-0116) vẫn đi tiếp detailed route (ALLOW_CONGESTION=1 chỉ cho lệnh make route,
-không đổi variant, nên place/cts dùng lại); summary.md ghi tổng tràn của global route và số vi phạm DRC cuối detailed
+--allow-congestion: global route tràn (GRT-0116) vẫn đi tiếp detailed route (GLOBAL_ROUTE_ARGS có -allow_congestion, chỉ
+cho lệnh make route, không đổi variant, nên place/cts dùng lại); summary.md ghi tổng tràn của global route và số vi phạm DRC cuối detailed
 route. Không gate/func (bản thiết kế đã qua gate trong loop). Không dọn ORFS: variant giữ nguyên (cts/route thêm file vào nó).
 
 Kết quả ở ~/soc-fmax-runs/<run>/: summary.md (bảng place/cts/route), results.csv, runs/check/ (báo cáo từng bước).
@@ -43,6 +43,9 @@ from chia.base.cache import start_cache, stop_cache
 from chia.trace.profiler import start_collector, stop_collector
 
 STAGES = ("place", "cts", "route")
+# GLOBAL_ROUTE_ARGS mặc định của ORFS cài sẵn (log 5_1_grt: "-congestion_report_iter_step 5 -verbose"; -congestion_iterations
+# 30 do global_route.tcl tự thêm) + -allow_congestion, cờ mà global_route.tcl tìm trong biến này (không có ALLOW_CONGESTION).
+ALLOW_CONGESTION_ARGS = "GLOBAL_ROUTE_ARGS=-congestion_report_iter_step 5 -verbose -allow_congestion"
 
 
 def parse_args():
@@ -54,7 +57,7 @@ def parse_args():
     ap.add_argument("--cts-timeout", type=int, default=3 * 3600)
     ap.add_argument("--route-timeout", type=int, default=8 * 3600)
     ap.add_argument("--allow-congestion", action="store_true",
-                    help="global route tràn vẫn chạy tiếp detailed route (ALLOW_CONGESTION=1 cho make route)")
+                    help="global route tràn vẫn chạy tiếp detailed route (thêm -allow_congestion vào GLOBAL_ROUTE_ARGS của make route)")
     a = ap.parse_args()
     a.period_explicit = any(x == "--period-ns" or x.startswith("--period-ns=") for x in sys.argv[1:])
     D.finish_args(a, ap)
@@ -199,7 +202,7 @@ def main():
             st["place"] = sp["place"]
             for stage in ("cts", "route"):
                 try:
-                    mv = ["ALLOW_CONGESTION=1"] if stage == "route" and a.allow_congestion else None
+                    mv = [ALLOW_CONGESTION_ARGS] if stage == "route" and a.allow_congestion else None
                     r = D.step_orfs(a, d, stage, rtl, fakeram, mw, tm, prep, point=point, fatal=False, make_vars=mv)
                 except SystemExit as e:          # noqa: PERF203
                     print(f"{stage}: {e}", flush=True)

@@ -387,8 +387,9 @@ cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-i
   L2 `bankedStore`** (19 864), dồn ở góc trên bên trái die (x 0..2200, y 2000..4000 um), nơi có thể là 4 macro
   `cc_banks` (fakeram 4096×64, chưa đối chiếu toạ độ macro). Còn lại: 144 ô trên clock net, vài ô quanh dcache/icache.
   Chưa rõ baseline có nghẽn như vậy không. ORFS cài sẵn **không có biến `ALLOW_CONGESTION`** (grep `flow/scripts/`
-  rỗng), nên `--allow-congestion` như hiện tại không có tác dụng.
-- Đã thêm (mới mock): `route_check.py --allow-congestion` (`ALLOW_CONGESTION=1` chỉ cho `make route`, không đổi variant,
+  rỗng): `global_route.tcl` tìm cờ `-allow_congestion` trong `GLOBAL_ROUTE_ARGS`, nên `--allow-congestion` đã sửa sang
+  `GLOBAL_ROUTE_ARGS=-congestion_report_iter_step 5 -verbose -allow_congestion` (giữ mặc định thấy trong log).
+- Đã thêm (mới mock): `route_check.py --allow-congestion` (cờ `-allow_congestion` chỉ cho `make route`, không đổi variant,
   place/cts lấy từ cache; `summary.md` ghi tổng tràn global route và số vi phạm DRC cuối detailed route) và
   `orfs/congestion_summary.py` (đọc `congestion.rpt`: số ô tràn theo lớp, lưới 8×8 trên die, theo khối thiết kế).
 
