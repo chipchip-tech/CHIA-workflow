@@ -230,6 +230,26 @@ build vòng và gate nhanh chưa đo; mỗi lần lùi thêm khoảng 32 phút.
 cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-id m4-a --working-dir . -- python loop.py --run-name m4-a --noise-json ~/soc-fmax-runs/m2-noise/noise.json --rounds 5
 ```
 
+**Kết quả `m4-a` (chạy thật 16/11/2026, 10 ns, sau khi chạy lại từ đầu: `m2-noise` cho lại đúng baseline 65,423 MHz và
+ngưỡng ±1,546):** cả đợt khoảng 1,5 giờ (vòng 8–17 phút, agent 1,6–4,6 phút, synth 4, floorplan 1,1–2,6, place 9,4
+phút, RAM đỉnh 4,6 GB). Ngưỡng nhiễu floorplan tự tính ra mức sàn ±0,3 MHz / ±0,2.
+
+| vòng | thay đổi | floorplan | kết quả |
+|---|---|---|---|
+| r1 | `FPU.scala`: retiming `dfma` (thanh ghi sau preMul, bỏ tầng ra rỗng, latency giữ 4) | 80,13 → 92,54 | cộng dồn |
+| r2 | `BufferParams` flow depth 1 → `flowQueue1`; putbuffer L2 ghi sớm (`eagerWrite`) | → 100,14 (slack +0,014) | cộng dồn |
+| r3 | `eagerQueue` cho TLBuffer depth 2 | 100,21 | trong nhiễu |
+| r4 | L2 `ListBuffer` cổng `peek` theo MSHR, so tag song song với chọn MSHR | 100,14 | trong nhiễu |
+| r5 | gộp r3 + r4 viết lại + `ToAXI4` dùng `flowQueue1Irrevocable` | 102,51 | cộng dồn |
+
+Cuối đợt: r1+r2+r5 (RTL `9c7a2d547185`) **nhận ngay lần đầu**: place **86,860 MHz** (WNS −1,513, +21,4 MHz / +33 %),
+điểm họ −4,162; gate + func đạt, cycle 1,0000, logic 2,289 mm² (+2,5 %). Đường găng place chuyển sang FPU `sfma`
+(`in_in2 → mulAddResult_pipe_b`), L2 −0,420, bus +1,502. Synth vẫn 52,4–52,8 MHz (`tlMasterXbar → btb`), không dùng.
+
+Nhận xét: ở 10 ns floorplan **bão hoà** quanh 100 MHz: bước sửa timing của floorplan dừng khi slack ≥ 0, nên sau r2 mọi
+họ đường nằm sát slack 0 và r3, r4 (sửa đúng đường xấu nhất) đều ra "trong nhiễu"; trong khi place vẫn thiếu 1,5 ns. Agent
+tự gộp hai thay đổi ở r5 để vượt ngưỡng. Bậc chu kỳ chưa đổi (place chưa có WNS ≥ 0); `loop.py` chưa tự xuống bậc.
+
 ## Chạy lại từ đầu (xoá cache và mọi lần chạy)
 
 Xoá cache CHIA (`~/chia_cache/soc-fmax`), kết quả (`~/soc-fmax-runs`) và thư mục ORFS của project
@@ -347,6 +367,6 @@ rm -rf ~/chia_cache/soc-fmax ~/soc-fmax-runs && for d in designs results logs re
 | M1 | build → gate → fakeram → ORFS place 10 ns → Fmax/WNS, vùng, diện tích, thời gian/RAM, `results.csv`; lần hai từ cache | **xong 15/11/2026** (chạy thật, kể cả kiểm cache) |
 | M2 | `func_check.py` vào gate, đo nhiễu place, chốt ngưỡng nhận, orchestration với bypass LLM | **xong 15/11/2026** (chạy thật: func_check, nhiễu, loop bypass 3 vòng) |
 | M3 | pha sim có agent (tầng pipeline, chỉ đo cycle) → `candidates.json` | **xong 15/11/2026** (`m3-b` chạy thật: 4 ứng viên / 5 vòng) |
-| M4 | pha asic có agent, đợt 5 vòng cộng dồn theo floorplan, cuối đợt place + gate (hỏng thì lùi), tự xuống bậc | mã xong, chạy mock 15/11/2026; chờ chạy lại từ đầu rồi `m4-a` |
+| M4 | pha asic có agent, đợt 5 vòng cộng dồn theo floorplan, cuối đợt place + gate (hỏng thì lùi), tự xuống bậc | đang chạy: `m4-a` thật 16/11/2026, place 65,42 → **86,86 MHz** (3/5 vòng cộng dồn, nhận lần đầu); floorplan bão hoà ở 10 ns; chưa tự xuống bậc |
 | M5 | CTS + route + GDS mỗi bậc đạt, timing sau route | chưa |
 | M6 | OpenRAM sky130 thật cho bản tốt nhất, GDS thật, so fakeram/OpenRAM | chưa |
