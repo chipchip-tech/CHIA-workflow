@@ -401,6 +401,13 @@ route đi qua (không dừng ở GRT-0116) nhưng tràn y hệt `route-r8`: dùn
 14 920 → 14 576 → 14 336 → 13 858 → **12 705** (vòng 11), đang ở vòng 12 khi dừng. Từ vòng 5 mỗi vòng chỉ giảm 2–8 %:
 không về 0 trong giới hạn 8 giờ. Kết luận: route bị chặn bởi nghẽn met1/met2 quanh L2 `bankedStore` (floorplan, chân
 fakeram), không phải thời gian chạy; chưa có Fmax sau route. Báo cáo DRC trung gian: `5_route_drc.rpt-5.rpt`, `-10.rpt`.
+`congestion_summary.py` trên `5_route_drc.rpt-10.rpt` (12 605 vi phạm): Short 10 000 (báo cáo cắt ở 10 000), Metal
+Spacing 2 323, Cut Spacing 266; theo lớp **met4 9 376, met5 2 715**, via4 282, met1–3 chỉ 232; 12 474 thuộc net L2
+`bankedStore`, 2 590/2 481 là `VSS`/`VDD`; dồn ở góc dưới-trái của nửa trên die (cùng vùng nghẽn global route). Tức là
+sau khi detailed route đẩy dây khỏi met1/met2, dây `bankedStore` lên met4/met5 và chập/sát với dải nguồn PDN (có thể
+quanh chân fakeram `cc_banks` trên met4). Chưa đối chiếu toạ độ macro/chân.
+**Người dùng quyết định (17/11/2026): tạm ngưng đo sau route**; loop tiếp tục tối ưu tới 5 ns theo place; sửa
+floorplan/PDN/chân fakeram để vào M5.
 
 ## Chạy lại từ đầu (xoá cache và mọi lần chạy)
 

@@ -160,7 +160,10 @@ Global route thất bại dù chỉ dùng 22 % tài nguyên dây: tràn cục b�
 của L2 `bankedStore`, dồn ở góc trên trái die, có thể quanh 4 macro `cc_banks`. Đây là vấn đề floorplan và chân
 fakeram, không phải timing. Lần chạy lại với cờ `-allow_congestion` (cho global route đi tiếp dù tràn) xác nhận điều này:
 tràn vẫn y hệt (38 557), và detailed route sau khoảng 7 giờ, 12 vòng tối ưu vẫn còn **12 705 vi phạm DRC** (từ 400 027;
-từ vòng 5 mỗi vòng chỉ giảm 2–8 %), nên được dừng tay. Vì vậy chưa có Fmax sau route; số đáng tin nhất hiện có là sau CTS.
+từ vòng 5 mỗi vòng chỉ giảm 2–8 %), nên được dừng tay. Vì vậy chưa có Fmax sau route; số đáng tin nhất hiện có là sau CTS. Báo cáo DRC trung gian cho thấy vi phạm
+còn lại chủ yếu là chập dây trên **met4/met5** (12 091/12 605) giữa net `bankedStore` và lưới nguồn `VDD`/`VSS`, cùng vùng
+nghẽn: dây bị đẩy lên lớp trên đụng dải PDN quanh macro. Đây là việc của floorplan/PDN (M5); việc đo sau route được tạm
+ngưng, loop tiếp tục tối ưu theo place.
 
 ## 6. Thảo luận
 
