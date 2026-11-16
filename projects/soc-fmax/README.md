@@ -4,6 +4,8 @@ Nhánh `project/soc-fmax-sky130` (mở 15/11/2026, tách từ `setup`). Khác pr
 (xong 06/11/2026, Chipyard 1.10/`chia_artifact`, RocketConfig, đo bằng synth): project này dùng Chipyard gốc 1.15.0,
 `chipyard.MinimalSoCConfig`, và đo bằng ORFS **sau place**, tới CTS/route/GDS.
 
+Báo cáo tóm tắt kiểu học thuật (phương pháp, kết quả Fmax, thảo luận): `report.md`, cập nhật sau mỗi mốc cùng README.
+
 ## Mục tiêu
 
 Loop CHIA để agent (Claude Code, Opus, effort medium) tối ưu Fmax của toàn bộ SoC (`DigitalTop`: RocketTile, L2
