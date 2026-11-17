@@ -1,6 +1,6 @@
 # Báo cáo: Tối ưu Fmax của SoC RISC-V trên sky130 bằng vòng lặp agent AI
 
-*Project `soc-fmax-sky130` · nhánh `project/soc-fmax-sky130` · cập nhật 17/11/2026 (sau `m4-c`, `route-r8`, `route-r8b`; đang chờ `m4-d`)*
+*Project `soc-fmax-sky130` · nhánh `project/soc-fmax-sky130` · cập nhật 17/11/2026 (sau `m4-d`, `route-r8`, `route-r8b`; đang chờ `m4-e`)*
 
 > Báo cáo này tóm tắt phương pháp và kết quả. Nhật ký kỹ thuật đầy đủ (lệnh chạy, lỗi đã gỡ, kiểm chứng bằng mock) nằm
 > trong `README.md` cùng thư mục. Mọi số liệu ở đây đều **đo thật** trên máy người dùng, trừ chỗ ghi rõ là chưa chạy thật.
@@ -16,7 +16,8 @@ Sau 3 đợt loop (15 vòng agent, khoảng 6,3 giờ máy), Fmax sau place tăn
 bậc ràng buộc 10 ns (WNS +0,194 ns). Thiết kế vẫn đúng chức năng (riscv-tests, 8 benchmark, so vết commit từng lệnh), số
 chu kỳ không đổi (tỉ lệ 1,0000) và diện tích logic chỉ tăng 2,3 %. Kiểm tra độc lập sau CTS (cây clock thật) cho
 100,66 MHz, vẫn đạt 10 ns. Ở bậc 9 ns, độ dao động của place (±1,5 ns trên cùng một RTL) lớn hơn mọi cải thiện của một
-vòng. Vì vậy luật nhận được sửa thành **đo lặp** (so trung vị 4 lần place), và luật mới đang được chạy thật.
+vòng. Vì vậy luật nhận được sửa thành **đo lặp** (so trung vị 4 lần place). Đợt đầu theo luật mới nhận một thay đổi:
+trung vị place ở 9 ns lên **103,64 MHz** (chu kỳ đạt được 9,649 ns, +58 % so với baseline), chưa đạt bậc 9 ns.
 
 ## 2. Bối cảnh và mục tiêu
 
@@ -107,10 +108,11 @@ Luật nhận thay đổi theo kết quả thực nghiệm. Các phương án đ
 |---|---|---|
 | `m4-a` | Lọc vòng bằng floorplan, chỉ place cuối đợt | Floorplan bão hoà ~100 MHz, không phân biệt được vòng |
 | `m4-b`, `m4-c` (hướng B) | Mỗi vòng tới place, một lần đo, ngưỡng ±0,367 ns | Ở 9 ns nhiễu ±2,275 ns chặn mọi vòng |
-| `m4-d` (phương án A) | Một lần place để lọc; vòng hứa hẹn được place thêm 3 lần; nhận khi **trung vị 4 lần** tốt lên ≥ 0,367 ns | Đang chạy |
+| `m4-d` (phương án A) | Một lần place để lọc; vòng hứa hẹn được place thêm 3 lần; nhận khi **trung vị 4 lần** tốt lên ≥ 0,367 ns | `m4-d`: nhận r16, chặn 2 vòng có một lần đo tốt nhưng trung vị dưới ngưỡng |
 
 Phương án A tách hai câu hỏi: "vòng có đáng đo kỹ không" (một lần đo, rẻ) và "vòng có thực sự tốt hơn không" (trung vị,
-bền với nhiễu). Mỗi vòng hứa hẹn tốn thêm khoảng 45 phút.
+bền với nhiễu). Mỗi vòng hứa hẹn tốn thêm khoảng 45 phút. Ở `m4-d`, 4 lần place của cùng một RTL vẫn dao động
+0,46–0,87 ns, và đo lặp chiếm khoảng một nửa thời gian máy của đợt.
 
 ## 5. Kết quả
 
@@ -121,7 +123,8 @@ bền với nhiễu). Mỗi vòng hứa hẹn tốn thêm khoảng 45 phút.
 | Baseline | — | 65,42 MHz | −5,285 @ 10 ns | 2,233 mm² | 1,0000 |
 | `m4-a` (5 vòng, 1,5 giờ) | r1 + r2 + r5 | 86,86 MHz (+33 %) | −1,513 | +2,5 % | 1,0000 |
 | `m4-b` (5 vòng, 2,1 giờ) | + r6, r7, r8 | **101,98 MHz (+55,9 %)** | **+0,194 → đạt 10 ns** | +2,3 % | 1,0000 |
-| `m4-c` (5 vòng, 2,7 giờ) | không nhận (trong nhiễu) | r8 @ 9 ns: 96,26 (trung vị 98,97) | −1,389 @ 9 ns | | |
+| `m4-c` (5 vòng, 2,7 giờ) | không nhận (trong nhiễu) | r8 @ 9 ns: 96,26 (trung vị 98,96) | −1,389 @ 9 ns | | |
+| `m4-d` (5 vòng, 4,5 giờ, đo lặp) | + r16 | trung vị **103,64 MHz** @ 9 ns (+58 %) | −0,817 @ 9 ns (1 lần đo) | +6,6 % | 1,0000 |
 
 Các thay đổi agent đề xuất và được nhận:
 
@@ -133,13 +136,17 @@ Các thay đổi agent đề xuất và được nhận:
 | r6 | FPU `sfma` | Đăng ký riêng A·B và C, dời phép cộng C sang tầng postMul |
 | r7 | Core `IBuf` | Tách Shannon `inst0_valid` theo `imem.valid` trên đường `mem_wrong_npc` |
 | r8 | L2 `SourceD` | Tách Shannon theo `bs_wadr.ready` cho khối bypass |
+| r16 | L2 `ListBuffer`, FPU `dfma` | Thanh ghi giữ tag đầu mỗi hàng đợi (bỏ chuỗi đọc Mem nối tiếp); tích con A×B ở tầng preMul, cây CSA 3:2 viết tay |
 
 Đường găng dịch chuyển qua các vòng: `dfma` → `sfma` → `ifpu`/L2. Agent đã tìm đúng nút thắt kế tiếp sau mỗi lần sửa.
 Nó cũng biết gộp hai thay đổi nhỏ (r5) khi từng thay đổi riêng lẻ nằm trong nhiễu.
 
 Các vòng bị loại cũng cho thông tin. Ở 9 ns, ba cách sửa L2 khác nhau (r11, r13, r15) đều đưa đường găng sang `dfma`
 và giảm TNS từ khoảng −1 316 xuống −6..−118 ns, tức là có tác dụng thật. Nhưng cải thiện một lần đo (+0,75 ns) vẫn nhỏ
-hơn ngưỡng ±2,275 ns. r12 bị loại vì diện tích vượt 1,15×.
+hơn ngưỡng ±2,275 ns. r12 bị loại vì diện tích vượt 1,15×. Ở `m4-d`, agent gộp cách sửa L2 tốt nhất (r15) với sửa
+`dfma` thành r16 và vượt ngưỡng trung vị (+0,456 ns). Hai vòng r17, r19 có một lần đo tốt hơn +0,30..0,39 ns nhưng trung
+vị chỉ +0,13..0,16 ns, nên bị chặn đúng như luật đo lặp dự kiến. Floorplan đã đạt 9 ns từ r17 (bão hoà lần nữa);
+khoảng cách còn lại khoảng 0,5 ns nằm ở place.
 
 Chi phí: mỗi vòng 19–25 phút (agent 2–5 phút, synth 4, floorplan 1–2, place 9,5). RAM đỉnh 9,5 GB, ở bước build.
 
@@ -192,7 +199,8 @@ ngưng, loop tiếp tục tối ưu theo place.
 
 | Việc | Trạng thái |
 |---|---|
-| `m4-d`: luật đo lặp ở 9 ns | đang chạy |
+| `m4-d`: luật đo lặp ở 9 ns | xong: nhận r16, 103,64 MHz (trung vị), chưa đạt 9 ns |
+| `m4-e`: đi tiếp từ `m4-d` | chờ chạy |
 | `route-r8b`: route với `-allow_congestion` | dừng sau ~7 giờ, còn 12 705 vi phạm DRC: cần sửa floorplan trước |
 | Xử lý nghẽn quanh `cc_banks` (halo/kênh macro, chân fakeram, `CORE_UTILIZATION`) | đề xuất cho M5 |
 | Tiếp tục bậc 8 → 5 ns | M4 |
@@ -204,6 +212,6 @@ ngưng, loop tiếp tục tối ưu theo place.
 | Số liệu | Lấy từ |
 |---|---|
 | Baseline, nhiễu 10 ns | `~/soc-fmax-runs/m1`, `m2-noise` (`noise.json`) |
-| Các vòng loop | `~/soc-fmax-runs/m4-a`, `m4-b`, `m4-c` (`history.md`, `results.csv`, `summary.md`) |
+| Các vòng loop | `~/soc-fmax-runs/m4-a`, `m4-b`, `m4-c`, `m4-d` (`history.md`, `results.csv`, `summary.md`) |
 | CTS/route | `~/soc-fmax-runs/route-r8/summary.md`, `route-r8b` (log `5_1_grt.log`, `5_2_route.log`), `orfs/congestion_summary.py` |
-| Patch được nhận | `~/soc-fmax-runs/m4-b/best.patch` (RTL hash `2370465e8eb7`) |
+| Patch được nhận | `~/soc-fmax-runs/m4-d/best.patch` (RTL hash `f0f3ab6946f1`; bản đạt 10 ns: `m4-b`, `2370465e8eb7`) |

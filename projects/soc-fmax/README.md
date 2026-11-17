@@ -20,7 +20,7 @@ và GDS của mỗi bậc đã đạt.
 | | |
 |---|---|
 | Pha đi qua | **Simulate** (bắt buộc) → **ASIC**. Không làm FPGA. |
-| Pha hiện tại | M1–M3 xong. M4 đang chạy: `m4-b` đạt bậc 10 ns sau place (**101,98 MHz**, WNS +0,194); `m4-c` (9 ns) không nhận vòng nào vì nhiễu place ở 9 ns quá lớn (±2,275 ns) → luật đo lặp (so trung vị 4 lần place, mới mock), chờ `m4-d` |
+| Pha hiện tại | M1–M3 xong. M4 đang chạy: `m4-b` đạt bậc 10 ns sau place (**101,98 MHz**, WNS +0,194); `m4-c` (9 ns) không nhận vòng nào vì nhiễu place ở 9 ns quá lớn (±2,275 ns) → luật đo lặp (so trung vị 4 lần place); `m4-d` chạy thật: nhận r16, trung vị place **103,64 MHz** (9,649 ns) @ 9 ns, chưa đạt 9 ns; chờ `m4-e` |
 | PDK / corner | sky130hd (`sky130_fd_sc_hd`), `tt_025C_1v80` |
 | SRAM | fakeram (`scripts/fakeram_sky130.py`, `docs/fakeram-sky130.md`): access 1,5 ns, 3 µm²/bit, timing giả định. OpenRAM thật chỉ ở M6 |
 | Bậc chu kỳ | 10 → 9 → 8 → 7 → 6 → 5 ns. Bản tốt nhất có WNS ≥ 0 sau place ở bậc hiện tại → bậc kế (`loop.py` tự xuống bậc, giữ variant ORFS của bậc đã đạt). CTS + route + GDS (M5) làm khi đạt 5 ns (người dùng chọn 16/11/2026) |
@@ -279,6 +279,12 @@ cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-i
 cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-id m4-d --working-dir . -- python loop.py --run-name m4-d --noise-json ~/soc-fmax-runs/m2-noise/noise.json --history-from ~/soc-fmax-runs/m4-c --rounds 5
 ```
 
+Đi tiếp từ `m4-d` (9 ns, bản so sánh r16 với trung vị 103,64 MHz / 9,649 ns từ 4 lần đo của `m4-d`):
+
+```bash
+cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-id m4-e --working-dir . -- python loop.py --run-name m4-e --noise-json ~/soc-fmax-runs/m2-noise/noise.json --history-from ~/soc-fmax-runs/m4-d --rounds 5
+```
+
 **Kết quả `m4-a` (chạy thật 16/11/2026, 10 ns, sau khi chạy lại từ đầu: `m2-noise` cho lại đúng baseline 65,423 MHz và
 ngưỡng ±1,546):** cả đợt khoảng 1,5 giờ (vòng 8–17 phút, agent 1,6–4,6 phút, synth 4, floorplan 1,1–2,6, place 9,4
 phút, RAM đỉnh 4,6 GB). Ngưỡng nhiễu floorplan tự tính ra mức sàn ±0,3 MHz / ±0,2.
@@ -334,6 +340,32 @@ Không vòng nào vượt ngưỡng nên không gate, bản tốt nhất giữ r
 đưa đường găng sang `dfma` ở khoảng −0,61..−0,64 ns và TNS từ −1316 xuống −6..−118 (r8 qua 4 lần đo: −149..−2099),
 tức là sửa L2 có tác dụng thật; nhưng Fmax place của chính r8 dao động 1,5 ns chỉ vì đổi density/util, lớn hơn mọi
 cải thiện một vòng. Với luật hiện tại loop sẽ kẹt ở 9 ns. ORFS giữ `2370465e8eb7_p9_o4_fr1a1p5u3` và `..._p10_...`.
+
+**Kết quả `m4-d` (chạy thật 17/11/2026, luật đo lặp lần đầu chạy thật, đi tiếp từ `m4-c`, 9 ns):** 4,46 giờ, 5 vòng,
+RAM đỉnh 9,8 GB (build). Bản so sánh r8: trung vị 4 lần đo của `m4-c` 98,964 MHz (10,105 ns). Đo lặp tốn 135 phút
+(synth 39 + floorplan 12 + place 84) trên tổng 268 phút: 3 vòng hứa hẹn × 45 phút như dự kiến.
+
+| vòng | thay đổi | place (1 lần) | 4 lần đo (MHz) | trung vị | so với bản so sánh | kết quả |
+|---|---|---|---|---|---|---|
+| r16 | L2 `ListBuffer` thanh ghi `keys` + Mem `nextKey` (tag đầu hàng đợi, bỏ chuỗi đọc Mem); `dfma` tích con A×B[7 bit] ở preMul, cây CSA 3:2 viết tay | 101,87 | 101,87 / 105,47 / 101,68 / 109,63 | 103,64 (9,649 ns) | +0,456 ns ≥ 0,367 | **nhận** (gate đủ 13,7 phút) |
+| r17 | L2: tính sẵn hazard `evictSafe` của `SourceD` cho từng MSHR, `Mux1H` 1 bit | 106,96 | 106,96 / 108,93 / 103,91 / 103,69 | 105,41 (9,487 ns) | +0,162 ns | không đủ |
+| r18 | r17 + tách `IntToFP` 2 tầng (sau 1 lần sửa build) | 93,28 | | | −1,071 ns | trong nhiễu, không đo lặp |
+| r19 | làm lại r18 | 108,02 | 108,02 / 102,33 / 108,97 / 99,52 | 105,10 (9,515 ns) | +0,134 ns | không đủ |
+| r20 | r17 viết lại + putbuffer ghi sớm `head`/`next` | 103,29 | | | −0,032 ns | không hứa hẹn |
+
+r16: WNS place −0,817 (một lần đo), logic 2,379 mm² (+6,6 %), cycle 1,0000; slack vùng L2 −0,817, tile −0,245, bus
++0,947, uncore +1,685. ORFS giữ `f0f3ab6946f1_p9_o4_fr1a1p5u3`. Tổng từ baseline: trung vị 103,64 MHz, +58 %.
+
+Nhận xét:
+- **Luật đo lặp chạy đúng** lần đầu trên máy thật: lọc một lần đo (r18, r20 không tốn đo lặp), nhận r16 nhờ trung vị,
+  chặn r17/r19 (một lần đo +0,30/+0,39 ns nhưng trung vị chỉ +0,16/+0,13 ns).
+- 4 lần place của cùng một RTL vẫn dao động 0,46–0,87 ns (r16: 9,12..9,84 ns). Một lần đo của r17/r19 rơi vào nửa tốt,
+  đúng tình huống luật này được thiết kế để chặn.
+- Ý `evictSafe` của r17 có vẻ có tác dụng nhỏ thật (cả r17, r19 đều +0,13..0,16 ns theo trung vị) nhưng dưới ngưỡng;
+  agent lặp lại ý này 3 lần (r17, r19, r20).
+- Từ r17, **floorplan đã đạt 9 ns** (111,12 MHz, WNS +0,001) nên lại bão hoà; khoảng cách còn lại (khoảng 0,5 ns) nằm ở
+  place. Đường găng của các biến thể r16..r20 chuyển dần sang tile (FPU `ifpu`, `dfma` → regfile, `icache → fq`).
+- Biến thể `util+1` của r16 cho 109,63 MHz (WNS −0,122), gần đạt 9 ns: tham số place giờ ảnh hưởng ngang một vòng RTL.
 
 Nhận xét:
 - **Bậc 10 ns đã đạt sau place** (WNS ≥ 0). Từ đây place ở 10 ns cũng bão hoà như floorplan: các họ đường đều sát slack
@@ -550,6 +582,6 @@ rm -rf ~/chia_cache/soc-fmax ~/soc-fmax-runs && for d in designs results logs re
 | M1 | build → gate → fakeram → ORFS place 10 ns → Fmax/WNS, vùng, diện tích, thời gian/RAM, `results.csv`; lần hai từ cache | **xong 15/11/2026** (chạy thật, kể cả kiểm cache) |
 | M2 | `func_check.py` vào gate, đo nhiễu place, chốt ngưỡng nhận, orchestration với bypass LLM | **xong 15/11/2026** (chạy thật: func_check, nhiễu, loop bypass 3 vòng) |
 | M3 | pha sim có agent (tầng pipeline, chỉ đo cycle) → `candidates.json` | **xong 15/11/2026** (`m3-b` chạy thật: 4 ứng viên / 5 vòng) |
-| M4 | pha asic có agent, đợt cộng dồn đo bằng place (hướng B), gate đủ cuối đợt theo Fmax, tự xuống bậc tới 5 ns | đang chạy: `m4-a` thật 16/11/2026 place 65,42 → 86,86 MHz; `m4-b` (hướng B, chạy thật) → **101,98 MHz, WNS +0,194: đạt bậc 10 ns**; `m4-c` (chạy thật): tự xuống 9 ns đúng, nhưng nhiễu place ở 9 ns ±2,275 ns chặn mọi vòng (r15 104,07 MHz, TNS −6, vẫn trong nhiễu); luật đo lặp mới mock, chờ `m4-d` |
+| M4 | pha asic có agent, đợt cộng dồn đo bằng place (hướng B), gate đủ cuối đợt theo Fmax, tự xuống bậc tới 5 ns | đang chạy: `m4-a` thật 16/11/2026 place 65,42 → 86,86 MHz; `m4-b` (hướng B, chạy thật) → **101,98 MHz, WNS +0,194: đạt bậc 10 ns**; `m4-c` (chạy thật): tự xuống 9 ns đúng, nhưng nhiễu place ở 9 ns ±2,275 ns chặn mọi vòng (r15 104,07 MHz, TNS −6, vẫn trong nhiễu); `m4-d` (luật đo lặp, chạy thật): nhận r16, trung vị place 103,64 MHz (+0,456 ns so với r8), chưa đạt 9 ns; chờ `m4-e` |
 | M5 | CTS + route + GDS, timing sau route: làm khi đạt 5 ns (variant ORFS bản tốt nhất của mỗi bậc đạt được giữ lại) | chưa |
 | M6 | OpenRAM sky130 thật cho bản tốt nhất, GDS thật, so fakeram/OpenRAM | chưa |
