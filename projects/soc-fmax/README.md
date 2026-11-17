@@ -20,7 +20,7 @@ và GDS của mỗi bậc đã đạt.
 | | |
 |---|---|
 | Pha đi qua | **Simulate** (bắt buộc) → **ASIC**. Không làm FPGA. |
-| Pha hiện tại | M1–M3 xong. M4 đang chạy: `m4-b` đạt bậc 10 ns sau place (**101,98 MHz**, WNS +0,194); `m4-c` (9 ns) không nhận vòng nào vì nhiễu place ở 9 ns quá lớn (±2,275 ns) → luật đo lặp (so trung vị 4 lần place); `m4-d` chạy thật: nhận r16, trung vị place **103,64 MHz** (9,649 ns) @ 9 ns, chưa đạt 9 ns; chờ `m4-e` |
+| Pha hiện tại | M1–M3 xong. M4 đang chạy: `m4-b` đạt bậc 10 ns sau place (**101,98 MHz**, WNS +0,194); `m4-c` (9 ns) không nhận vòng nào vì nhiễu place ở 9 ns quá lớn (±2,275 ns) → luật đo lặp (so trung vị 4 lần place); `m4-d` chạy thật: nhận r16, trung vị place **103,64 MHz** (9,649 ns) @ 9 ns, chưa đạt 9 ns; thêm A/B của agent (mới mock), chờ `m4-e` |
 | PDK / corner | sky130hd (`sky130_fd_sc_hd`), `tt_025C_1v80` |
 | SRAM | fakeram (`scripts/fakeram_sky130.py`, `docs/fakeram-sky130.md`): access 1,5 ns, 3 µm²/bit, timing giả định. OpenRAM thật chỉ ở M6 |
 | Bậc chu kỳ | 10 → 9 → 8 → 7 → 6 → 5 ns. Bản tốt nhất có WNS ≥ 0 sau place ở bậc hiện tại → bậc kế (`loop.py` tự xuống bậc, giữ variant ORFS của bậc đã đạt). CTS + route + GDS (M5) làm khi đạt 5 ns (người dùng chọn 16/11/2026) |
@@ -114,6 +114,8 @@ vvadd, mm, spmv), `minstret` của mọi benchmark bằng baseline; thêm `func_
 | `policy.py` | luật nhận/loại (place, ngưỡng theo ns chu kỳ đạt được), ngưỡng nhiễu (hàm thuần) |
 | `loop.py` | đợt N vòng: áp đầu chuỗi → agent đề xuất patch → build (lỗi thì agent sửa, tối đa `--fix-retries`) → `--phase sim`: gate + func → ứng viên vào `candidates.json`; `--phase asic` (mặc định): synth → floorplan → so đầu chuỗi → gate nhanh → cộng dồn; cuối đợt place + gate đủ bản cộng dồn, hỏng thì lùi → hoàn nguyên cây; `history.md`, `history.json`, `best.patch`, `results.csv`, log agent ở `runs/r<N>/`. Cuối job dọn ORFS, chỉ giữ bản tốt nhất. `--bypass empty,comment,broken,file:<patch>` thay agent |
 | `route_check.py` | hiệu chỉnh một lần: một patch qua place → `make cts` → `make route`, so Fmax/đường găng place với CTS (clock thật) và route (RC OpenRCX); không thuộc loop |
+| `ab_tool.py` | công cụ A/B của agent (MCP `ab`, pha asic): `make verilog` bản sửa đang có trên khối chipyard (áp tạm rồi hoàn nguyên), ORFS synth + `2_1_floorplan` của một module (child vs parent) trên khối asic; xem mục **A/B của agent** |
+| `patchutil.py` | `split_patch` (tách patch theo submodule), dùng chung cho `loop.py` và `ab_tool.py` |
 | `agent.py` | agent Claude Code trên khối claude: chép `.scala` của các submodule được sửa từ mount Chipyard chỉ đọc sang `/tmp`, viết `TASK.md` + `context/` (báo cáo ORFS baseline, lịch sử, lỗi build), chạy `claude --print` (`ClaudeCodeLLM`, có timeout), diff bản chép ra patch |
 | `memwatch.py` | RAM đỉnh từng container theo bước (`docker stats` mỗi 5 s, trên host) |
 | `exp.yaml` | cache/bypass: `ChiselBuildNode.build`, `extract_soc_rtl`, `run_gate`, `run_func`, `orfs_stage`; bypass agent (`agent_bypass_*`) |
@@ -279,7 +281,8 @@ cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-i
 cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-id m4-d --working-dir . -- python loop.py --run-name m4-d --noise-json ~/soc-fmax-runs/m2-noise/noise.json --history-from ~/soc-fmax-runs/m4-c --rounds 5
 ```
 
-Đi tiếp từ `m4-d` (9 ns, bản so sánh r16 với trung vị 103,64 MHz / 9,649 ns từ 4 lần đo của `m4-d`):
+Đi tiếp từ `m4-d` (9 ns, bản so sánh r16 với trung vị 103,64 MHz / 9,649 ns từ 4 lần đo của `m4-d`); từ 17/11/2026 mặc
+định có A/B của agent (mục **A/B của agent**, `--ab-runs 0` để tắt):
 
 ```bash
 cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-id m4-e --working-dir . -- python loop.py --run-name m4-e --noise-json ~/soc-fmax-runs/m2-noise/noise.json --history-from ~/soc-fmax-runs/m4-d --rounds 5
@@ -377,6 +380,41 @@ Nhận xét:
 - Floorplan và place lệch nhau: r8 làm floorplan tụt (98,51, đường mới `sourceD/busy → s4_adjusted_opcode`) nhưng
   place tăng. Hướng B đo bằng place là đúng.
 - Synth vẫn không dùng được (51,4–52,5 MHz).
+
+## A/B của agent (duyệt 17/11/2026, theo `examples/timing_opt` của CHIA)
+
+Trước đây agent nộp patch "mù": không build được, không đo được, nên mất vòng vì lỗi build (r18) hoặc lặp lại một ý
+không có tác dụng (r17/r19/r20). Từ 17/11/2026, ở `--phase asic` (task đề xuất, không bypass), phiên agent có MCP server
+`ab` (`ab_tool.py`, khung lấy từ `synth_ab` của `rocket-fmax` và `TimingExperimentTool` của CHIA):
+
+| tool | việc |
+|---|---|
+| `rebuild_verilog` | diff bản chép của agent → áp tạm lên `~/tools/chipyard` trên khối chipyard → `make verilog` → hoàn nguyên; trả lỗi compile hoặc danh sách module đổi |
+| `list_modules` | module dưới `DigitalTop`, đánh dấu module bị sửa |
+| `start_ab(module)` + `ab_result` | ORFS synth + `2_1_floorplan` (bước đầu floorplan: `repair_timing` đổi cỡ cell, không chèn buffer, không đặt macro/PDN) của **một module**, bản sửa (child) và đầu chuỗi (parent), ở `--ab-period` (5 ns, đặt chặt để không bão hoà ở slack 0); chỉ đường thanh ghi→thanh ghi trong module; trả slack, Δ và bảng họ endpoint |
+
+- Không dùng timing ngay sau synth: ở `soc-fmax` Fmax synth không đi theo place (r17 synth tệ nhất 44,7 MHz nhưng place tốt
+  nhất), ở `rocket-fmax` A/B bằng synth cho 47 → 140 MHz nhưng FPGA thật chỉ +7,9 %.
+- Giới hạn `--ab-runs` 3 lần đo mỗi phiên (đo lại đúng Verilog cũ hoặc lần lỗi không tính); `make verilog` không giới hạn.
+  Bật A/B thì `--agent-timeout` mặc định 3600 giây (không bật: 1800). Effort giữ `medium` (giới hạn usage của gói Pro).
+- **Luật nhận không đổi** (place + đo lặp). A/B chỉ là tín hiệu cho agent: không có dây giữa các khối, không có nhiễu place.
+- An toàn cây Chipyard: patch tạm và process group của `make verilog` ghi vào `/tmp/socfmax_ab/applied.json` trên khối
+  chipyard trước khi chạy; sau mỗi phiên agent, loop gọi `ab_idle` (chờ khối chipyard rảnh, giết `make` sót, `git apply -R`
+  phần sót). Agent thoát khi `make verilog` đang chạy thì loop chờ nó xong (vài phút). Cuối vòng `check_tree` vẫn kiểm
+  digest như cũ.
+- Parent là RTL của đầu chuỗi, giữ trong bộ nhớ của loop (không có thì build lại, thường cache HIT). Kết quả ORFS của A/B
+  ở variant `ab_*`, xoá cuối job (`--keep-orfs` để giữ). Nhật ký từng vòng: `runs/r<N>/ab.jsonl`, dòng "A/B của agent" trong
+  `history.md`, số lần trong `summary.md`.
+- Tắt: `--ab-runs 0`.
+
+**Kiểm chứng (17/11/2026): mới mock trong sandbox** (Ray 2.54, `chialoops` 2.0.1, `claude` giả gọi tool qua MCP thật,
+Chipyard giả có submodule git và `make verilog` giả có macro SRAM, ORFS giả): sửa → rebuild → `start_ab` ra Δ và bảng họ;
+đo lại cùng Verilog thì trả kết quả cũ; module không đổi/không có bị từ chối; sửa sau rebuild thì báo Verilog cũ; lỗi
+compile trả đúng dòng `[error]`; hết lượt thì từ chối; agent thoát khi `make verilog` đang chạy → `ab_idle` chờ xong và
+cây sạch; `prune_ab` xoá thư mục `ab_*`; `config.mk` của module con có `DESIGN_NAME` = module, fakeram của macro trong
+module. **Chưa chạy thật:** `make verilog` của Chipyard 1.15.0 trên khối chipyard (thời gian, thư mục `generated-src`), đích
+`2_1_floorplan` trong bản ORFS của image (bản cũ không có thì tự chạy cả `floorplan`), thời gian ORFS của module con,
+agent thật có dùng tool đúng cách không.
 
 ## Hiệu chỉnh place với route (`route_check.py`, duyệt 16/11/2026)
 
@@ -582,6 +620,6 @@ rm -rf ~/chia_cache/soc-fmax ~/soc-fmax-runs && for d in designs results logs re
 | M1 | build → gate → fakeram → ORFS place 10 ns → Fmax/WNS, vùng, diện tích, thời gian/RAM, `results.csv`; lần hai từ cache | **xong 15/11/2026** (chạy thật, kể cả kiểm cache) |
 | M2 | `func_check.py` vào gate, đo nhiễu place, chốt ngưỡng nhận, orchestration với bypass LLM | **xong 15/11/2026** (chạy thật: func_check, nhiễu, loop bypass 3 vòng) |
 | M3 | pha sim có agent (tầng pipeline, chỉ đo cycle) → `candidates.json` | **xong 15/11/2026** (`m3-b` chạy thật: 4 ứng viên / 5 vòng) |
-| M4 | pha asic có agent, đợt cộng dồn đo bằng place (hướng B), gate đủ cuối đợt theo Fmax, tự xuống bậc tới 5 ns | đang chạy: `m4-a` thật 16/11/2026 place 65,42 → 86,86 MHz; `m4-b` (hướng B, chạy thật) → **101,98 MHz, WNS +0,194: đạt bậc 10 ns**; `m4-c` (chạy thật): tự xuống 9 ns đúng, nhưng nhiễu place ở 9 ns ±2,275 ns chặn mọi vòng (r15 104,07 MHz, TNS −6, vẫn trong nhiễu); `m4-d` (luật đo lặp, chạy thật): nhận r16, trung vị place 103,64 MHz (+0,456 ns so với r8), chưa đạt 9 ns; chờ `m4-e` |
+| M4 | pha asic có agent, đợt cộng dồn đo bằng place (hướng B), gate đủ cuối đợt theo Fmax, tự xuống bậc tới 5 ns | đang chạy: `m4-a` thật 16/11/2026 place 65,42 → 86,86 MHz; `m4-b` (hướng B, chạy thật) → **101,98 MHz, WNS +0,194: đạt bậc 10 ns**; `m4-c` (chạy thật): tự xuống 9 ns đúng, nhưng nhiễu place ở 9 ns ±2,275 ns chặn mọi vòng (r15 104,07 MHz, TNS −6, vẫn trong nhiễu); `m4-d` (luật đo lặp, chạy thật): nhận r16, trung vị place 103,64 MHz (+0,456 ns so với r8), chưa đạt 9 ns; A/B của agent (17/11/2026, mới mock), chờ `m4-e` |
 | M5 | CTS + route + GDS, timing sau route: làm khi đạt 5 ns (variant ORFS bản tốt nhất của mỗi bậc đạt được giữ lại) | chưa |
 | M6 | OpenRAM sky130 thật cho bản tốt nhất, GDS thật, so fakeram/OpenRAM | chưa |

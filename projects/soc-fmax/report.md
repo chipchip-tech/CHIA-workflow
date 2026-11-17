@@ -1,6 +1,6 @@
 # Báo cáo: Tối ưu Fmax của SoC RISC-V trên sky130 bằng vòng lặp agent AI
 
-*Project `soc-fmax-sky130` · nhánh `project/soc-fmax-sky130` · cập nhật 17/11/2026 (sau `m4-d`, `route-r8`, `route-r8b`; đang chờ `m4-e`)*
+*Project `soc-fmax-sky130` · nhánh `project/soc-fmax-sky130` · cập nhật 17/11/2026 (sau `m4-d`, `route-r8`, `route-r8b`; thêm A/B cho agent, đang chờ `m4-e`)*
 
 > Báo cáo này tóm tắt phương pháp và kết quả. Nhật ký kỹ thuật đầy đủ (lệnh chạy, lỗi đã gỡ, kiểm chứng bằng mock) nằm
 > trong `README.md` cùng thư mục. Mọi số liệu ở đây đều **đo thật** trên máy người dùng, trừ chỗ ghi rõ là chưa chạy thật.
@@ -114,6 +114,16 @@ Phương án A tách hai câu hỏi: "vòng có đáng đo kỹ không" (một l
 bền với nhiễu). Mỗi vòng hứa hẹn tốn thêm khoảng 45 phút. Ở `m4-d`, 4 lần place của cùng một RTL vẫn dao động
 0,46–0,87 ns, và đo lặp chiếm khoảng một nửa thời gian máy của đợt.
 
+### 4.4. Công cụ A/B cho agent
+
+Đến `m4-d`, agent đề xuất patch mà không tự build hay đo được: một vòng mất vì lỗi build, và cùng một ý được lặp lại ba
+vòng dù chỉ cải thiện khoảng 0,15 ns. Theo ví dụ `timing_opt` của CHIA (tối ưu BOOM), từ `m4-e` agent có một công cụ A/B
+trong phiên: build lại Verilog từ bản sửa đang có (bắt lỗi compile), rồi chạy ORFS synth và bước đầu floorplan (sửa
+timing bằng đổi cỡ cell, chưa đặt cell) cho **một module** của bản sửa và của bản đang giữ, ở chu kỳ đặt chặt 5 ns, rồi so
+slack theo họ endpoint. Thước đo này tất định và nhanh hơn place nhiều, nhưng không thấy dây nối giữa các khối, nên chỉ
+dùng để agent tự lọc ý; luật nhận vẫn dựa trên place. Không dùng timing ngay sau synth: trong project này nó không đi theo
+place, và ở project trước (`rocket-fmax`) A/B bằng synth cho Fmax tăng 3 lần trong khi Fmax đo thật chỉ tăng 7,9 %.
+
 ## 5. Kết quả
 
 ### 5.1. Tiến trình Fmax
@@ -200,7 +210,8 @@ ngưng, loop tiếp tục tối ưu theo place.
 | Việc | Trạng thái |
 |---|---|
 | `m4-d`: luật đo lặp ở 9 ns | xong: nhận r16, 103,64 MHz (trung vị), chưa đạt 9 ns |
-| `m4-e`: đi tiếp từ `m4-d` | chờ chạy |
+| Công cụ A/B cho agent (mục 4.4) | mới thử trên mock |
+| `m4-e`: đi tiếp từ `m4-d`, có A/B | chờ chạy |
 | `route-r8b`: route với `-allow_congestion` | dừng sau ~7 giờ, còn 12 705 vi phạm DRC: cần sửa floorplan trước |
 | Xử lý nghẽn quanh `cc_banks` (halo/kênh macro, chân fakeram, `CORE_UTILIZATION`) | đề xuất cho M5 |
 | Tiếp tục bậc 8 → 5 ns | M4 |

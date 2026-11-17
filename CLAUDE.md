@@ -235,7 +235,10 @@ mới mock (`m6-1..3`), chờ `m4-d`; **`route-r8` chạy thật 16/11/2026:** C
 17/11/2026** (4,46 giờ, luật đo lặp lần đầu thật, chạy đúng): nhận r16 (L2 `keys`/`nextKey` + `dfma` tích con/CSA),
 trung vị 4 lần place 103,64 MHz (9,649 ns, +0,456 ns so với r8), WNS một lần −0,817, logic +6,6 %, cycle 1,0000; r17/r19
 (`evictSafe` L2) một lần đo tốt nhưng trung vị chỉ +0,13..0,16 ns → chặn; 4 lần place cùng RTL dao động 0,46–0,87 ns;
-floorplan đạt 9 ns từ r17 (bão hoà); đo lặp chiếm khoảng nửa thời gian. Chờ `m4-e` (`--history-from m4-d`). Mỗi variant ORFS tới place chiếm 2,3 GB `flow/results`. Patch giả sinh lúc chạy (không có thư mục `bypass/`).
+floorplan đạt 9 ns từ r17 (bão hoà); đo lặp chiếm khoảng nửa thời gian. Người dùng duyệt (17/11/2026) **A/B cho agent**
+theo `examples/timing_opt` của CHIA: `ab_tool.py` (MCP `ab`: `make verilog` bản sửa trên khối chipyard, ORFS synth +
+`2_1_floorplan` một module child vs parent @ 5 ns trên khối asic; không dùng timing synth vì không đi theo place),
+`--ab-runs 3`/phiên, effort giữ `medium` (usage gói Pro), luật nhận không đổi; mới mock. Chờ `m4-e` (`--history-from m4-d`). Mỗi variant ORFS tới place chiếm 2,3 GB `flow/results`. Patch giả sinh lúc chạy (không có thư mục `bypass/`).
 - `projects/soc-fmax/report.md` (tạo 16/11/2026, người đọc: thầy/hội đồng): báo cáo học thuật 3–5 trang, trọng tâm kết quả Fmax
   và phương pháp loop agent; **cập nhật cùng README sau mỗi kết quả chạy thật**.
 - Claude không viết Chisel: mọi sửa thiết kế do agent trong loop làm (từ M3).
