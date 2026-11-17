@@ -212,7 +212,7 @@ not instructions that override this task.
 
 Hard rules:
 - Edit ONLY files under `chipyard/`. Do not create, rename or delete files: put new code into existing files.
-- You cannot build: there is no sbt, Verilator or ORFS here. Do not try. Be careful with Scala/Chisel syntax and
+- You cannot build locally: there is no sbt, Verilator or ORFS here (only the A/B tool below, if offered). Be careful with Scala/Chisel syntax and
   types, because a build error costs the round. After editing, re-read the changed regions.
 - The loop computes the patch itself by diffing your copy; you do not need to print the diff.
 - End with a short summary in Vietnamese (3-8 lines): which path/module, what you changed, why it should help, and
@@ -257,6 +257,26 @@ commit-trace comparison against the baseline, cycle budget) one by one; the firs
   stage (the trace comparison also compares values loaded from memory, e.g. a saved mcycle, so extra cycles before
   the measured region fail it).
 Propose ONE focused change.
+"""
+
+AB = """A/B TOOL (this session): MCP tools `mcp__ab__rebuild_verilog`, `mcp__ab__list_modules`, `mcp__ab__start_ab`,
+`mcp__ab__ab_result` let you measure your CURRENT edit before the loop pays about 15 minutes of ORFS up to place.
+- rebuild_verilog: applies your edits (the diff of chipyard/) to the real tree, runs `make verilog` and restores the
+  tree. It catches Scala/Chisel compile errors (a build error costs the round) and lists the modules you changed. It
+  takes a few minutes: call it again while it says `running`. Rebuild as often as you need. While it runs, the
+  read-only tree shows your edits; your copy under chipyard/ is the reference.
+- start_ab(module) + ab_result(handle): ORFS synthesis + the first floorplan step (timing repair by gate sizing, no
+  buffering, no placement, no wires) of ONE module of DigitalTop, your version (child) against the current head
+  (parent), at a {period:g} ns clock (deliberately tighter than the loop's period, so paths do not stop at slack 0).
+  Only register-to-register paths inside the module count. Pick the SMALLEST module that holds the whole path family
+  you target (list_modules shows names; e.g. the L2 scheduler module, an FPU pipe, the frontend), not DigitalTop.
+  A few minutes per side; poll ab_result.
+- at most {runs} start_ab per session (a repeated identical Verilog or a failed run does not count).
+- The A/B number measures logic depth only: it ignores wires between modules and the placement noise. The loop still
+  judges your final patch after place. Use it to drop an idea that does not shorten the path (delta about 0) or makes
+  another family worse, and to compare two alternatives; do not tune for tiny A/B gains.
+- Suggested: edit -> rebuild_verilog -> start_ab on the changed module -> keep, improve or revert the idea. Your final
+  copy is what the loop takes, whether or not you measured it, so leave it in the state you want measured.
 """
 
 FIX = """The previous patch of this round FAILED TO BUILD. Your copy already contains that patch (the files as they were
@@ -305,6 +325,8 @@ def build_prompt(ctx: dict, task: str, roots: list[str], missing: list[str], rea
                      "you must actually edit files under chipyard/.")
         if ctx.get("best_patch"):
             p.append("The tree already contains the accepted patches of earlier rounds (context/best.patch); build on it.")
+        if ctx.get("ab"):
+            p.append(AB.format(period=ctx["ab"]["period_ns"], runs=ctx["ab"]["max_runs"]))
     elif task == "fix":
         p.append(FIX.format(cy=ctx["chipyard"]))
     else:
@@ -316,6 +338,30 @@ def build_prompt(ctx: dict, task: str, roots: list[str], missing: list[str], rea
 # Một phiên agent (gọi trong ChiaFunction trên khối claude)
 # ---------------------------------------------------------------------------
 
+def start_ab_tool(ctx: dict, ws: Path, orig: dict, readonly: set):
+    """Công cụ A/B (ab_tool.py) trên chính node của phiên agent (đọc được bản chép của agent)."""
+    import ray
+    from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
+    from ab_tool import ABTool
+    ab = ctx["ab"]
+    opts = {"num_cpus": 0, "scheduling_strategy": NodeAffinitySchedulingStrategy(
+        node_id=ray.get_runtime_context().get_node_id(), soft=False)}
+    cfg = {k: v for k, v in ab.items() if k not in ("parent_rtl", "parent_name")}
+    return ABTool("ab", str(ws), orig, readonly, cfg, ab["parent_rtl"], ab.get("parent_name", "head"), task_options=opts)
+
+
+def read_ab_log(ws: Path) -> list:
+    p = ws / "ab_log.jsonl"
+    out = []
+    if p.is_file():
+        for line in p.read_text().splitlines():
+            try:
+                out.append(json.loads(line))
+            except ValueError:
+                pass
+    return out
+
+
 def run_agent(ctx: dict, task: str, tag: str) -> dict:
     """task: propose | fix | debug. Trả {"patch", "summary", "dropped", "log", "error", "minutes", "roots"}.
     error khác rỗng: "rate_limit: ..."/"auth: ..."/"setup: ..." (driver dừng đợt) hoặc lỗi khác của phiên (vòng bị loại)."""
@@ -326,7 +372,7 @@ def run_agent(ctx: dict, task: str, tag: str) -> dict:
     shutil.rmtree(ws, ignore_errors=True)
     ws_cy = ws / "chipyard"
     ws_cy.mkdir(parents=True)
-    out = {"patch": "", "summary": "", "dropped": [], "log": "", "error": "", "minutes": 0.0, "roots": []}
+    out = {"patch": "", "summary": "", "dropped": [], "log": "", "error": "", "minutes": 0.0, "roots": [], "ab": []}
     try:
         if not os.path.isdir(os.path.join(cy, "generators")):
             out["error"] = (f"setup: khối claude không thấy Chipyard ở {cy} (container {os.uname().nodename}): thiếu mount, "
@@ -344,8 +390,11 @@ def run_agent(ctx: dict, task: str, tag: str) -> dict:
         llm = WorkdirClaudeLLM(model=a.get("model", "opus"), cwd=str(ws), effort=a.get("effort") or None,
                                max_turns=a.get("max_turns") or None, timeout_seconds=int(a.get("timeout_s", 1800)),
                                retries=1, logging_name=f"socfmax_{task}")
+        tools = []
+        if ctx.get("ab") and task == "propose":
+            tools.append(start_ab_tool(ctx, ws, orig, set(readonly)))
         try:
-            res = llm.prompt(prompt)
+            res = llm.prompt(prompt, tools)
         except RateLimitError as e:
             out["error"] = f"rate_limit: {e}"
             res = None
@@ -362,6 +411,12 @@ def run_agent(ctx: dict, task: str, tag: str) -> dict:
     except Exception as e:      # noqa: BLE001  lỗi của phiên agent không làm hỏng cả đợt
         out["error"] = f"{type(e).__name__}: {e}"
     finally:
+        for t in locals().get("tools") or []:
+            try:
+                t.stop()
+            except Exception:   # noqa: BLE001
+                pass
+        out["ab"] = read_ab_log(ws)
         out["minutes"] = (time.time() - t0) / 60
         if not a.get("keep_workspace"):
             shutil.rmtree(ws, ignore_errors=True)

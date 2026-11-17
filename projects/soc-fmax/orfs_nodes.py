@@ -175,7 +175,7 @@ def prepare_design(orfs_dir: str, rtl: "S.SocRTL", period_ns: float, fakeram, fr
     if _put(d / "tapcell.tcl", tapcell_text(orfs_vars)):
         changed.append("tapcell.tcl")
     lines = [f"# soc-fmax {FLOW_VERSION}: sinh bởi orfs_nodes.py, variant {variant}",
-             f"export PLATFORM = {PLATFORM}", "export DESIGN_NAME = DigitalTop", f"export DESIGN_NICKNAME = {NICK}",
+             f"export PLATFORM = {PLATFORM}", f"export DESIGN_NAME = {rtl.top}", f"export DESIGN_NICKNAME = {NICK}",
              f"export VERILOG_FILES = {cd}/soc.sv", f"export SDC_FILE = {cd}/constraint.sdc",
              f"export ABC_CLOCK_PERIOD_IN_PS = {int(round(period_ns * 1000))}"]
     if mems:
@@ -390,14 +390,25 @@ STAGE_INPUTS = {
     "cts": (["4_cts.odb"], ["4_cts.sdc", "3_place.sdc"]),
     "route": (["5_route.odb"], ["5_route.sdc", "4_cts.sdc"]),
     "finish": (["6_final.odb"], ["6_final.sdc", "5_route.sdc"]),
+    # Chỉ bước đầu của floorplan (initialize_floorplan + repair_timing không chèn buffer), không đặt macro/PDN: A/B
+    # module con của agent (ab_tool.py). Báo cáo như floorplan (không RC).
+    "2_1_floorplan": (["2_1_floorplan.odb"], ["2_1_floorplan.sdc", "1_synth.sdc"]),
 }
+REPORT_STAGE = {"2_1_floorplan": "floorplan"}
 
 
 @ChiaFunction(resources={"asic": 1}, max_retries=0)
 def orfs_stage(config_mk: str, variant: str, stage: str, period_ns: float, timeout_s: int,
                report_timeout_s: int = 3600, nproc: int | None = None,
                make_vars: list | None = None) -> StageResult:
-    """`make <stage>` cho variant (bước trước đã xong thì make không chạy lại), rồi report.tcl trên kết quả của
+    """Node của khối asic, xem run_stage."""
+    return run_stage(config_mk, variant, stage, period_ns, timeout_s, report_timeout_s, nproc, make_vars)
+
+
+def run_stage(config_mk: str, variant: str, stage: str, period_ns: float, timeout_s: int,
+              report_timeout_s: int = 3600, nproc: int | None = None,
+              make_vars: list | None = None) -> StageResult:
+    """(chạy trên khối asic) `make <stage>` cho variant (bước trước đã xong thì make không chạy lại), rồi report.tcl trên kết quả của
     bước đó (sau place: RC ước lượng từ placement). make_vars: biến thêm cho riêng lệnh make của bước này (vd
     ALLOW_CONGESTION=1), không vào tên variant. Không raise: lỗi nằm trong StageResult.error."""
     flow = f"{C_ORFS}/flow"
@@ -418,7 +429,7 @@ def orfs_stage(config_mk: str, variant: str, stage: str, period_ns: float, timeo
     if not db_path:
         r.error = f"không thấy kết quả {db} trong {w['results']}"
         return r
-    env_vars = [f"SOCFMAX_DB={db_path}", f"SOCFMAX_SDC={sdc_path or ''}", f"SOCFMAX_STAGE={stage}",
+    env_vars = [f"SOCFMAX_DB={db_path}", f"SOCFMAX_SDC={sdc_path or ''}", f"SOCFMAX_STAGE={REPORT_STAGE.get(stage, stage)}",
                 f"RUN_SCRIPT={os.path.dirname(config_mk)}/report.tcl", f"RUN_LOG_NAME_STEM=soc_fmax_report_{stage}"]
     rc2, sec2, _ = _run(base + env_vars + ["run"], flow, report_timeout_s, f"{w['logs']}/soc_fmax_report_{stage}.txt")
     rep = open(f"{w['logs']}/soc_fmax_report_{stage}.txt", errors="replace").read()

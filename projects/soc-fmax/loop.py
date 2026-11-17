@@ -61,7 +61,9 @@ from pathlib import Path
 
 import ray
 
+import ab_tool as AB
 import agent as A
+from patchutil import split_patch  # noqa: F401  (dùng chung với ab_tool trên khối chipyard)
 import policy as P
 import soc_fmax as D
 import soc_nodes as S
@@ -71,6 +73,7 @@ from chia.base.bypass import Bypass
 from chia.base.cache import start_cache, stop_cache
 from chia.trace.profiler import start_collector, stop_collector
 
+O_PLATFORM_NICK = "sky130hd/soc_fmax"            # flow/<loại>/<PLATFORM>/<NICK>/ của orfs_nodes
 BYPASS_FILE = "generators/rocket-chip/src/main/scala/rocket/RocketCore.scala"
 AGENT_FNS = ("agent_propose", "agent_fix_build", "agent_debug")
 
@@ -135,45 +138,6 @@ def _git(args: list[str], cwd: str, inp: str | None = None, check: bool = True) 
     if check and r.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)} ({cwd}) lỗi {r.returncode}:\n{r.stdout[-2000:]}\n{r.stderr[-2000:]}")
     return r
-
-
-def split_patch(patch: str, subs: list[str]) -> dict[str, str]:
-    """Tách patch theo submodule chứa file (tiền tố dài nhất), viết lại đường dẫn tương đối với submodule đó.
-    Khoá "" là repo gốc. Mỗi file cần header `diff --git` hoặc `--- a/...`."""
-    head = "diff --git " if re.search(r"^diff --git ", patch, re.M) else "--- "
-    sections, cur = [], []
-    for line in patch.splitlines(True):
-        if line.startswith(head) and cur:
-            sections.append(cur)
-            cur = []
-        cur.append(line)
-    if cur:
-        sections.append(cur)
-    subs = sorted(subs, key=len, reverse=True)
-    out: dict[str, list[str]] = {}
-    for sec in sections:
-        path = None
-        for l in sec:
-            m = re.match(r"^(?:\+\+\+ b/|--- a/|diff --git a/)(\S+)", l)
-            if m and m.group(1) != "/dev/null":
-                path = m.group(1)
-                break
-        if path is None:
-            if any(l.strip() for l in sec):
-                raise ValueError("patch có đoạn không đọc được đường dẫn file:\n" + "".join(sec[:5]))
-            continue
-        sub = next((s for s in subs if path == s or path.startswith(s + "/")), "")
-        pre = sub + "/" if sub else ""
-
-        def strip(l: str) -> str:
-            if not pre:
-                return l
-            return (l.replace(f" a/{pre}", " a/").replace(f" b/{pre}", " b/")
-                    .replace(f"--- a/{pre}", "--- a/").replace(f"+++ b/{pre}", "+++ b/")
-                    .replace(f"rename from {pre}", "rename from ").replace(f"rename to {pre}", "rename to "))
-        out.setdefault(sub, []).extend(strip(l) if l.startswith(("diff --git", "--- ", "+++ ", "rename ")) else l
-                                       for l in sec)
-    return {k: "".join(v) for k, v in out.items()}
 
 
 class Applied:
@@ -273,6 +237,7 @@ class Round:
     attempts: int = 1
     gate_rank: int = 0            # thứ tự gate đủ ở cuối đợt (1 = Fmax place cao nhất, ...)
     gate_minutes: float = 0.0
+    ab: list = dataclasses.field(default_factory=list)   # A/B của agent trong vòng (ab_tool.py): rebuild + kết quả
 
 
 def patch_stat(patch: str) -> str:
@@ -288,6 +253,23 @@ def med_txt(p: dict) -> str:
     if len(fs) < 2:
         return ""
     return f"{1000.0 / P.median([1000.0 / f for f in fs]):.3f} ({len(fs)})"
+
+
+def ab_lines(ab: list) -> list[str]:
+    """Dòng history.md cho A/B agent đã chạy trong vòng."""
+    if not ab:
+        return []
+    rb = [x for x in ab if x.get("event") == "rebuild"]
+    res = [x for x in ab if x.get("event") == "ab"]
+    L = [f"- A/B của agent: {len(rb)} lần make verilog ({sum(1 for x in rb if not x.get('ok'))} lỗi), {len(res)} lần đo"]
+    for x in res:
+        c, p = x.get("child") or {}, x.get("parent") or {}
+        if c.get("ok") and p.get("ok"):
+            L.append(f"  - {x.get('module')} @ {x.get('period_ns')} ns: slack parent {p['slack_ns']:+.3f}, child "
+                     f"{c['slack_ns']:+.3f} (Δ {x.get('delta_ns'):+.3f} ns); child `{c.get('crit', '')[:160]}`")
+        else:
+            L.append(f"  - {x.get('module')}: lỗi {((c.get('error') or p.get('error') or '')[:200])!r}")
+    return L
 
 
 def history_md(a, base: P.Point, best: P.Point, noise: P.Noise, rounds: list[Round], rungs: list | None = None) -> str:
@@ -322,6 +304,7 @@ def history_md(a, base: P.Point, best: P.Point, noise: P.Noise, rounds: list[Rou
               f"- Patch: {r.patch_stat or '-'} (lần hỏi: {r.attempts}, agent {r.agent_minutes:.1f} phút)",
               f"- RTL hash: `{r.rtl_hash[:12] or '-'}`"]
         L += [f"- {x}" for x in r.reasons]
+        L += ab_lines(r.ab)
         if r.diagnosis:
             L.append(f"- Chẩn đoán: {r.diagnosis}")
     return "\n".join(L) + "\n"
@@ -358,6 +341,7 @@ class Ctx:
         self.met_round: int | None = None            # vòng cộng dồn có WNS ≥ 0 ở bậc hiện tại -> kết thúc đợt sớm
         self.noise_runs: list[dict] = []             # các lần đo nhiễu trong job (cho summary.md)
         self.measured = {base_rtl.hash: "baseline"}
+        self.rtls = {base_rtl.hash: base_rtl}         # RTL đã tách của baseline/đầu chuỗi/chuỗi (parent của A/B)
         self.rounds: list[Round] = []
         self.candidates: list[dict] = []
         self.untracked = sorted(base_state.get("untracked_sha", {}))
@@ -440,6 +424,48 @@ def agent_context(c: Ctx, n: int) -> dict:
                       "timeout_s": c.a.agent_timeout, "keep_workspace": c.a.agent_keep_workspace}}
 
 
+def ab_enabled(a) -> bool:
+    return a.phase == "asic" and a.ab_runs > 0 and not a.bypass_list
+
+
+def ab_context(c: Ctx, d: Path) -> dict:
+    """Cấu hình công cụ A/B của agent (ab_tool.py). Parent = RTL của đầu chuỗi (cây đang ở trạng thái đó): lấy từ
+    bộ nhớ, không có thì build (thường cache HIT vì đầu chuỗi đã build trong đợt hoặc lúc dựng lại)."""
+    a = c.a
+    keep = {c.best.rtl_hash, c.head.rtl_hash} | {x["point"].rtl_hash for x in c.chain}
+    c.rtls = {h: r for h, r in c.rtls.items() if h in keep}
+    rtl = c.rtls.get(c.head.rtl_hash)
+    if rtl is None:
+        print(f"  A/B: tách RTL của đầu chuỗi {c.head.name} (build, thường từ cache)", flush=True)
+        _s, _art, rtl = D.step_rtl(a, d / "ab_parent", c.mw, c.tm, baseline=False)
+        if rtl is None or rtl.hash != c.head.rtl_hash:
+            raise SystemExit(f"A/B: đầu chuỗi build ra RTL khác ({rtl.hash[:12] if rtl else 'build lỗi'} ≠ "
+                             f"{c.head.rtl_hash[:12]})")
+        c.rtls[rtl.hash] = rtl
+    fk = c.fakeram
+    return {"chipyard": a.chipyard, "config": a.config, "subs": c.subs, "make_jobs": a.make_jobs,
+            "period_ns": a.ab_period, "orfs_vars": dict(a.orfs_vars), "orfs_timeout": a.ab_orfs_timeout,
+            "fakeram_src": Path(fk.__file__).read_text(),
+            "fr_params": {"access_ns": a.fakeram_access_ns, "um2_per_bit": a.fakeram_um2_per_bit},
+            "fr_tag": f"{fk.VERSION}a{a.fakeram_access_ns:g}u{a.fakeram_um2_per_bit:g}",
+            "max_runs": a.ab_runs, "parent_rtl": rtl, "parent_name": c.head.name}
+
+
+def ab_after_session(c: Ctx, d: Path, rd: Round, r: dict):
+    """Sau phiên agent có A/B: chờ khối chipyard rảnh và dọn phần A/B sót (make verilog, patch tạm); ghi nhật ký."""
+    notes = get(AB.ab_idle.chia_remote(c.a.chipyard)).get("notes") or []
+    for x in notes:
+        print(f"  A/B dọn: {x}", flush=True)
+    ab = r.get("ab") or []
+    rd.ab += ab
+    if ab:
+        with open(d / "ab.jsonl", "a") as f:
+            for x in ab:
+                f.write(json.dumps(x, ensure_ascii=False, default=str) + "\n")
+        for line in ab_lines(ab):
+            print("  " + line, flush=True)
+
+
 def run_round(c: Ctx, n: int, kind: str) -> Round:
     a = c.a
     rd = Round(n=n, bypass=kind)
@@ -454,6 +480,8 @@ def run_round(c: Ctx, n: int, kind: str) -> Round:
                 applied.apply(c.head_patch, c.subs)
             except PatchError as e:
                 raise SystemExit(f"best.patch không áp được vào cây hiện tại: {e}")
+        if ab_enabled(a):
+            ctx_in["ab"] = ab_context(c, d)
         return _round_body(c, n, kind, rd, d, tag_base, ctx_in, applied)
     finally:
         applied.revert()
@@ -465,8 +493,13 @@ def _round_body(c: Ctx, n: int, kind: str, rd: Round, d: Path, tag_base: str, ct
     prop = {}
     for attempt in range(1, a.empty_retries + 2):
         rd.attempts = attempt
-        prop = ask("agent_propose", agent_propose, {**ctx_in, "attempt": attempt}, kind, a, f"{tag_base}_p{attempt}",
-                   d, rd)
+        got = {}
+        try:
+            prop = got = ask("agent_propose", agent_propose, {**ctx_in, "attempt": attempt}, kind, a,
+                             f"{tag_base}_p{attempt}", d, rd)
+        finally:
+            if ctx_in.get("ab"):
+                ab_after_session(c, d, rd, got)
         if (prop.get("patch") or "").strip() or prop.get("error"):
             break
         print(f"  agent trả patch rỗng (lần {attempt})", flush=True)
@@ -619,6 +652,7 @@ def chain_round(c: Ctx, n: int, kind: str, rd: Round, d: Path, tag_base: str, pa
             rd.status = "đo lặp"
             return rd
     rd.status, rd.pending = "cộng dồn", True
+    c.rtls[rtl.hash] = rtl
     c.chain.append({"n": n, "tree_patch": cand_patch, "patch": patch, "point": pt, "tag_base": tag_base, "kind": kind})
     c.head, c.head_patch = pt, cand_patch
     print(f"  cộng dồn: vòng sau xây trên r{n} (chuỗi {' + '.join('r' + str(x['n']) for x in c.chain)})", flush=True)
@@ -738,6 +772,7 @@ def measure_best(c: Ctx, why: str, noise: bool = False):
         _state, _art, rtl = D.step_rtl(a, d, c.mw, c.tm, baseline=not c.best_patch)
         if rtl is None or rtl.hash != b.rtl_hash:
             raise SystemExit(f"best.patch build ra RTL khác ({rtl.hash[:12] if rtl else 'build lỗi'} ≠ {b.rtl_hash[:12]})")
+        c.rtls[rtl.hash] = rtl
         _prep, st = D.run_orfs_point(a, d, rtl, c.fakeram, a.orfs_vars, b.name, "place", c.mw, c.tm)
         if noise:
             pl = st["place"]
@@ -871,7 +906,12 @@ def parse_args():
     ap.add_argument("--agent-model", default="opus", help="model của claude --model (mặc định opus)")
     ap.add_argument("--agent-effort", default="medium", help="claude --effort (rỗng = mặc định của CLI)")
     ap.add_argument("--agent-max-turns", type=int, default=200)
-    ap.add_argument("--agent-timeout", type=int, default=1800, help="giây cho mỗi phiên agent")
+    ap.add_argument("--agent-timeout", type=int, default=0,
+                    help="giây cho mỗi phiên agent (mặc định 1800, 3600 khi bật A/B)")
+    ap.add_argument("--ab-runs", type=int, default=3,
+                    help="--phase asic: số lần A/B (ORFS synth + 2_1_floorplan một module) agent được chạy mỗi phiên; 0 = tắt")
+    ap.add_argument("--ab-period", type=float, default=5.0, help="chu kỳ (ns) của A/B, đặt chặt để không bão hoà")
+    ap.add_argument("--ab-orfs-timeout", type=int, default=1500, help="giây cho mỗi lần ORFS của A/B")
     ap.add_argument("--agent-keep-workspace", action="store_true", help="giữ /tmp/socfmax-agent/<tag> trên khối claude")
     ap.add_argument("--fix-retries", type=int, default=2, help="số lần agent sửa build mỗi vòng")
     ap.add_argument("--quick-gate", choices=("isa", "full", "none"), default="isa",
@@ -895,6 +935,8 @@ def parse_args():
     D.finish_args(a, ap)
     a.ladder_list = sorted({float(x) for x in a.ladder.split(",") if x.strip()}, reverse=True)
     a.bypass_list = [x.strip() for x in a.bypass.split(",") if x.strip()]
+    if not a.agent_timeout:
+        a.agent_timeout = 3600 if ab_enabled(a) else 1800
     return a
 
 
@@ -981,7 +1023,8 @@ def main():
               f"ngưỡng nhiễu: chu kỳ đạt được ±{c.noise.period_ns:.3f} ns, điểm họ ±{c.noise.family_ns:.3f} "
               f"(đo trên {c.noise.point} @ {c.noise.at_period_ns:g} ns); ngân sách {c.budget}", flush=True)
         who = ("bypass " + a.bypass) if a.bypass_list else \
-            f"{a.agent_model}, effort {a.agent_effort or '-'}, {a.agent_timeout} s/phiên, sửa build {a.fix_retries} lần"
+            (f"{a.agent_model}, effort {a.agent_effort or '-'}, {a.agent_timeout} s/phiên, sửa build {a.fix_retries} lần, "
+             + (f"A/B {a.ab_runs} lần/phiên @ {a.ab_period:g} ns" if ab_enabled(a) else "không A/B"))
         print(f"pha {a.phase}; agent: {who}", flush=True)
         for i in range(a.rounds):
             n = start + i
@@ -1023,6 +1066,7 @@ def main():
             save(out, a, c)
         mw.stop()
         D.prune_orfs(a, ([c.best.name] + c.keep_points) if c is not None else ["baseline"])
+        prune_ab(a)
         if c is not None:
             D.write(out / "summary.md", summary_md(a, c, tm, mw, t_start))
         print("\n## Thời gian", flush=True)
@@ -1031,6 +1075,20 @@ def main():
         print(f"\nKết quả: {out}/summary.md, {out}/history.md, {out}/best.patch, {out}/results.csv", flush=True)
         stop_collector()
         stop_cache()
+
+
+def prune_ab(a):
+    """Cuối job: xoá design + kết quả ORFS của A/B (variant ab_*); --keep-orfs để giữ."""
+    if getattr(a, "keep_orfs", False):
+        return
+    import shutil
+    base = Path(a.orfs_dir) / "flow"
+    dirs = [p for k in ("designs", "results", "logs", "reports", "objects")
+            for p in (base / k / O_PLATFORM_NICK).glob("ab_*")]
+    for p in dirs:
+        shutil.rmtree(p, ignore_errors=True)
+    if dirs:
+        print(f"ORFS: xoá {len(dirs)} thư mục A/B (ab_*)", flush=True)
 
 
 def summary_md(a, c: Ctx, tm, mw, t_start: datetime) -> str:
@@ -1115,6 +1173,11 @@ def summary_md(a, c: Ctx, tm, mw, t_start: datetime) -> str:
     L += [f"| {k} | {v[0]} ({v[2]}) | {v[1]:.1f} |" for k, v in agg.items()]
     agent_min = sum(r.agent_minutes for r in rs)
     L.append(f"| agent | {len(rs)} vòng | {agent_min:.1f} |")
+    abx = [x for r in rs for x in (r.ab or [])]
+    if abx:
+        n_ab = sum(1 for x in abx if x.get("event") == "ab")
+        n_rb = sum(1 for x in abx if x.get("event") == "rebuild")
+        L.append(f"| trong đó A/B của agent | {n_ab} lần đo, {n_rb} lần make verilog | (tính trong phút agent) |")
     peaks = {k: v.get("_tổng") for k, v in mw.peaks().items() if v.get("_tổng")}
     if peaks:
         k = max(peaks, key=peaks.get)

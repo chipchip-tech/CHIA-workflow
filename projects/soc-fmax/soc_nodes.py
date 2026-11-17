@@ -207,6 +207,19 @@ def soc_rtl_from_sources(generated_src_files: list, top: str = TOP) -> SocRTL:
                   replaced=replaced, hash=rtl_hash(modules, conf, replaced), n_files=n_files)
 
 
+def sub_rtl(rtl: SocRTL, module: str) -> SocRTL:
+    """Cây con của `rtl` từ `module` (module con có instance trong cây, macro SRAM của nó): A/B của agent."""
+    files = [("soc.v", "\n\n".join(rtl.modules[m] for m in sorted(rtl.modules)))]
+    if rtl.mems_conf:
+        files.append(("soc.top.mems.conf", rtl.mems_conf))
+    return soc_rtl_from_sources(files, module)
+
+
+def module_texts(rtl: SocRTL) -> dict:
+    """{module: text bỏ chú thích vị trí nguồn} để so module nào đã đổi."""
+    return {m: _LOC_RE.sub("", t) for m, t in rtl.modules.items()}
+
+
 @ChiaFunction(max_retries=0)
 def extract_soc_rtl(artifact, top: str = TOP) -> SocRTL:
     """Cây DigitalTop từ BuildArtifact build với collect_generated_src=True."""
