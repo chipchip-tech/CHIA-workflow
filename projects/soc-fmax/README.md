@@ -496,8 +496,33 @@ Câu hỏi: nên ép cả loop ở 5 ns, và A/B của agent nên chạy ở đ�
 cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-id cal-5ns --working-dir . -- python cal_5ns.py --run-name cal-5ns
 ```
 
-**Kiểm chứng (18/11/2026):** mới `py_compile` và chạy `load_points`/`summary_md` trên `history.json` giả trong sandbox; chưa
-chạy trên cluster.
+**Kiểm chứng (18/11/2026):** `py_compile` và `load_points`/`summary_md` trên `history.json` giả trong sandbox. Chạy thật lỗi
+lần đầu (`KeyError: 'baseline'`: `history.json` thật không có khoá này; sửa: lấy hash từ `measured`, số loop từ dòng
+place của `results.csv`). `cal-5ns-2` chết giữa chừng khi cluster dựng lại (mất mạng), `cal-5ns-4` chạy tiếp đúng từ cache.
+
+**Kết quả `cal-5ns-4` (chạy thật 18/11/2026,** 0,85 giờ, phần chưa có cache; các điểm đo ở `cal-5ns-2` lấy từ cache CHIA,
+cột `cached` = True, không đo lại). Chu kỳ đạt được (ns), một lần đo, trừ dòng trung vị:
+
+| điểm | loop (bậc 10/9 ns) | floorplan @ 5 | place @ 5 | đường găng place @ 5 |
+|---|---|---|---|---|
+| baseline | 15,285 @ 10 | 12,480 | 14,997 | FPU `dfma` |
+| r5 | 11,513 @ 10 | **8,643** | 10,582 | FPU `sfma` |
+| r8 | 10,389 @ 9 | 10,151 | 10,051 | L2 `sinkA/putbuffer` |
+| r16 | 9,649 @ 9 (trung vị 4) | 9,995 | **9,017** | FPU `ifpu` |
+| r21 | 9,280 @ 9 (trung vị 4) | 8,781 | 9,241; trung vị 4 lần **9,379** | FPU `ifpu` |
+
+- **Nhiễu place @ 5 ns (r21, 4 lần):** 9,209 / 9,241 / 9,518 / 9,840 ns, dao động 0,631 ns, ngang 9 ns (0,46–0,87 ns). Trung
+  vị 9,379 ns, không tốt hơn trung vị ở 9 ns (9,280). Ép 5 ns **không giảm nhiễu và không làm place tốt lên**; thời gian
+  (place 9,6–10,2 phút, synth 4,5, floorplan 1,3) và RAM đỉnh (4,36 GB) bằng ở 9/10 ns.
+- **Floorplan @ 5 ns không xếp hạng đúng:** chỉ tách baseline khỏi các bản đã tối ưu. r5 floorplan nhanh nhất (8,64 ns) mà
+  place chậm hơn r8, r16, r21; r16 → r21 floorplan +1,21 ns, place −0,22 ns (một lần). Từ r8 đường găng floorplan là chân
+  enable `DE` của L2 `sourceD` (fan-out lớn chưa buffer; floorplan chưa `repair_design`, place mới làm). → **Bỏ A/B cả SoC
+  tới floorplan.**
+- **Place @ 5 ns giữ thứ tự** baseline < r5 < r8 < {r16, r21}; r16 (một lần, 9,017) và r21 (trung vị 9,379) cách nhau dưới
+  nhiễu một lần đo, không phải ngược thứ tự.
+- Đường găng place của bản tốt nhất giờ ở FPU `ifpu` (`in_pipe_b` → `io_out_pipe_b_data`), sau đó L2 (−3,3..−4,4) và `dfma`.
+- place r21 chỉ 3,5 phút: `make` đi tiếp từ thư mục variant mà `cal-5ns-2` đang place dở (cùng variant, cùng RTL). Số khớp
+  biến thể `density-` (9,209) nên coi là hợp lệ.
 
 ## Hiệu chỉnh place với route (`route_check.py`, duyệt 16/11/2026)
 

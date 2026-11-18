@@ -195,6 +195,26 @@ còn lại chủ yếu là chập dây trên **met4/met5** (12 091/12 605) giữ
 nghẽn: dây bị đẩy lên lớp trên đụng dải PDN quanh macro. Đây là việc của floorplan/PDN (M5); việc đo sau route được tạm
 ngưng, loop tiếp tục tối ưu theo place.
 
+### 5.3. Hiệu chỉnh ở chu kỳ ép 5 ns
+
+Câu hỏi: ép ràng buộc chặt (5 ns) có làm phép đo phân biệt tốt hơn, và floorplan ở 5 ns có dùng làm phép thử A/B nhanh
+cho cả SoC được không. Baseline và bản tốt nhất của từng job được đưa lại qua synth → floorplan → place ở 5 ns
+(`cal-5ns-4`), cộng 3 biến thể nhiễu cho r21. Chu kỳ đạt được (ns):
+
+| Điểm | Loop (bậc 10/9 ns) | Floorplan @ 5 | Place @ 5 |
+|---|---|---|---|
+| baseline | 15,285 | 12,480 | 14,997 |
+| r5 | 11,513 | 8,643 | 10,582 |
+| r8 | 10,389 | 10,151 | 10,051 |
+| r16 | 9,649 (trung vị) | 9,995 | 9,017 |
+| r21 | 9,280 (trung vị) | 8,781 | 9,379 (trung vị 4 lần) |
+
+Hai kết luận. (1) Nhiễu place của cùng RTL ở 5 ns là 0,631 ns qua 4 lần, ngang với 9 ns (0,46–0,87 ns), và trung vị của
+r21 không tốt hơn. Ràng buộc chặt không làm thước đo sắc hơn. (2) Floorplan ở 5 ns chỉ tách được baseline khỏi các bản đã
+tối ưu, còn giữa các bản đã tối ưu thì đảo thứ tự (r5 nhanh nhất ở floorplan nhưng chậm nhất ở place). Nguyên nhân có thể
+là ở floorplan các net fan-out lớn chưa được buffer, nên patch tạo fan-out lớn bị phạt dù place sửa được. Vì vậy phép thử
+A/B nhanh có ý nghĩa phải đi tới place (khoảng 16 phút cho cả SoC), và một lần place vẫn mang nhiễu khoảng 0,6 ns.
+
 ## 6. Thảo luận
 
 1. **Bão hoà của bước đo trung gian.** Floorplan và place đều có bước sửa timing dừng khi slack ≥ 0. Khi thiết kế đã gần
@@ -225,7 +245,7 @@ ngưng, loop tiếp tục tối ưu theo place.
 | `m4-d`: luật đo lặp ở 9 ns | xong: nhận r16, 103,64 MHz (trung vị), chưa đạt 9 ns |
 | Công cụ A/B cho agent (mục 4.4) | chạy thật ở `m4-e`, không lỗi hạ tầng |
 | `m4-e`: đi tiếp từ `m4-d`, có A/B | xong: nhận r21, 107,76 MHz (trung vị), chưa đạt 9 ns |
-| `cal-5ns`: baseline + bản tốt nhất ở 5 ns (ép loop ở 5 ns? A/B cả SoC tới floorplan?) | chờ chạy, trước `m4-f` |
+| `cal-5ns`: baseline + bản tốt nhất ở 5 ns (ép loop ở 5 ns? A/B cả SoC tới floorplan?) | xong (mục 5.3): nhiễu place @ 5 ns ngang 9 ns, floorplan không xếp hạng đúng |
 | `m4-f`: đi tiếp từ `m4-e` | chờ chạy |
 | `route-r8b`: route với `-allow_congestion` | dừng sau ~7 giờ, còn 12 705 vi phạm DRC: cần sửa floorplan trước |
 | Xử lý nghẽn quanh `cc_banks` (halo/kênh macro, chân fakeram, `CORE_UTILIZATION`) | đề xuất cho M5 |
@@ -240,4 +260,5 @@ ngưng, loop tiếp tục tối ưu theo place.
 | Baseline, nhiễu 10 ns | `~/soc-fmax-runs/m1`, `m2-noise` (`noise.json`) |
 | Các vòng loop | `~/soc-fmax-runs/m4-a` … `m4-e` (`history.md`, `results.csv`, `summary.md`, `runs/r*/ab.jsonl`) |
 | CTS/route | `~/soc-fmax-runs/route-r8/summary.md`, `route-r8b` (log `5_1_grt.log`, `5_2_route.log`), `orfs/congestion_summary.py` |
+| Hiệu chỉnh 5 ns | `~/soc-fmax-runs/cal-5ns-4/summary.md`, `results.csv` (điểm đầu đo ở `cal-5ns-2`, lấy từ cache) |
 | Patch được nhận | `~/soc-fmax-runs/m4-e/best.patch` (RTL hash `c5785e5bdb1e`; bản đạt 10 ns: `m4-b`, `2370465e8eb7`) |
