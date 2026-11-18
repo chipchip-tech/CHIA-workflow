@@ -63,17 +63,39 @@ def _point(d: dict) -> "P.Point":
     return P.Point(**{k: v for k, v in d.items() if k in keys})
 
 
+def load_baseline(hdir: Path) -> dict:
+    """Baseline: history.json không lưu khoá "baseline" (chỉ có trong ngữ cảnh agent), nên lấy RTL hash
+    từ "measured" (hash -> tên điểm) và số đo place đầu tiên của điểm baseline trong results.csv."""
+    import csv
+    h = json.loads((hdir / "history.json").read_text())
+    if "baseline" in h:
+        b = _point(h["baseline"])
+        f, _g, n = b.eff()
+        return {"name": "baseline", "run": "", "patch": "", "rtl_hash": b.rtl_hash,
+                "ref_period": b.period_ns, "ref_fmax": f, "ref_n": n}
+    hashes = [k for k, v in h.get("measured", {}).items() if v == "baseline"]
+    if len(hashes) != 1:
+        raise SystemExit(f"{hdir}/history.json: không tìm thấy đúng một RTL baseline trong measured ({hashes})")
+    ref_p, ref_f = None, None
+    rc = hdir / "results.csv"
+    if rc.exists():
+        with rc.open() as fh:
+            for r in csv.DictReader(fh):
+                if r.get("point") == "baseline" and r.get("stage") == "place" and r.get("fmax_mhz"):
+                    ref_p, ref_f = float(r["period_ns"]), float(r["fmax_mhz"])
+                    break
+    return {"name": "baseline", "run": "", "patch": "", "rtl_hash": hashes[0],
+            "ref_period": ref_p, "ref_fmax": ref_f, "ref_n": 1}
+
+
 def load_points(a) -> list[dict]:
     """[{name, run, patch, rtl_hash, ref_period, ref_fmax, ref_n}] theo thứ tự đo."""
     root = Path(os.path.expanduser(a.out_dir))
     pts, seen = [], set()
     if not a.no_baseline:
-        h0 = json.loads((root / a.runs.split(",")[0].strip() / "history.json").read_text())
-        b = _point(h0["baseline"])
-        f, _g, n = b.eff()
-        pts.append({"name": "baseline", "run": "", "patch": "", "rtl_hash": b.rtl_hash,
-                    "ref_period": b.period_ns, "ref_fmax": f, "ref_n": n})
-        seen.add(b.rtl_hash)
+        b = load_baseline(root / a.runs.split(",")[0].strip())
+        pts.append(b)
+        seen.add(b["rtl_hash"])
     for run in [x.strip() for x in a.runs.split(",") if x.strip()]:
         hdir = root / run
         h = json.loads((hdir / "history.json").read_text())
