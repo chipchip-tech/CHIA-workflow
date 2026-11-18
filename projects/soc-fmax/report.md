@@ -1,6 +1,6 @@
 # Báo cáo: Tối ưu Fmax của SoC RISC-V trên sky130 bằng vòng lặp agent AI
 
-*Project `soc-fmax-sky130` · nhánh `project/soc-fmax-sky130` · cập nhật 17/11/2026 (sau `m4-d`, `route-r8`, `route-r8b`; thêm A/B cho agent, đang chờ `m4-e`)*
+*Project `soc-fmax-sky130` · nhánh `project/soc-fmax-sky130` · cập nhật 18/11/2026 (sau `m4-e`, lần đầu agent có A/B)*
 
 > Báo cáo này tóm tắt phương pháp và kết quả. Nhật ký kỹ thuật đầy đủ (lệnh chạy, lỗi đã gỡ, kiểm chứng bằng mock) nằm
 > trong `README.md` cùng thư mục. Mọi số liệu ở đây đều **đo thật** trên máy người dùng, trừ chỗ ghi rõ là chưa chạy thật.
@@ -124,6 +124,17 @@ slack theo họ endpoint. Thước đo này tất định và nhanh hơn place n
 dùng để agent tự lọc ý; luật nhận vẫn dựa trên place. Không dùng timing ngay sau synth: trong project này nó không đi theo
 place, và ở project trước (`rocket-fmax`) A/B bằng synth cho Fmax tăng 3 lần trong khi Fmax đo thật chỉ tăng 7,9 %.
 
+Ở `m4-e` (lần chạy thật đầu tiên), agent gọi `make verilog` 8 lần (bắt được 2 lỗi compile ngay trong phiên) và đo A/B 8
+lần; phiên agent dài 8–10 phút thay vì 2–5 phút. A/B giúp agent tránh nộp patch hỏng và nhắm đúng module, nhưng chưa đoán
+được kết quả place ở mức 0,4 ns: r23 rút đường `IntToFP` 1,96 ns trong A/B mà place lại kém hơn 0,43 ns, vì sau place các
+họ xấu nhất sát slack 0 và nằm rải trên nhiều khối, còn dao động của place (0,46–0,87 ns) lớn hơn phần lợi.
+
+**Fmax ở bước synth.** Cột synth của ORFS cho 52,84 MHz ở mọi vòng của `m4-e`, thấp hơn nhiều so với 140 MHz của
+`rocket-fmax` hay 107,7 MHz của `soc-fmax` cũ. Lý do là đo khác nhau: netlist ngay sau synth của ORFS chưa chèn buffer, nên
+một net lái hàng nghìn chân (vào mảng flop BTB) quyết định số đó; `rocket-fmax` chỉ đo tile, bỏ qua SRAM, không có buffer
+lẫn dây, và ép `abc` ở 6 ns; `soc-fmax` cũ đo cả SoC có buffer (`repair_design`) và dây ước lượng, nhưng SRAM 0 ns. Số so
+được với `soc-fmax` cũ là Fmax sau place của project này (trung vị 107,76 MHz, SRAM 1,5 ns).
+
 ## 5. Kết quả
 
 ### 5.1. Tiến trình Fmax
@@ -135,6 +146,7 @@ place, và ở project trước (`rocket-fmax`) A/B bằng synth cho Fmax tăng 
 | `m4-b` (5 vòng, 2,1 giờ) | + r6, r7, r8 | **101,98 MHz (+55,9 %)** | **+0,194 → đạt 10 ns** | +2,3 % | 1,0000 |
 | `m4-c` (5 vòng, 2,7 giờ) | không nhận (trong nhiễu) | r8 @ 9 ns: 96,26 (trung vị 98,96) | −1,389 @ 9 ns | | |
 | `m4-d` (5 vòng, 4,5 giờ, đo lặp) | + r16 | trung vị **103,64 MHz** @ 9 ns (+58 %) | −0,817 @ 9 ns (1 lần đo) | +6,6 % | 1,0000 |
+| `m4-e` (5 vòng, 3,2 giờ, A/B của agent) | + r21 | trung vị **107,76 MHz** @ 9 ns (+65 %) | −0,258 @ 9 ns (1 lần đo) | +5,9 % | 1,0000 |
 
 Các thay đổi agent đề xuất và được nhận:
 
@@ -147,6 +159,7 @@ Các thay đổi agent đề xuất và được nhận:
 | r7 | Core `IBuf` | Tách Shannon `inst0_valid` theo `imem.valid` trên đường `mem_wrong_npc` |
 | r8 | L2 `SourceD` | Tách Shannon theo `bs_wadr.ready` cho khối bypass |
 | r16 | L2 `ListBuffer`, FPU `dfma` | Thanh ghi giữ tag đầu mỗi hàng đợi (bỏ chuỗi đọc Mem nối tiếp); tích con A×B ở tầng preMul, cây CSA 3:2 viết tay |
+| r21 | L2 `SourceD`/`SourceC`/`Scheduler` | Tính sẵn phép so set/way cho từng MSHR, chỉ chọn 1 bit ở Scheduler; thanh ghi s2 nạp theo `s2_ready` để tín hiệu đến muộn rời khỏi chân enable |
 
 Đường găng dịch chuyển qua các vòng: `dfma` → `sfma` → `ifpu`/L2. Agent đã tìm đúng nút thắt kế tiếp sau mỗi lần sửa.
 Nó cũng biết gộp hai thay đổi nhỏ (r5) khi từng thay đổi riêng lẻ nằm trong nhiễu.
@@ -210,8 +223,9 @@ ngưng, loop tiếp tục tối ưu theo place.
 | Việc | Trạng thái |
 |---|---|
 | `m4-d`: luật đo lặp ở 9 ns | xong: nhận r16, 103,64 MHz (trung vị), chưa đạt 9 ns |
-| Công cụ A/B cho agent (mục 4.4) | mới thử trên mock |
-| `m4-e`: đi tiếp từ `m4-d`, có A/B | chờ chạy |
+| Công cụ A/B cho agent (mục 4.4) | chạy thật ở `m4-e`, không lỗi hạ tầng |
+| `m4-e`: đi tiếp từ `m4-d`, có A/B | xong: nhận r21, 107,76 MHz (trung vị), chưa đạt 9 ns |
+| `m4-f`: đi tiếp từ `m4-e` | chờ chạy |
 | `route-r8b`: route với `-allow_congestion` | dừng sau ~7 giờ, còn 12 705 vi phạm DRC: cần sửa floorplan trước |
 | Xử lý nghẽn quanh `cc_banks` (halo/kênh macro, chân fakeram, `CORE_UTILIZATION`) | đề xuất cho M5 |
 | Tiếp tục bậc 8 → 5 ns | M4 |
@@ -223,6 +237,6 @@ ngưng, loop tiếp tục tối ưu theo place.
 | Số liệu | Lấy từ |
 |---|---|
 | Baseline, nhiễu 10 ns | `~/soc-fmax-runs/m1`, `m2-noise` (`noise.json`) |
-| Các vòng loop | `~/soc-fmax-runs/m4-a`, `m4-b`, `m4-c`, `m4-d` (`history.md`, `results.csv`, `summary.md`) |
+| Các vòng loop | `~/soc-fmax-runs/m4-a` … `m4-e` (`history.md`, `results.csv`, `summary.md`, `runs/r*/ab.jsonl`) |
 | CTS/route | `~/soc-fmax-runs/route-r8/summary.md`, `route-r8b` (log `5_1_grt.log`, `5_2_route.log`), `orfs/congestion_summary.py` |
-| Patch được nhận | `~/soc-fmax-runs/m4-d/best.patch` (RTL hash `f0f3ab6946f1`; bản đạt 10 ns: `m4-b`, `2370465e8eb7`) |
+| Patch được nhận | `~/soc-fmax-runs/m4-e/best.patch` (RTL hash `c5785e5bdb1e`; bản đạt 10 ns: `m4-b`, `2370465e8eb7`) |
