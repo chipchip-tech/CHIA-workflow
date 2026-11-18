@@ -246,7 +246,7 @@ A/B nhanh có ý nghĩa phải đi tới place (khoảng 16 phút cho cả SoC),
 | Công cụ A/B cho agent (mục 4.4) | chạy thật ở `m4-e`, không lỗi hạ tầng |
 | `m4-e`: đi tiếp từ `m4-d`, có A/B | xong: nhận r21, 107,76 MHz (trung vị), chưa đạt 9 ns |
 | `cal-5ns`: baseline + bản tốt nhất ở 5 ns (ép loop ở 5 ns? A/B cả SoC tới floorplan?) | xong (mục 5.3): nhiễu place @ 5 ns ngang 9 ns, floorplan không xếp hạng đúng |
-| `m4-f`: đi tiếp từ `m4-e` | chờ chạy |
+| `m4-f`: đi tiếp từ `m4-e`, ép 5 ns, tắt A/B (bản so sánh r21: trung vị 9,379 ns @ 5 ns) | chờ chạy |
 | `route-r8b`: route với `-allow_congestion` | dừng sau ~7 giờ, còn 12 705 vi phạm DRC: cần sửa floorplan trước |
 | Xử lý nghẽn quanh `cc_banks` (halo/kênh macro, chân fakeram, `CORE_UTILIZATION`) | đề xuất cho M5 |
 | Tiếp tục bậc 8 → 5 ns | M4 |

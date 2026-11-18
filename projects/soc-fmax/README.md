@@ -289,10 +289,15 @@ cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-i
 cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-id m4-e --working-dir . -- python loop.py --run-name m4-e --noise-json ~/soc-fmax-runs/m2-noise/noise.json --history-from ~/soc-fmax-runs/m4-d --rounds 5
 ```
 
-Đi tiếp từ `m4-e` (bản so sánh r21, trung vị 107,76 MHz / 9,280 ns):
+Đi tiếp từ `m4-e`, **ép 5 ns, tắt A/B** (người dùng chọn 18/11/2026 sau `cal-5ns-4`): `--period-ns 5` bỏ qua các bậc 9 → 6
+ns (không bão hoà, không mất ~1 giờ đo lại mỗi lần xuống bậc); bậc 5 ns là bậc cuối nên đạt thì dừng (M5). Bản so sánh r21
+đo lại ở 5 ns và ngưỡng nhiễu mới (`--rung-noise measure`) lấy hết từ cache của `cal-5ns-4` (tag cache ORFS chỉ theo variant
+và bước; cùng RTL, chu kỳ, biến ORFS → cùng variant): trung vị 4 lần 106,62 MHz / 9,379 ns. Luật nhận không đổi (trung vị 4
+lần place tốt lên ≥ 0,367 ns). `--ab-runs 0`: A/B module không đoán được place ở mức 0,4 ns (`m4-e`), A/B cả SoC tới
+floorplan xếp hạng sai (`cal-5ns-4`).
 
 ```bash
-cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-id m4-f --working-dir . -- python loop.py --run-name m4-f --noise-json ~/soc-fmax-runs/m2-noise/noise.json --history-from ~/soc-fmax-runs/m4-e --rounds 5
+cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-id m4-f --working-dir . -- python loop.py --run-name m4-f --noise-json ~/soc-fmax-runs/m2-noise/noise.json --history-from ~/soc-fmax-runs/m4-e --period-ns 5 --ab-runs 0 --rounds 5
 ```
 
 **Kết quả `m4-a` (chạy thật 16/11/2026, 10 ns, sau khi chạy lại từ đầu: `m2-noise` cho lại đúng baseline 65,423 MHz và
