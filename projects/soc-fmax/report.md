@@ -225,6 +225,7 @@ ngưng, loop tiếp tục tối ưu theo place.
 | `m4-d`: luật đo lặp ở 9 ns | xong: nhận r16, 103,64 MHz (trung vị), chưa đạt 9 ns |
 | Công cụ A/B cho agent (mục 4.4) | chạy thật ở `m4-e`, không lỗi hạ tầng |
 | `m4-e`: đi tiếp từ `m4-d`, có A/B | xong: nhận r21, 107,76 MHz (trung vị), chưa đạt 9 ns |
+| `cal-5ns`: baseline + bản tốt nhất ở 5 ns (ép loop ở 5 ns? A/B cả SoC tới floorplan?) | chờ chạy, trước `m4-f` |
 | `m4-f`: đi tiếp từ `m4-e` | chờ chạy |
 | `route-r8b`: route với `-allow_congestion` | dừng sau ~7 giờ, còn 12 705 vi phạm DRC: cần sửa floorplan trước |
 | Xử lý nghẽn quanh `cc_banks` (halo/kênh macro, chân fakeram, `CORE_UTILIZATION`) | đề xuất cho M5 |

@@ -114,6 +114,7 @@ vvadd, mm, spmv), `minstret` của mọi benchmark bằng baseline; thêm `func_
 | `policy.py` | luật nhận/loại (place, ngưỡng theo ns chu kỳ đạt được), ngưỡng nhiễu (hàm thuần) |
 | `loop.py` | đợt N vòng: áp đầu chuỗi → agent đề xuất patch → build (lỗi thì agent sửa, tối đa `--fix-retries`) → `--phase sim`: gate + func → ứng viên vào `candidates.json`; `--phase asic` (mặc định): synth → floorplan → so đầu chuỗi → gate nhanh → cộng dồn; cuối đợt place + gate đủ bản cộng dồn, hỏng thì lùi → hoàn nguyên cây; `history.md`, `history.json`, `best.patch`, `results.csv`, log agent ở `runs/r<N>/`. Cuối job dọn ORFS, chỉ giữ bản tốt nhất. `--bypass empty,comment,broken,file:<patch>` thay agent |
 | `route_check.py` | hiệu chỉnh một lần: một patch qua place → `make cts` → `make route`, so Fmax/đường găng place với CTS (clock thật) và route (RC OpenRCX); không thuộc loop |
+| `cal_5ns.py` | hiệu chỉnh một lần: baseline và bản tốt nhất của từng job qua synth → floorplan → place ở chu kỳ ép 5 ns, cộng 3 biến thể nhiễu cho bản cuối; không thuộc loop |
 | `ab_tool.py` | công cụ A/B của agent (MCP `ab`, pha asic): `make verilog` bản sửa đang có trên khối chipyard (áp tạm rồi hoàn nguyên), ORFS synth + `2_1_floorplan` của một module (child vs parent) trên khối asic; xem mục **A/B của agent** |
 | `patchutil.py` | `split_patch` (tách patch theo submodule), dùng chung cho `loop.py` và `ab_tool.py` |
 | `agent.py` | agent Claude Code trên khối claude: chép `.scala` của các submodule được sửa từ mount Chipyard chỉ đọc sang `/tmp`, viết `TASK.md` + `context/` (báo cáo ORFS baseline, lịch sử, lỗi build), chạy `claude --print` (`ClaudeCodeLLM`, có timeout), diff bản chép ra patch |
@@ -472,6 +473,31 @@ cây sạch; `prune_ab` xoá thư mục `ab_*`; `config.mk` của module con có
 module. **Chưa chạy thật:** `make verilog` của Chipyard 1.15.0 trên khối chipyard (thời gian, thư mục `generated-src`), đích
 `2_1_floorplan` trong bản ORFS của image (bản cũ không có thì tự chạy cả `floorplan`), thời gian ORFS của module con,
 agent thật có dùng tool đúng cách không.
+
+## Hiệu chỉnh ở 5 ns (`cal_5ns.py`, duyệt 18/11/2026)
+
+Câu hỏi: nên ép cả loop ở 5 ns, và A/B của agent nên chạy ở đâu (một module như hiện tại, hay cả SoC tới floorplan @ 5 ns).
+Ở 9 ns floorplan bão hoà (111,12 MHz mọi vòng); ở 5 ns slack luôn âm nên có thể phân biệt được các bản. Người dùng chọn chỉ
+đo baseline và các bản tốt nhất để tiết kiệm thời gian.
+
+- Điểm (`--runs m4-a,m4-c,m4-d,m4-e`): baseline, r5, r8, r16, r21 (bản tốt nhất của từng job, `best.patch` cộng dồn, kiểm RTL
+  hash khớp `history.json`). Mỗi điểm: build/tách RTL (cache), ORFS synth → floorplan → place ở `--period-ns` (mặc định 5).
+  Rồi 3 biến thể nhiễu cho bản cuối (density ±0,01, `util+1`; `--noise-variants 0` để tắt). Bước lỗi không dừng job.
+- Mỗi điểm đo ở chu kỳ khác loop nên là variant ORFS mới, không phải đo lại cùng thiết lập. Cuối job chỉ giữ ORFS của bản cuối.
+- `summary.md`: bảng synth/floorplan/place @ 5 ns cạnh số loop (9/10 ns); cải thiện giữa hai điểm liên tiếp theo chu kỳ đạt
+  được (loop, floorplan, place); xếp hạng; nhiễu place @ 5 ns của bản cuối; thời gian và RAM.
+- **Hạn chế:** các bản tốt nhất cách nhau ≥ 0,37 ns nên xếp hạng gần như chắc khớp; phép thử chính là cặp r16 → r21 (0,369 ns ở
+  9 ns). Chưa trả lời được việc phân biệt hai ứng viên cách nhau 0,1–0,3 ns.
+- Cách đọc kết quả: floorplan @ 5 ns giữ đúng thứ tự và tỉ lệ cải thiện như place → A/B cả SoC tới floorplan @ 5 ns; nhiễu
+  place @ 5 ns nhỏ hơn ở 9 ns → chuyển loop sang ép 5 ns; không được cả hai → giữ nguyên, chuyển sang chỉnh floorplan/place.
+- Ước lượng: 8 lần ORFS × ~15 phút (synth phải chạy lại vì `ABC_CLOCK_PERIOD` đổi) ≈ 2 giờ, nhiều hơn nếu ép 5 ns làm place lâu.
+
+```bash
+cd ~/CHIA-workflow/projects/soc-fmax && chia job submit --no-wait --submission-id cal-5ns --working-dir . -- python cal_5ns.py --run-name cal-5ns
+```
+
+**Kiểm chứng (18/11/2026):** mới `py_compile` và chạy `load_points`/`summary_md` trên `history.json` giả trong sandbox; chưa
+chạy trên cluster.
 
 ## Hiệu chỉnh place với route (`route_check.py`, duyệt 16/11/2026)
 
