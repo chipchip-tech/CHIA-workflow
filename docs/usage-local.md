@@ -357,9 +357,13 @@ def run_test(...):
 ```
 
 ```bash
-chia viz-profile /tmp/chia_profiles/<file>.jsonl --format html     # timeline tương tác
-chia viz-profile /tmp/chia_profiles/<file>.jsonl --format table    # CSV thời gian theo hàm
+chia viz-profile /tmp/chia_profiles/ChiaProfileCollector.log --format html     # timeline tương tác
+chia viz-profile /tmp/chia_profiles/ChiaProfileCollector.log --format table    # CSV thời gian theo hàm
 ```
+
+File log tên `ChiaProfileCollector.log` (nội dung là JSONL), bản HTML ghi cạnh nó thành
+`ChiaProfileCollector_profile.html` (kiểm chứng 20/11/2026, chialoops 2.0.1). Gọi `stop_collector()` ở cuối driver để sự
+kiện cuối kịp ghi vào log.
 
 ## 10. Loop mẫu: agent sửa RTL có phản hồi
 

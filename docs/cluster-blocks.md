@@ -77,9 +77,9 @@ chạy song song trong container verilator (mặc định 1). `ASIC_MEM=20g` đ�
 `12g`; flow quá giới hạn thì container bị OOM-kill, không ảnh hưởng máy). Chipyard khác chỗ
 mặc định (`~/tools/chipyard`) thì đặt `CHIPYARD_FORK=/đường/dẫn/tuyệt/đối`; ORFS khác chỗ thì `ORFS_DIR`.
 
-**Thư mục làm việc chung `WORK_DIR`** (mặc định `~/chia_demo`, thêm 20/11/2026, **chưa chạy thật**): script tạo thư mục
+**Thư mục làm việc chung `WORK_DIR`** (mặc định `~/chia_demo`, thêm và kiểm chứng 20/11/2026: khối chipyard, verilator, claude ghi được, job `demo-alu` build ở chipyard rồi chạy ở verilator qua thư mục này): script tạo thư mục
 nếu chưa có và mount nó **cùng đường dẫn thật** (`/var/home/...`) vào cả 5 khối, ghi được (khối `claude` cũng ghi được
-ở đây, khác với Chipyard chỉ đọc). Loop ghi file lớn (VCD, bitstream, GDS, báo cáo) và file agent sửa vào đây, vì
+ở đây, khác với Chipyard chỉ đọc). Lưu ý: tạo lại container (`--down` rồi bật lại) mới có mount mới; `chia up` gặp container cũ đang chạy thì dùng lại nó. Loop ghi file lớn (VCD, bitstream, GDS, báo cáo) và file agent sửa vào đây, vì
 `--working-dir` chỉ chép code vào mỗi container dưới dạng bản tạm. Đổi chỗ bằng `WORK_DIR=/đường/dẫn`. Script kiểm
 trước: Chipyard có `env.sh`, Vivado có `settings64.sh`, image `chia-orfs` đã build, Claude đã đăng nhập.
 
