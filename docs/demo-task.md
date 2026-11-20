@@ -175,4 +175,4 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
 
 1. **Board cụ thể** (hãng, part). Có board mới chốt được nhánh FPGA.
 2. **Lõi CPU cho Demo 2:** đề xuất PicoRV32, chốt khi bắt đầu Demo 2.
-3. **RTL cho Demo 1:** bản mẫu `NoCG_alu.v`, `CG_alu.v`, `icg_sim.v` đang chờ người dùng duyệt.
+3. **RTL cho Demo 1:** `NoCG_alu.v`, `CG_alu.v`, `icg_sim.v` đã duyệt; testbench bước Sim ở `projects/demo-alu/sim/` (`tb_alu.v`, `run_sim.sh`).
