@@ -1,6 +1,5 @@
-// tb_alu.v - testbench tự kiểm tra cho NoCG_alu / CG_alu (bước Sim của Demo 1, docs/demo-task.md).
+// tb_NoCG_alu.v - testbench tự kiểm tra cho NoCG_alu (bước Sim của demo NoCG, docs/demo-task.md).
 //
-// Chọn DUT lúc biên dịch: +define+DUT=NoCG_alu hoặc +define+DUT=CG_alu (mặc định NoCG_alu).
 // Plusargs lúc chạy (đều có mặc định):
 //   +seed=<n>     hạt giống bộ sinh ngẫu nhiên (xorshift32, giống nhau trên mọi simulator)   mặc định 1
 //   +cycles=<n>   số chu kỳ của phần ngẫu nhiên                                              mặc định 20000
@@ -13,7 +12,7 @@
 //   3. Giữ giá trị: khi valid=0, y/zero/carry không đổi.
 //      Thêm kiểm tra hộp trắng: khi en=0, thanh ghi vào (dut.a_q, b_q, op_q) không đổi. Lỗi này KHÔNG lộ ra
 //      ở cổng ra (tầng ra chỉ chốt một chu kỳ sau khi nạp), nhưng làm ALU tổ hợp chuyển mạch vô ích khi rảnh,
-//      tức là mất ý nghĩa của enable/clock gating. Hai biến thể phải giữ cùng tên thanh ghi bên trong.
+//      tức là mất ý nghĩa của enable.
 //   4. Ngẫu nhiên: op/a/b ngẫu nhiên, en theo en_pct.
 // Mỗi kết quả (valid=1) so với mô hình tham chiếu trong testbench; số kết quả phải bằng số phép đã gửi.
 //
@@ -24,12 +23,7 @@
 /* verilator lint_off BLKSEQ */
 /* verilator lint_off SYNCASYNCNET */
 
-`ifndef DUT
-`define DUT NoCG_alu
-`endif
-`define STR(x) `"x`"
-
-module tb_alu;
+module tb_NoCG_alu;
     localparam W = 8;
     localparam QN = 16;               // độ sâu hàng đợi kết quả chờ (pipeline chỉ cần 2)
 
@@ -41,8 +35,8 @@ module tb_alu;
     wire [W-1:0] y;
     wire         zero, carry, valid;
 
-    `DUT dut (.clk(clk), .rst_n(rst_n), .en(en), .op(op), .a(a), .b(b),
-              .y(y), .zero(zero), .carry(carry), .valid(valid));
+    NoCG_alu dut (.clk(clk), .rst_n(rst_n), .en(en), .op(op), .a(a), .b(b),
+                  .y(y), .zero(zero), .carry(carry), .valid(valid));
 
     always #5 clk = ~clk;             // 100 MHz danh nghĩa, chỉ để đọc waveform
 
@@ -165,7 +159,7 @@ module tb_alu;
         if (!$value$plusargs("en_pct=%d", en_pct)) en_pct = 30;
         if ($value$plusargs("vcd=%s", vcd_file)) begin
             $dumpfile(vcd_file);
-            $dumpvars(0, tb_alu);
+            $dumpvars(0, tb_NoCG_alu);
         end
         rng = (seed == 0) ? 32'h1 : seed;
         edge_v[0] = 8'h00; edge_v[1] = 8'h01; edge_v[2] = 8'h7F; edge_v[3] = 8'h80; edge_v[4] = 8'hFF;
@@ -206,8 +200,8 @@ module tb_alu;
             errors = errors + 1;
             $display("ERROR: còn %0d phép chưa có kết quả", q_tail - q_head);
         end
-        $display("RESULT: %s dut=%s seed=%0d cycles=%0d en_pct=%0d sent=%0d checked=%0d errors=%0d",
-                 (errors == 0) ? "PASS" : "FAIL", `STR(`DUT), seed, cyc, en_pct, sent, checked, errors);
+        $display("RESULT: %s dut=NoCG_alu seed=%0d cycles=%0d en_pct=%0d sent=%0d checked=%0d errors=%0d",
+                 (errors == 0) ? "PASS" : "FAIL", seed, cyc, en_pct, sent, checked, errors);
         $finish;
     end
 endmodule

@@ -47,15 +47,19 @@ Demo 1.
 
 ### Demo 1: mạch ALU, có và không có clock gating (làm trước)
 
-**Đầu vào:** hai file Verilog **đưa sẵn** (không do agent viết), để baseline có đầu vào cố định. Nằm ở
-`projects/demo-alu/rtl/`:
+Demo 1 gồm **hai demo riêng**, mỗi demo một thư mục, có file RTL, testbench, script và (sau này) constraint,
+config, kết quả riêng. Hai demo không dùng chung file nào.
 
-- ALU 8 bit, 8 phép tính (ADD, SUB, AND, OR, XOR, SHL, SHR, SLT): thanh ghi vào → ALU tổ hợp → thanh ghi ra, có
-  tín hiệu `en`, cờ `zero`, `carry`, `valid`.
-- Hai biến thể là **hai file riêng**, cùng giao diện cổng:
-  - **`NoCG_alu.v`** (module `NoCG_alu`): thanh ghi dùng clock enable thông thường (mux hồi tiếp).
-  - **`CG_alu.v`** (module `CG_alu`): clock của thanh ghi vào/ra đi qua module `icg`.
-- Module `icg` là wrapper nhỏ, mỗi nơi một bản (bản sim: `icg_sim.v`):
+| Demo | Thư mục | RTL | Mô tả |
+|---|---|---|---|
+| **NoCG** | `projects/demo-alu/NoCG/` | `rtl/NoCG_alu.v` | Thanh ghi dùng clock enable thông thường (mux hồi tiếp) |
+| **CG** | `projects/demo-alu/CG/` | `rtl/CG_alu.v` + `rtl/icg_sim.v` | Clock của thanh ghi vào/ra đi qua module `icg` |
+
+**Đầu vào:** RTL **đưa sẵn** (không do agent viết), để baseline có đầu vào cố định. Cả hai là ALU 8 bit, 8 phép
+tính (ADD, SUB, AND, OR, XOR, SHL, SHR, SLT): thanh ghi vào → ALU tổ hợp → thanh ghi ra, có `en`, cờ `zero`,
+`carry`, `valid`, cùng giao diện cổng.
+
+Demo CG có module `icg` là wrapper nhỏ, mỗi nơi một bản (bản sim: `icg_sim.v`):
 
   | Nơi chạy | Hiện thực ICG |
   |---|---|
@@ -66,12 +70,12 @@ Demo 1.
 **Flow:** CHIA chạy **nối tiếp** Sim → FPGA → ASIC. Bước sau chỉ chạy khi bước trước đạt gate.
 
 ```
-NoCG_alu.v / CG_alu.v (+ icg) ─► 1. Sim (verilator) ── PASS ──► 2. FPGA (vivado) ── OK ──► 3. ASIC (ORFS sky130hd)
+<demo>/rtl/*.v                ─► 1. Sim (verilator) ── PASS ──► 2. FPGA (vivado) ── OK ──► 3. ASIC (ORFS sky130hd)
                                    testbench, chạy test          synth, P&R, .bit          synth → floorplan → place
                                                                                              → CTS → route → .gds
 ```
 
-**Ba pha:**
+**Ba pha** (chạy riêng cho từng demo):
 
 ```
 Pha 1: BASELINE (không có agent)
@@ -84,7 +88,7 @@ Pha 2: AGENT (Claude trong CHIA)
                  │
                  ▼
 Pha 3: SO SÁNH
-  bảng baseline / agent theo từng bước (Sim, FPGA, ASIC), cho cả NoCG và CG
+  bảng baseline / agent theo từng bước (Sim, FPGA, ASIC), mỗi demo một bảng
 ```
 
 **Từng bước:**
@@ -92,7 +96,7 @@ Pha 3: SO SÁNH
 | | Sim | FPGA | ASIC |
 |---|---|---|---|
 | Các bước | Verilator build → chạy test | Vivado synth → P&R → bitstream | Yosys → floorplan → place → CTS → route → GDS |
-| Gate (đúng) | Output khớp kết quả mong đợi, cả 2 biến thể | Có `.bit`, WNS ≥ 0 | Có `.gds`, timing đạt, không lỗi |
+| Gate (đúng) | Output khớp mô hình tham chiếu (`RESULT: PASS`) | Có `.bit`, WNS ≥ 0 | Có `.gds`, timing đạt, không lỗi |
 | Sản phẩm (đủ) | Log `PASS` + waveform | `.bit` + báo cáo tài nguyên | `.gds` + ảnh layout + báo cáo diện tích |
 | Thước đo | Đúng/sai; số cycle hoặc độ phủ test nếu có | LUT, FF, WNS/Fmax, công suất | Diện tích, số cell, WNS/Fmax, công suất |
 | Khối cluster | `verilator` | `vivado` | `asic` |
@@ -105,18 +109,18 @@ Agent Claude chạy ở khối `claude`. Ngoài đánh giá và tối ưu, agent
   agent được phép đổi).
 - Mọi thay đổi của agent phải qua lại gate Sim. Sai chức năng thì loại.
 - Chạy baseline **hai lần** để đo nhiễu (P&R thường dao động khoảng 1–2 %). Chỉ tính là cải thiện khi vượt mức nhiễu.
-- Mỗi biến thể (NoCG, CG) có baseline và phần agent riêng.
+- Mỗi demo (NoCG, CG) có baseline và phần agent riêng.
 - "Không cải thiện" vẫn là kết quả hợp lệ và vẫn ghi vào slide. ALU nhỏ nên có thể ít chỗ để tối ưu.
 
 **Slide:**
 - Mở đầu: cluster CHIA và các khối.
 - 3 slide chính: **Sim**, **FPGA**, **ASIC**. Cùng một bố cục: sơ đồ flow; agent đánh giá gì và đã đổi gì; sản phẩm
-  cuối (`PASS`, `.bit`, ảnh GDS); bảng baseline / agent cho NoCG và CG.
+  cuối (`PASS`, `.bit`, ảnh GDS); bảng baseline / agent của từng demo; cuối cùng có thể đặt NoCG và CG cạnh nhau.
 - Kết: bước tiếp theo (Demo 2).
 
 **Rủi ro cần kiểm tra sớm:**
-- CTS của OpenROAD có xử lý được cell ICG trên cây clock không. Nếu không, ASIC chạy NoCG trước để chứng minh flow,
-  CG xử lý sau.
+- CTS của OpenROAD có xử lý được cell ICG trên cây clock không. Nếu không, làm demo NoCG trước để chứng minh flow,
+  demo CG xử lý sau.
 - Loop "agent Claude ghi file rồi CHIA build/kiểm tra" chưa từng chạy: smoke test đầu tiên.
 - Nếu chưa có board, nhánh FPGA dừng ở bitstream, vẫn đủ chứng minh flow.
 
@@ -175,4 +179,4 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
 
 1. **Board cụ thể** (hãng, part). Có board mới chốt được nhánh FPGA.
 2. **Lõi CPU cho Demo 2:** đề xuất PicoRV32, chốt khi bắt đầu Demo 2.
-3. **RTL cho Demo 1:** `NoCG_alu.v`, `CG_alu.v`, `icg_sim.v` đã duyệt; testbench bước Sim ở `projects/demo-alu/sim/` (`tb_alu.v`, `run_sim.sh`).
+3. **RTL cho Demo 1:** đã duyệt. Bước Sim mỗi demo ở `projects/demo-alu/<NoCG|CG>/sim/` (`tb_<module>.v`, `run_sim.sh`).

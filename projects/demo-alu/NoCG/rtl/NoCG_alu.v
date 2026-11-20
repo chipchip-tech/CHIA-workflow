@@ -1,8 +1,6 @@
-// CG_alu.v - ALU 8 bit, CÓ clock gating (Demo 1, docs/demo-task.md).
+// NoCG_alu.v - ALU 8 bit, KHÔNG clock gating (demo NoCG, docs/demo-task.md).
 //
-// Thanh ghi vào/ra nhận clock đã gate qua module icg (gclk_in theo en, gclk_out theo en_q).
-// Module icg có bản riêng cho từng nơi: icg_sim.v (mô phỏng), bản FPGA (BUFGCE), bản ASIC
-// (sky130_fd_sc_hd__dlclkp). en_q và valid luôn chạy clk gốc.
+// Thanh ghi dùng clock enable (if (en) ...): tool tổng hợp thành mux hồi tiếp, mọi flop chạy clk liên tục.
 //
 // Pipeline 2 tầng:
 //   chu kỳ t   : en=1 -> chốt a, b, op vào thanh ghi vào
@@ -18,9 +16,9 @@
 //   111 SLT  y = (a < b) có dấu ? 1 : 0
 // zero = (y == 0). carry = 0 với các op ngoài ADD/SUB.
 //
-// NoCG_alu.v và CG_alu.v phải cho output giống hệt nhau ở mọi chu kỳ.
+// Output phải khớp mô hình tham chiếu trong ../sim/tb_NoCG_alu.v.
 
-module CG_alu #(
+module NoCG_alu #(
     parameter W = 8
 ) (
     input  wire         clk,
@@ -48,18 +46,13 @@ module CG_alu #(
         if (!rst_n) valid <= 1'b0;
         else        valid <= en_q;
 
-    // ---------------- Clock đã gate cho hai tầng ----------------
-    wire gclk_in, gclk_out;
-    icg u_icg_in  (.clk(clk), .en(en),   .test_en(1'b0), .gclk(gclk_in));
-    icg u_icg_out (.clk(clk), .en(en_q), .test_en(1'b0), .gclk(gclk_out));
-
     // ---------------- Tầng vào ----------------
     reg [W-1:0] a_q, b_q;
     reg [2:0]   op_q;
 
-    always @(posedge gclk_in or negedge rst_n)
-        if (!rst_n) begin a_q <= 0; b_q <= 0; op_q <= 3'b0; end
-        else        begin a_q <= a; b_q <= b; op_q <= op;   end
+    always @(posedge clk or negedge rst_n)
+        if (!rst_n)  begin a_q <= 0; b_q <= 0; op_q <= 3'b0; end
+        else if (en) begin a_q <= a; b_q <= b; op_q <= op;   end
 
     // ---------------- ALU tổ hợp ----------------
     reg [W-1:0] r;
@@ -81,8 +74,8 @@ module CG_alu #(
     end
 
     // ---------------- Tầng ra ----------------
-    always @(posedge gclk_out or negedge rst_n)
-        if (!rst_n) begin y <= 0; zero <= 1'b0; carry <= 1'b0; end
-        else        begin y <= r; zero <= (r == 0); carry <= c; end
+    always @(posedge clk or negedge rst_n)
+        if (!rst_n)    begin y <= 0; zero <= 1'b0; carry <= 1'b0; end
+        else if (en_q) begin y <= r; zero <= (r == 0); carry <= c; end
 
 endmodule
