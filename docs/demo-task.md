@@ -47,13 +47,15 @@ Demo 1.
 
 ### Demo 1: mạch ALU, có và không có clock gating (làm trước)
 
-**Đầu vào:** file Verilog `alu.v` **đưa sẵn** (không do agent viết), để baseline có một đầu vào cố định.
+**Đầu vào:** hai file Verilog **đưa sẵn** (không do agent viết), để baseline có đầu vào cố định. Nằm ở
+`projects/demo-alu/rtl/`:
 
-- ALU 8 bit: thanh ghi vào → ALU tổ hợp (cộng, trừ, AND, OR, XOR) → thanh ghi ra, có tín hiệu `en`.
-- Hai biến thể chọn bằng `define`:
-  - **NoCG**: thanh ghi dùng clock enable thông thường (mux hồi tiếp).
-  - **CG**: clock của thanh ghi đi qua một module ICG.
-- Lõi ALU dùng chung. Riêng module ICG là wrapper nhỏ `icg.v`, mỗi nơi một bản:
+- ALU 8 bit, 8 phép tính (ADD, SUB, AND, OR, XOR, SHL, SHR, SLT): thanh ghi vào → ALU tổ hợp → thanh ghi ra, có
+  tín hiệu `en`, cờ `zero`, `carry`, `valid`.
+- Hai biến thể là **hai file riêng**, cùng giao diện cổng:
+  - **`NoCG_alu.v`** (module `NoCG_alu`): thanh ghi dùng clock enable thông thường (mux hồi tiếp).
+  - **`CG_alu.v`** (module `CG_alu`): clock của thanh ghi vào/ra đi qua module `icg`.
+- Module `icg` là wrapper nhỏ, mỗi nơi một bản (bản sim: `icg_sim.v`):
 
   | Nơi chạy | Hiện thực ICG |
   |---|---|
@@ -64,7 +66,7 @@ Demo 1.
 **Flow:** CHIA chạy **nối tiếp** Sim → FPGA → ASIC. Bước sau chỉ chạy khi bước trước đạt gate.
 
 ```
-alu.v (+ icg.v) ─► 1. Sim (verilator) ── PASS ──► 2. FPGA (vivado) ── OK ──► 3. ASIC (ORFS sky130hd)
+NoCG_alu.v / CG_alu.v (+ icg) ─► 1. Sim (verilator) ── PASS ──► 2. FPGA (vivado) ── OK ──► 3. ASIC (ORFS sky130hd)
                       testbench, chạy test          synth, P&R, .bit          synth → floorplan → place
                                                                               → CTS → route → .gds
 ```
@@ -73,7 +75,7 @@ alu.v (+ icg.v) ─► 1. Sim (verilator) ── PASS ──► 2. FPGA (vivado)
 
 ```
 Pha 1: BASELINE (không có agent)
-  alu.v ─► Sim ─► FPGA ─► ASIC        flow cơ bản, thiết lập mặc định; lưu mọi số liệu và báo cáo
+  *_alu.v ─► Sim ─► FPGA ─► ASIC      flow cơ bản, thiết lập mặc định; lưu mọi số liệu và báo cáo
                  │
                  ▼
 Pha 2: AGENT (Claude trong CHIA)
@@ -99,7 +101,7 @@ Agent Claude chạy ở khối `claude`. Ngoài đánh giá và tối ưu, agent
 (testbench, `.xdc` và top cho board, `config.mk` cho ORFS) và sửa khi một bước fail.
 
 **Quy tắc so sánh công bằng:**
-- Cùng `alu.v` gốc, cùng phiên bản công cụ, cùng board/part và PDK, cùng chu kỳ clock mục tiêu (hoặc ghi rõ nếu
+- Cùng file RTL gốc, cùng phiên bản công cụ, cùng board/part và PDK, cùng chu kỳ clock mục tiêu (hoặc ghi rõ nếu
   agent được phép đổi).
 - Mọi thay đổi của agent phải qua lại gate Sim. Sai chức năng thì loại.
 - Chạy baseline **hai lần** để đo nhiễu (P&R thường dao động khoảng 1–2 %). Chỉ tính là cải thiện khi vượt mức nhiễu.
@@ -173,4 +175,4 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
 
 1. **Board cụ thể** (hãng, part). Có board mới chốt được nhánh FPGA.
 2. **Lõi CPU cho Demo 2:** đề xuất PicoRV32, chốt khi bắt đầu Demo 2.
-3. **`alu.v` cho Demo 1:** người dùng đưa sẵn.
+3. **RTL cho Demo 1:** bản mẫu `NoCG_alu.v`, `CG_alu.v`, `icg_sim.v` đang chờ người dùng duyệt.

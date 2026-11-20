@@ -1,15 +1,11 @@
-// alu.v - ALU 8 bit có thanh ghi vào/ra, dùng cho Demo 1 (docs/demo-task.md).
+// NoCG_alu.v - ALU 8 bit, KHÔNG clock gating (Demo 1, docs/demo-task.md).
+//
+// Thanh ghi dùng clock enable (if (en) ...): tool tổng hợp thành mux hồi tiếp, mọi flop chạy clk liên tục.
 //
 // Pipeline 2 tầng:
 //   chu kỳ t   : en=1 -> chốt a, b, op vào thanh ghi vào
-//   chu kỳ t+1 : en_q=1 -> chốt kết quả ALU tổ hợp vào thanh ghi ra (y, zero, carry)
+//   chu kỳ t+1 : en_q=1 -> chốt kết quả ALU tổ hợp vào thanh ghi ra (y, zero, carry), valid=1
 // Khi en=0 (en_q=0), thanh ghi tương ứng giữ nguyên giá trị.
-//
-// Hai biến thể, chọn lúc biên dịch:
-//   (mặc định) NoCG : thanh ghi dùng clock enable (mux hồi tiếp), mọi flop chạy clk liên tục.
-//   +define+USE_CG  : thanh ghi vào/ra nhận clock đã gate qua module icg (gclk_in, gclk_out).
-//                     Module icg có bản riêng cho sim / FPGA / ASIC (icg_sim.v, ...).
-// Hai biến thể phải cho output giống hệt nhau ở mọi chu kỳ.
 //
 // Mã op:
 //   000 ADD  y = a + b        carry = bit nhớ
@@ -19,8 +15,10 @@
 //   110 SHR  y = a >> b[2:0]  (logic)
 //   111 SLT  y = (a < b) có dấu ? 1 : 0
 // zero = (y == 0). carry = 0 với các op ngoài ADD/SUB.
+//
+// NoCG_alu.v và CG_alu.v phải cho output giống hệt nhau ở mọi chu kỳ.
 
-module alu #(
+module NoCG_alu #(
     parameter W = 8
 ) (
     input  wire         clk,
@@ -48,26 +46,13 @@ module alu #(
         if (!rst_n) valid <= 1'b0;
         else        valid <= en_q;
 
-    // ---------------- Clock cho hai tầng ----------------
-`ifdef USE_CG
-    wire gclk_in, gclk_out;
-    icg u_icg_in  (.clk(clk), .en(en),   .test_en(1'b0), .gclk(gclk_in));
-    icg u_icg_out (.clk(clk), .en(en_q), .test_en(1'b0), .gclk(gclk_out));
-`endif
-
     // ---------------- Tầng vào ----------------
     reg [W-1:0] a_q, b_q;
     reg [2:0]   op_q;
 
-`ifdef USE_CG
-    always @(posedge gclk_in or negedge rst_n)
-        if (!rst_n) begin a_q <= 0; b_q <= 0; op_q <= 3'b0; end
-        else        begin a_q <= a; b_q <= b; op_q <= op;   end
-`else
     always @(posedge clk or negedge rst_n)
         if (!rst_n)  begin a_q <= 0; b_q <= 0; op_q <= 3'b0; end
         else if (en) begin a_q <= a; b_q <= b; op_q <= op;   end
-`endif
 
     // ---------------- ALU tổ hợp ----------------
     reg [W-1:0] r;
@@ -89,14 +74,8 @@ module alu #(
     end
 
     // ---------------- Tầng ra ----------------
-`ifdef USE_CG
-    always @(posedge gclk_out or negedge rst_n)
-        if (!rst_n) begin y <= 0; zero <= 1'b0; carry <= 1'b0; end
-        else        begin y <= r; zero <= (r == 0); carry <= c; end
-`else
     always @(posedge clk or negedge rst_n)
         if (!rst_n)    begin y <= 0; zero <= 1'b0; carry <= 1'b0; end
         else if (en_q) begin y <= r; zero <= (r == 0); carry <= c; end
-`endif
 
 endmodule
