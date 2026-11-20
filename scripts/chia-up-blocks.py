@@ -7,6 +7,7 @@ Mặc định bật chipyard + verilator + claude. Tuỳ chọn:
   --no-claude   tắt khối claude
   --verilator-slots N   số slot verilator_run (mặc định 1): N sim chạy song song trong 1 container
   ASIC_MEM=20g  (biến môi trường) giới hạn RAM của container asic, mặc định 12g
+  WORK_DIR=...  (biến môi trường) thư mục làm việc chung của mọi khối, mặc định ~/chia_demo
   --dry-run     chỉ sinh cluster.gen.yaml và in ra, không `chia up`
 
 Chạy trong env chia_env:
@@ -31,6 +32,7 @@ DEFAULTS = {
     "VIVADO_VERSION": "2025.1",
     "JVM_CACHE": str(Path.home() / "chia_cache" / "jvm"),
     "ASIC_MEM": "12g",
+    "WORK_DIR": str(Path.home() / "chia_demo"),
 }
 
 
@@ -73,11 +75,12 @@ def main() -> None:
         os.environ.setdefault(k, v)
     # Bazzite: /home là symlink tới /var/home. setup-chipyard.sh dựng Chipyard theo đường dẫn
     # thật (/var/home/...), và env.sh/conda env ghi cứng đường dẫn đó, nên mount cũng phải dùng nó.
-    for k in ("CHIPYARD_FORK", "ORFS_DIR", "XILINX_DIR", "JVM_CACHE"):
+    for k in ("CHIPYARD_FORK", "ORFS_DIR", "XILINX_DIR", "JVM_CACHE", "WORK_DIR"):
         os.environ[k] = os.path.realpath(os.environ[k])
     # Tạo trước thư mục cache, nếu không docker tạo chúng với chủ root và container không ghi được.
     for sub in ("coursier", "sbt", "ivy2"):
         (Path(os.environ["JVM_CACHE"]) / sub).mkdir(parents=True, exist_ok=True)
+    Path(os.environ["WORK_DIR"]).mkdir(parents=True, exist_ok=True)
     if not os.environ.get("THIS_MACHINE"):
         os.environ["THIS_MACHINE"] = detect_ip() or fail("không dò được IP, hãy export THIS_MACHINE")
 
@@ -113,11 +116,11 @@ def main() -> None:
               f"# Khối bật: {', '.join(n for n, on in enabled.items() if on)}\n"
               f"# CHIPYARD_FORK={fork}  ORFS_DIR={os.environ['ORFS_DIR']}  VIVADO_VERSION={os.environ['VIVADO_VERSION']}"
               f"  JVM_CACHE={os.environ['JVM_CACHE']}\n"
-              f"# ASIC_MEM={os.environ['ASIC_MEM']}  verilator_run={args.verilator_slots}\n")
+              f"# ASIC_MEM={os.environ['ASIC_MEM']}  verilator_run={args.verilator_slots}  WORK_DIR={os.environ['WORK_DIR']}\n")
     body = yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True, width=1000)
     # CHIA không thay ${VAR} trong worker_setup_commands (chỉ trong run_options), nên tự thay
     # các biến của template ở đây. ${THIS_MACHINE}, ${USER} để CHIA thay như các config khác.
-    for k in ("CHIPYARD_FORK", "ORFS_DIR", "XILINX_DIR", "VIVADO_VERSION", "JVM_CACHE", "ASIC_MEM"):
+    for k in ("CHIPYARD_FORK", "ORFS_DIR", "XILINX_DIR", "VIVADO_VERSION", "JVM_CACHE", "ASIC_MEM", "WORK_DIR"):
         body = body.replace("${" + k + "}", os.environ[k])
     out = Path(args.out)
     out.write_text(header + body)

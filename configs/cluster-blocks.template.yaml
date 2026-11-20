@@ -17,6 +17,8 @@
 #   XILINX_DIR      thư mục cài Xilinx, mặc định ~/tools/Xilinx
 #   VIVADO_VERSION  thư mục phiên bản trong XILINX_DIR (ví dụ 2025.1)
 #   ASIC_MEM        giới hạn RAM của container asic (docker --memory), mặc định 12g
+#   WORK_DIR        thư mục làm việc chung, mount cùng đường dẫn thật vào MỌI khối (ghi được), mặc định
+#                   ~/chia_demo. Loop ghi file lớn (VCD, bitstream, GDS, báo cáo) và file agent sửa vào đây.
 #
 # Số slot verilator_run đặt bằng `chia-up-blocks.py --verilator-slots N` (mặc định 1).
 #
@@ -54,6 +56,7 @@ available_node_types:
                 - "-v ${JVM_CACHE}/coursier:/home/ray/.cache/coursier:z"
                 - "-v ${JVM_CACHE}/sbt:/home/ray/.sbt:z"
                 - "-v ${JVM_CACHE}/ivy2:/home/ray/.ivy2:z"
+                - "-v ${WORK_DIR}:${WORK_DIR}:z"
 
     # --- Khối verilator: chạy mô phỏng (nhận binary từ khối chipyard). ---
     verilator:
@@ -67,6 +70,7 @@ available_node_types:
             run_options:
                 - --ulimit nofile=65536:65536
                 - --shm-size=10.24gb
+                - "-v ${WORK_DIR}:${WORK_DIR}:z"
 
     # --- Khối claude: agent Claude Code đăng nhập trên host. ---
     # Trước lần đầu: chạy `claude` trên host, rồi `cp ~/.claude.json ~/.claude/.claude.json`.
@@ -86,6 +90,7 @@ available_node_types:
                 # label=disable thay cho relabel (:z) cả cây Chipyard.
                 - --security-opt label=disable
                 - "-v ${CHIPYARD_FORK}:${CHIPYARD_FORK}:ro"
+                - "-v ${WORK_DIR}:${WORK_DIR}"
             run_setup_commands:
                 - echo "user:x:$(id -u):$(id -g)::/home/ray:/bin/bash" >> /etc/passwd
                 - cp /home/ray/.claude/.claude.json /home/ray/.claude.json
@@ -116,6 +121,7 @@ available_node_types:
                 - "-v ${JVM_CACHE}/coursier:/home/ray/.cache/coursier"
                 - "-v ${JVM_CACHE}/sbt:/home/ray/.sbt"
                 - "-v ${JVM_CACHE}/ivy2:/home/ray/.ivy2"
+                - "-v ${WORK_DIR}:${WORK_DIR}"
 
     # --- Khối asic (tuỳ chọn): OpenROAD-flow-scripts. Image tự build: docker/orfs-ray.Dockerfile. ---
     # ORFS trên host (sửa tay được) mount đè lên /OpenROAD-flow-scripts của image.
@@ -138,6 +144,7 @@ available_node_types:
                 - "-e HOME=/tmp"
                 - "-v ${ORFS_DIR}:/OpenROAD-flow-scripts:z"
                 - "-v ${CHIPYARD_FORK}:${CHIPYARD_FORK}:z"
+                - "-v ${WORK_DIR}:${WORK_DIR}:z"
 
 head_env_commands: ["source ~/.bashrc && conda activate chia_env"]
 head_setup_commands: ["source ~/.bashrc && conda activate chia_env"]

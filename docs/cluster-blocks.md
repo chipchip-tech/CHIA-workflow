@@ -75,7 +75,12 @@ python scripts/chia-up-blocks.py
 Thêm `--fpga`, `--asic`, `--no-claude` tuỳ nhu cầu; `--dry-run` để chỉ xem config. `--verilator-slots N` cho N sim
 chạy song song trong container verilator (mặc định 1). `ASIC_MEM=20g` đổi giới hạn RAM của container asic (mặc định
 `12g`; flow quá giới hạn thì container bị OOM-kill, không ảnh hưởng máy). Chipyard khác chỗ
-mặc định (`~/tools/chipyard`) thì đặt `CHIPYARD_FORK=/đường/dẫn/tuyệt/đối`; ORFS khác chỗ thì `ORFS_DIR`. Script kiểm
+mặc định (`~/tools/chipyard`) thì đặt `CHIPYARD_FORK=/đường/dẫn/tuyệt/đối`; ORFS khác chỗ thì `ORFS_DIR`.
+
+**Thư mục làm việc chung `WORK_DIR`** (mặc định `~/chia_demo`, thêm 20/11/2026, **chưa chạy thật**): script tạo thư mục
+nếu chưa có và mount nó **cùng đường dẫn thật** (`/var/home/...`) vào cả 5 khối, ghi được (khối `claude` cũng ghi được
+ở đây, khác với Chipyard chỉ đọc). Loop ghi file lớn (VCD, bitstream, GDS, báo cáo) và file agent sửa vào đây, vì
+`--working-dir` chỉ chép code vào mỗi container dưới dạng bản tạm. Đổi chỗ bằng `WORK_DIR=/đường/dẫn`. Script kiểm
 trước: Chipyard có `env.sh`, Vivado có `settings64.sh`, image `chia-orfs` đã build, Claude đã đăng nhập.
 
 Tắt cluster (từ `~/CHIA-workflow`):
