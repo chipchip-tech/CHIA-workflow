@@ -64,7 +64,7 @@ Demo CG có module `icg` là wrapper nhỏ, mỗi nơi một bản (bản sim: `
   | Nơi chạy | Hiện thực ICG |
   |---|---|
   | Sim | Mô hình hành vi (latch + AND) |
-  | FPGA | `BUFGCE` (trên FPGA không gate clock bằng logic: tạo skew, timing sai) |
+  | FPGA | Baseline dùng **nguyên** `icg_sim.v` (Vivado ra latch + LUT trên đường clock, có cảnh báo gated clock). Đổi sang `BUFGCE` là việc của agent ở pha 2 |
   | ASIC | Cell `sky130_fd_sc_hd__dlclkp` của sky130hd |
 
 **Flow:** CHIA chạy **nối tiếp** Sim → FPGA → ASIC. Bước sau chỉ chạy khi bước trước đạt gate.
@@ -95,11 +95,15 @@ Pha 3: SO SÁNH
 
 | | Sim | FPGA | ASIC |
 |---|---|---|---|
-| Các bước | Verilator build → chạy test | Vivado synth → P&R → bitstream | Yosys → floorplan → place → CTS → route → GDS |
+| Các bước | Verilator build (khối chipyard) → chạy test (khối verilator) | Vivado synth → P&R → bitstream, qua vỏ `fpga/fpga_top.v` | Yosys → floorplan → place → CTS → route → GDS |
 | Gate (đúng) | Output khớp mô hình tham chiếu (`RESULT: PASS`) | Có `.bit`, WNS ≥ 0 | Có `.gds`, timing đạt, không lỗi |
 | Sản phẩm (đủ) | Log `PASS` + waveform | `.bit` + báo cáo tài nguyên | `.gds` + ảnh layout + báo cáo diện tích |
 | Thước đo | Đúng/sai; số cycle hoặc độ phủ test nếu có | LUT, FF, WNS/Fmax, công suất | Diện tích, số cell, WNS/Fmax, công suất |
 | Khối cluster | `verilator` | `vivado` | `asic` |
+
+**Vỏ FPGA** (`<demo>/fpga/fpga_top.v`): ALU có khoảng 30 cổng nên vỏ tự sinh kích thích (LFSR, rảnh 70 %) và tự kiểm tra
+(MISR so với chữ ký tính bằng `golden_sig.py`), ra ngoài chỉ có `clk`, nút reset, 4 LED (nhịp, PASS, FAIL, đã xong khung
+đầu). Đổi board chỉ sửa `arty_a7_100t.xdc`. Chưa có board thì dùng part `xc7a100tcsg324-1`, clock 100 MHz.
 
 Agent Claude chạy ở khối `claude`. Ngoài đánh giá và tối ưu, agent có thể viết những thứ phụ của từng bước
 (testbench, `.xdc` và top cho board, `config.mk` cho ORFS) và sửa khi một bước fail.
@@ -180,4 +184,5 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
 1. **Board cụ thể** (hãng, part). Có board mới chốt được nhánh FPGA.
 2. **Lõi CPU cho Demo 2:** đề xuất PicoRV32, chốt khi bắt đầu Demo 2.
 3. **RTL cho Demo 1:** đã duyệt. Bước Sim mỗi demo ở `projects/demo-alu/<NoCG|CG>/sim/` (`tb_<module>.v`, `run_sim.sh`).
-   Baseline bước Sim qua CHIA (`baseline.py`) đã chạy thật 20/11/2026, cả hai demo `RESULT: PASS`. Tiếp: bước FPGA.
+   Baseline bước Sim qua CHIA (`baseline.py`) đã chạy thật 20/11/2026, cả hai demo `RESULT: PASS`. Bước FPGA đã viết
+   (`--stages sim,fpga`), chưa chạy với Vivado thật.
