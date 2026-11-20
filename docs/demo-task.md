@@ -34,19 +34,101 @@ Spec ─► RTL SoC ─► Sim RTL + phần mềm ─► FPGA (Vivado): bitstrea
 
 **Mục đích:** chứng minh đề bài ở phần 1 chạy được. Demo không phải đề bài.
 
-**Hình thức:** **video** kèm **một slide PPT** báo cáo.
+**Hình thức:** **video** kèm slide PPT báo cáo.
 
-**Yêu cầu:**
-1. **SoC chạy real-time:** chạy sim RTL trước, sau đó nạp xuống FPGA chạy thử. Cùng phần mềm. Sự khác biệt giữa
-   sim (chậm) và FPGA (thời gian thật) phải nhìn thấy được.
-2. **Trực quan** trên cả sim lẫn FPGA.
-3. **Show rõ quy trình của framework:** cluster, node và job, agent hành động, gate, vòng phản hồi, chạy song song,
-   timeline.
-4. **Mọi bước tạo, sửa, kiểm tra đều nhanh** để quay được video.
-5. **Nhánh ASIC ra GDS**, có hình layout.
+**Yêu cầu chung:**
+1. **Show rõ quy trình của framework:** cluster, node và job, agent hành động, gate, vòng phản hồi, timeline.
+2. **Mọi bước tạo, sửa, kiểm tra đều nhanh** để quay được video. Bước nào cũng không cần phức tạp, chỉ cần chứng
+   minh flow **đúng và đủ**.
+3. **Nhánh ASIC ra GDS**, có hình layout.
 
-**Slide báo cáo:** flow, các bước có agent và việc agent đã làm, số liệu trước/sau, hình kết quả (sim, board,
-layout).
+Làm theo thứ tự: **Demo 1 (ALU) trước**. Demo 2 (SoC) chỉ làm nếu còn thời gian, dùng lại loop, node và khối của
+Demo 1.
+
+### Demo 1: mạch ALU, có và không có clock gating (làm trước)
+
+**Đầu vào:** file Verilog `alu.v` **đưa sẵn** (không do agent viết), để baseline có một đầu vào cố định.
+
+- ALU 8 bit: thanh ghi vào → ALU tổ hợp (cộng, trừ, AND, OR, XOR) → thanh ghi ra, có tín hiệu `en`.
+- Hai biến thể chọn bằng `define`:
+  - **NoCG**: thanh ghi dùng clock enable thông thường (mux hồi tiếp).
+  - **CG**: clock của thanh ghi đi qua một module ICG.
+- Lõi ALU dùng chung. Riêng module ICG là wrapper nhỏ `icg.v`, mỗi nơi một bản:
+
+  | Nơi chạy | Hiện thực ICG |
+  |---|---|
+  | Sim | Mô hình hành vi (latch + AND) |
+  | FPGA | `BUFGCE` (trên FPGA không gate clock bằng logic: tạo skew, timing sai) |
+  | ASIC | Cell `sky130_fd_sc_hd__dlclkp` của sky130hd |
+
+**Flow:** CHIA chạy **nối tiếp** Sim → FPGA → ASIC. Bước sau chỉ chạy khi bước trước đạt gate.
+
+```
+alu.v (+ icg.v) ─► 1. Sim (verilator) ── PASS ──► 2. FPGA (vivado) ── OK ──► 3. ASIC (ORFS sky130hd)
+                      testbench, chạy test          synth, P&R, .bit          synth → floorplan → place
+                                                                              → CTS → route → .gds
+```
+
+**Ba pha:**
+
+```
+Pha 1: BASELINE (không có agent)
+  alu.v ─► Sim ─► FPGA ─► ASIC        flow cơ bản, thiết lập mặc định; lưu mọi số liệu và báo cáo
+                 │
+                 ▼
+Pha 2: AGENT (Claude trong CHIA)
+  đọc báo cáo baseline từng bước ─► đánh giá ─► đề xuất thay đổi (RTL, constraint, config)
+  ─► CHIA chạy lại ─► qua gate thì giữ, không thì loại
+                 │
+                 ▼
+Pha 3: SO SÁNH
+  bảng baseline / agent theo từng bước (Sim, FPGA, ASIC), cho cả NoCG và CG
+```
+
+**Từng bước:**
+
+| | Sim | FPGA | ASIC |
+|---|---|---|---|
+| Các bước | Verilator build → chạy test | Vivado synth → P&R → bitstream | Yosys → floorplan → place → CTS → route → GDS |
+| Gate (đúng) | Output khớp kết quả mong đợi, cả 2 biến thể | Có `.bit`, WNS ≥ 0 | Có `.gds`, timing đạt, không lỗi |
+| Sản phẩm (đủ) | Log `PASS` + waveform | `.bit` + báo cáo tài nguyên | `.gds` + ảnh layout + báo cáo diện tích |
+| Thước đo | Đúng/sai; số cycle hoặc độ phủ test nếu có | LUT, FF, WNS/Fmax, công suất | Diện tích, số cell, WNS/Fmax, công suất |
+| Khối cluster | `verilator` | `vivado` | `asic` |
+
+Agent Claude chạy ở khối `claude`. Ngoài đánh giá và tối ưu, agent có thể viết những thứ phụ của từng bước
+(testbench, `.xdc` và top cho board, `config.mk` cho ORFS) và sửa khi một bước fail.
+
+**Quy tắc so sánh công bằng:**
+- Cùng `alu.v` gốc, cùng phiên bản công cụ, cùng board/part và PDK, cùng chu kỳ clock mục tiêu (hoặc ghi rõ nếu
+  agent được phép đổi).
+- Mọi thay đổi của agent phải qua lại gate Sim. Sai chức năng thì loại.
+- Chạy baseline **hai lần** để đo nhiễu (P&R thường dao động khoảng 1–2 %). Chỉ tính là cải thiện khi vượt mức nhiễu.
+- Mỗi biến thể (NoCG, CG) có baseline và phần agent riêng.
+- "Không cải thiện" vẫn là kết quả hợp lệ và vẫn ghi vào slide. ALU nhỏ nên có thể ít chỗ để tối ưu.
+
+**Slide:**
+- Mở đầu: cluster CHIA và các khối.
+- 3 slide chính: **Sim**, **FPGA**, **ASIC**. Cùng một bố cục: sơ đồ flow; agent đánh giá gì và đã đổi gì; sản phẩm
+  cuối (`PASS`, `.bit`, ảnh GDS); bảng baseline / agent cho NoCG và CG.
+- Kết: bước tiếp theo (Demo 2).
+
+**Rủi ro cần kiểm tra sớm:**
+- CTS của OpenROAD có xử lý được cell ICG trên cây clock không. Nếu không, ASIC chạy NoCG trước để chứng minh flow,
+  CG xử lý sau.
+- Loop "agent Claude ghi file rồi CHIA build/kiểm tra" chưa từng chạy: smoke test đầu tiên.
+- Nếu chưa có board, nhánh FPGA dừng ở bitstream, vẫn đủ chứng minh flow.
+
+### Demo 2: SoC (nếu còn thời gian)
+
+Thay ALU bằng một SoC nhỏ, giữ nguyên loop, node và khối của Demo 1; chỉ đổi RTL, testbench và constraint.
+
+- **Lõi đề xuất:** PicoRV32 (một file Verilog, rất nhỏ, từng dùng trên sky130 trong Caravel). Mini-SoC: PicoRV32,
+  ROM chương trình 1–2 KB, RAM 256–512 B bằng flip-flop, UART, GPIO (LED, nút), timer.
+- **Ứng dụng đề xuất:** Game of Life 16×16 real-time: UART in lưới mỗi nhịp timer, LED hiện số thế hệ.
+- **Yêu cầu riêng:** SoC chạy real-time: sim RTL trước rồi nạp xuống FPGA, cùng phần mềm. Khác biệt giữa sim
+  (chậm) và FPGA (thời gian thật) phải nhìn thấy được.
+- **Nối từ Demo 1:** CPU rảnh giữa hai nhịp timer, nên clock gating CPU hoặc ngoại vi lúc chờ là ứng dụng tự nhiên
+  (PicoRV32 không có WFI: thêm thanh ghi "sleep", timer đánh thức).
 
 ## Phần 3. Hệ quả và ràng buộc
 
@@ -90,4 +172,5 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
 ## Còn mở
 
 1. **Board cụ thể** (hãng, part). Có board mới chốt được nhánh FPGA.
-2. **Lõi CPU:** chốt sau khi biết board và đo tốc độ.
+2. **Lõi CPU cho Demo 2:** đề xuất PicoRV32, chốt khi bắt đầu Demo 2.
+3. **`alu.v` cho Demo 1:** người dùng đưa sẵn.
