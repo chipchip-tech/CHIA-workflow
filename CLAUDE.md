@@ -215,6 +215,11 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   và chuyển nó sang 1.15.0 trước.
 - `project/soc-fmax-sky130` (mở 15/11/2026, Chipyard 1.15.0): loop agent tối ưu Fmax cả SoC `MinimalSoCConfig`
   (`DigitalTop`) trên sky130hd đo bằng ORFS sau place, fakeram, bậc chu kỳ 10 → 5 ns; chi tiết trong nhánh đó.
+- Nhánh `demo` (mở 20/11/2026): demo flow Sim → FPGA → ASIC có agent, phạm vi ở `docs/demo-task.md`. Demo 1 là ALU 8 bit,
+  hai demo riêng `projects/demo-alu/NoCG/` và `projects/demo-alu/CG/` (clock gating). Pha 1 baseline: `baseline.py` do CHIA điều
+  phối, **bước Sim đã chạy thật 20/11/2026** (build ở khối chipyard bằng Verilator 5.022 của Chipyard, chạy ở khối verilator,
+  `RESULT: PASS`, VCD và timeline vào `~/chia_demo/demo-alu/<demo>/<run_id>/`). Khối verilator KHÔNG có Verilator (image chỉ
+  chạy binary). FPGA, ASIC chưa làm.
 
 ## Việc tiếp theo (gợi ý)
 

@@ -180,3 +180,4 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
 1. **Board cụ thể** (hãng, part). Có board mới chốt được nhánh FPGA.
 2. **Lõi CPU cho Demo 2:** đề xuất PicoRV32, chốt khi bắt đầu Demo 2.
 3. **RTL cho Demo 1:** đã duyệt. Bước Sim mỗi demo ở `projects/demo-alu/<NoCG|CG>/sim/` (`tb_<module>.v`, `run_sim.sh`).
+   Baseline bước Sim qua CHIA (`baseline.py`) đã chạy thật 20/11/2026, cả hai demo `RESULT: PASS`. Tiếp: bước FPGA.
