@@ -67,8 +67,8 @@ Demo 1.
 
 ```
 NoCG_alu.v / CG_alu.v (+ icg) ─► 1. Sim (verilator) ── PASS ──► 2. FPGA (vivado) ── OK ──► 3. ASIC (ORFS sky130hd)
-                      testbench, chạy test          synth, P&R, .bit          synth → floorplan → place
-                                                                              → CTS → route → .gds
+                                   testbench, chạy test          synth, P&R, .bit          synth → floorplan → place
+                                                                                             → CTS → route → .gds
 ```
 
 **Ba pha:**
