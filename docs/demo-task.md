@@ -194,6 +194,15 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
 
    Số liệu tính cả vỏ `fpga_top` (LFSR, MISR, bộ đếm). CG trên FPGA **kém hơn** NoCG: clock đi qua latch + LUT nên WNS
    giảm khoảng 3 ns và công suất động tăng. Đây là chỗ cho agent ở pha 2 (đổi sang `BUFGCE`).
-   Bước ASIC đã viết (`asic/config.mk`, `constraint.sdc`; CG thêm `asic/icg_sky130.v` dùng `sky130_fd_sc_hd__dlclkp_1`),
-   mặc định `--stages sim,fpga,asic`, chưa chạy với ORFS thật. Đã kiểm trong sandbox: điều phối 6 bước make qua ORFS giả,
-   đường lỗi, và testbench Sim của CG vẫn `PASS` khi thay `icg_sim.v` bằng `icg_sky130.v` + mô hình hành vi của cell.
+   Bước ASIC **đã chạy thật 21/11/2026** (ORFS sky130hd ở khối asic, `asic/config.mk` gần mặc định, clock 10 ns; CG dùng
+   `asic/icg_sky130.v` = `sky130_fd_sc_hd__dlclkp_1`). Cả ba bước qua gate, hai demo `KẾT QUẢ: OK`, khoảng 2,5 phút mỗi demo:
+
+   | Demo | Diện tích (µm²) | Util | Cell | Flop | ICG | Buffer clock | Setup / hold WS (ns) | Công suất (mW) | DRC | Route (s) |
+   |---|---|---|---|---|---|---|---|---|---|---|
+   | NoCG | 3078 | 44,8 % | 356 | 31 | 0 | 9 | 6,815 / 0,493 | 0,368 | 0 | 35 |
+   | CG | 2975 | 46,9 % | 306 | 31 | 2 | 18 | 6,957 / 0,406 | 0,324 | 0 | 113 |
+
+   Trên ASIC, CG **tốt hơn** NoCG (ngược với FPGA): bỏ mux hồi tiếp nên ít hơn 50 cell, diện tích giảm 3 %, công suất giảm
+   12 %, đổi lại buffer clock tăng gấp đôi. CTS của OpenROAD xử lý được cell ICG (rủi ro ở trên đã gỡ). Công suất là ước
+   lượng của OpenSTA với hoạt động mặc định, không phải từ VCD. Thời gian route CG dài gấp 3 lần, chưa rõ lý do (cần chạy
+   lại để xem có phải nhiễu).
