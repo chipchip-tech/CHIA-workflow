@@ -220,7 +220,7 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   phối, **bước Sim đã chạy thật 20/11/2026** (build ở khối chipyard bằng Verilator 5.022 của Chipyard, chạy ở khối verilator,
   `RESULT: PASS`, VCD và timeline vào `~/chia_demo/demo-alu/<demo>/<run_id>/`). Khối verilator KHÔNG có Verilator (image chỉ
   chạy binary). **Bước FPGA đã chạy thật 21/11/2026** (vỏ `fpga/fpga_top.v`, Vivado 2025.1, bitstream, cả hai demo OK; số liệu
-  trong `docs/demo-task.md`). **Bước ASIC đã chạy thật 21/11/2026** (ORFS sky130hd, `WORK_HOME` trong thư mục run, 6 task make, ra GDS, cả hai demo OK; CTS xử lý được ICG). Pha 1 baseline xong; tiếp theo pha 2 (agent).
+  trong `docs/demo-task.md`). **Bước ASIC đã chạy thật 21/11/2026** (ORFS sky130hd, `WORK_HOME` trong thư mục run, 6 task make, ra GDS, cả hai demo OK; CTS xử lý được ICG). Pha 1 baseline xong (chạy 2 lần ra đúng từng số: tất định). Pha 2 `agent.py` (Claude ở khối `claude`, mỗi bước tối đa 2 vòng, sửa trong thư mục vòng, CHIA đo lại, nhận/loại) đã viết, mới thử với Claude/Vivado/ORFS giả. `clean_runs.py` dọn `WORK_DIR` (mặc định chỉ liệt kê).
   Chạy `chia-up-blocks.py` phải trong `chia_env` (env `base` không có lệnh `chia`).
 
 ## Việc tiếp theo (gợi ý)

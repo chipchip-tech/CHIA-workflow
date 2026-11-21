@@ -5,7 +5,12 @@ set part  xc7a100tcsg324-1
 set top   fpga_top
 file mkdir out reports
 
-read_verilog [glob ../rtl/*.v] fpga_top.v
+# Danh sách file Verilog ở sources.f (bỏ dòng trống và dòng #), dùng chung với mô phỏng xsim của agent.py.
+set fh [open sources.f]
+set srcs {}
+foreach ln [split [read $fh] "\n"] { set ln [string trim $ln]; if {$ln ne "" && [string index $ln 0] ne "#"} { lappend srcs $ln } }
+close $fh
+read_verilog $srcs
 read_xdc arty_a7_100t.xdc
 
 synth_design -top $top -part $part

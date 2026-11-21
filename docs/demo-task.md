@@ -206,3 +206,14 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    12 %, đổi lại buffer clock tăng gấp đôi. CTS của OpenROAD xử lý được cell ICG (rủi ro ở trên đã gỡ). Công suất là ước
    lượng của OpenSTA với hoạt động mặc định, không phải từ VCD. Thời gian route CG dài gấp 3 lần, chưa rõ lý do (cần chạy
    lại để xem có phải nhiễu).
+   Baseline chạy lần hai (21/11/2026) ra **đúng từng số** ở cả ba bước, kể cả thời gian route (CG vẫn 113 s): công cụ
+   tất định, nhiễu bằng 0, nên ngưỡng so sánh ở pha 2 chỉ bỏ qua sai khác làm tròn.
+   **Pha 2** (`agent.py`, mỗi demo một bản) đã viết, chưa chạy với Claude thật. Mỗi bước tối đa `--rounds` vòng (mặc định
+   2): Claude Code ở khối `claude` đọc báo cáo của bản tốt nhất, sửa file được phép ngay trong thư mục vòng, CHIA đo lại
+   trên các khối như baseline. Phạm vi sửa: Sim chỉ `sim/tb_*.v` (thêm kiểm tra, nhận khi số lần kiểm tra tăng); FPGA chỉ
+   `fpga/` (`build.tcl`, `sources.f`, file `.v` mới riêng cho FPGA; gate thêm `tb_fpga_top` trong xsim có UNISIM); ASIC
+   chỉ `asic/config.mk`. `rtl/`, `.xdc`, `.sdc` cố định; sửa ngoài phạm vi bị hoàn lại. Nhận vòng khi không kém ở chỉ số
+   nào và tốt hơn ở ít nhất một. Kết quả: `results/compare.md` (bảng baseline / agent cho slide). Đã thử trong sandbox với
+   Claude, Vivado, ORFS giả (Verilator thật): nhận/loại đúng, sửa `rtl/` bị hoàn lại. `fpga/build.tcl` giờ đọc danh sách
+   file từ `fpga/sources.f` (cùng tập file như trước). `projects/demo-alu/clean_runs.py` dọn các lần chạy cũ trong
+   `WORK_DIR`.
