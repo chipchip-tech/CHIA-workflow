@@ -219,7 +219,9 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   hai demo riêng `projects/demo-alu/NoCG/` và `projects/demo-alu/CG/` (clock gating). Pha 1 baseline: `baseline.py` do CHIA điều
   phối, **bước Sim đã chạy thật 20/11/2026** (build ở khối chipyard bằng Verilator 5.022 của Chipyard, chạy ở khối verilator,
   `RESULT: PASS`, VCD và timeline vào `~/chia_demo/demo-alu/<demo>/<run_id>/`). Khối verilator KHÔNG có Verilator (image chỉ
-  chạy binary). FPGA, ASIC chưa làm.
+  chạy binary). **Bước FPGA đã chạy thật 21/11/2026** (vỏ `fpga/fpga_top.v`, Vivado 2025.1, bitstream, cả hai demo OK; số liệu
+  trong `docs/demo-task.md`). Bước ASIC (ORFS sky130hd, `WORK_HOME` trong thư mục run, 6 task make) đã viết, chưa chạy thật.
+  Chạy `chia-up-blocks.py` phải trong `chia_env` (env `base` không có lệnh `chia`).
 
 ## Việc tiếp theo (gợi ý)
 

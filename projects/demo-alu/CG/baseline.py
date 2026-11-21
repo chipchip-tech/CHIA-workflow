@@ -1,21 +1,27 @@
 """baseline.py - Pha 1 (baseline, KHÔNG có agent) của demo CG, do CHIA điều phối.
 
 Chạy từ thư mục chứa file này (projects/demo-alu/CG), cluster theo khối đang bật:
-  chia job submit --working-dir . -- python baseline.py [--stages sim,fpga] [--seed 1] [--cycles 20000] [--en-pct 30]
-Bước fpga cần khối vivado: bật cluster bằng `python scripts/chia-up-blocks.py --fpga`.
+  chia job submit --working-dir . -- python baseline.py [--stages sim,fpga,asic] [--seed 1] [--cycles 20000] [--en-pct 30]
+Bước fpga cần khối vivado, bước asic cần khối asic: `python scripts/chia-up-blocks.py --fpga --asic`.
 
 Các bước (mỗi bước là một task CHIA, chạy trên khối có resource tương ứng):
   1. sim_build  khối chipyard   Verilator 5 của Chipyard build testbench (tb + RTL) thành binary Vtb
   2. sim_run    khối verilator  chạy Vtb; gate: dòng `RESULT: PASS`; ghi waveform VCD
   3. fpga       khối vivado     Vivado (thiết lập mặc định) build fpga/fpga_top.v cho xc7a100tcsg324-1 tới bitstream;
                                 gate: có .bit và WNS >= 0; số liệu: LUT, FF, BUFG, WNS/WHS, công suất, cảnh báo
-  (ASIC: thêm sau; mỗi bước chỉ chạy khi bước trước qua gate)
+  4. asic_*     khối asic       ORFS sky130hd theo asic/config.mk, mỗi bước make là một task CHIA:
+                                synth → floorplan → place → cts → route → finish (GDS, ảnh layout bằng KLayout);
+                                gate: có .gds, setup/hold slack >= 0, không lỗi DRC; số liệu: diện tích, số cell
+                                (flop, ICG, buffer clock), slack, công suất
+  Mỗi bước chỉ chạy khi bước trước qua gate.
 
 Mỗi lần chạy có một thư mục riêng trong thư mục làm việc chung (mount vào mọi khối, xem docs/cluster-blocks.md):
   <WORK_DIR>/demo-alu/CG/<run_id>/
-      rtl/, sim/, fpga/         bản chép của project (đầu vào cố định của lần chạy)
+      rtl/, sim/, fpga/, asic/  bản chép của project (đầu vào cố định của lần chạy)
       sim/build/                build.log, sim.log, wave.vcd, obj/Vtb
       fpga/out/, fpga/reports/  fpga_top.bit, post_route.dcp, vivado.log; util, timing, power, methodology, drc
+      asic/orfs/                WORK_HOME của ORFS: logs/, reports/, results/ (6_final.gds), objects/
+      asic/layout.png           ảnh layout
       results/baseline.json     số liệu từng bước (đầu vào cho pha 2: agent)
       profile/                  timeline của CHIA: ChiaProfileCollector.log (JSONL) và _profile.html (tự sinh)
 """
@@ -25,6 +31,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -116,6 +123,123 @@ def fpga_build(run_dir: str, timeout_s: int = 3600) -> dict:
     return res
 
 
+# ---------------- ASIC (ORFS) ----------------
+ORFS_FLOW = "/OpenROAD-flow-scripts/flow"            # trong khối asic (ORFS của host mount vào đây)
+ASIC_STAGES = ["synth", "floorplan", "place", "cts", "route", "finish"]
+
+
+def _orfs_paths(run_dir: str) -> dict:
+    asic = os.path.join(run_dir, "asic")
+    work = os.path.join(asic, "orfs")
+    sub = os.path.join("sky130hd", DUT, "base")
+    return {"asic": asic, "work": work, "config": os.path.join(asic, "config.mk"),
+            **{k: os.path.join(work, k, sub) for k in ("logs", "reports", "results")}}
+
+
+def _run_logged(cmd: list[str], cwd: str, timeout: int, log_path: str) -> tuple[int, float, str]:
+    """Chạy trong process group riêng, log ra file; quá giờ thì giết cả nhóm (make, yosys, openroad)."""
+    t0 = time.time()
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    with open(log_path, "w") as f:
+        p = subprocess.Popen(cmd, cwd=cwd, stdout=f, stderr=subprocess.STDOUT, start_new_session=True)
+        try:
+            rc = p.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            os.killpg(p.pid, signal.SIGKILL)
+            p.wait()
+            rc = -1
+    return rc, round(time.time() - t0, 2), _read(log_path)[-3000:]
+
+
+@ChiaFunction(resources={"asic": 1})
+def asic_stage(run_dir: str, stage: str, timeout_s: int = 3600) -> dict:
+    """Một bước `make <stage>` của ORFS (worker asic đã nạp env.sh của ORFS). WORK_HOME trỏ vào thư mục run, nên
+    ORFS trên host không bị ghi. Bước finish còn đọc số liệu và vẽ ảnh layout."""
+    P = _orfs_paths(run_dir)
+    cmd = ["make", "-C", ORFS_FLOW, f"DESIGN_CONFIG={P['config']}", f"WORK_HOME={P['work']}", stage]
+    rc, sec, tail = _run_logged(cmd, ORFS_FLOW, timeout_s, os.path.join(P["asic"], "make", f"{stage}.log"))
+    res = {"stage": stage, "rc": rc, "seconds": sec, "host": os.uname().nodename, "ok": rc == 0, "log_tail": tail}
+    if stage == "synth":
+        _, ver, _ = _sh("yosys -V; openroad -version 2>/dev/null | head -1", ORFS_FLOW)
+        res["tools"] = ver.strip()
+        if rc == 0 and not os.path.isdir(P["results"]):
+            res["ok"] = False
+            res["log_tail"] = (f"make synth xong nhưng không có {P['results']}: ORFS này không nhận WORK_HOME? "
+                               f"xem {ORFS_FLOW}/results/sky130hd/{DUT}\n") + tail
+    if stage == "finish" and rc == 0:
+        res.update(_asic_metrics(P))
+        res["ok"] = res["gate_ok"]
+    get_profiler().add_info({"step": f"asic_{stage}", "ok": res["ok"], "seconds": sec})
+    return res
+
+
+def _asic_metrics(P: dict) -> dict:
+    """Số liệu sau finish: metrics JSON của ORFS (logs/*.json), báo cáo 6_finish.rpt, netlist 6_final.v."""
+    metrics = {}
+    for f in sorted(Path(P["logs"]).glob("*.json")):
+        try:
+            metrics.update(json.loads(f.read_text()))
+        except (OSError, ValueError):
+            pass
+    fin = _read(os.path.join(P["reports"], "6_finish.rpt"))
+
+    def m(keys, pattern=None):
+        for k in keys:
+            if isinstance(metrics.get(k), (int, float)):
+                return metrics[k]
+        return _num(pattern, fin) if pattern else None
+
+    gds = os.path.join(P["results"], "6_final.gds")
+    r = {
+        "gds": gds if os.path.isfile(gds) else None,
+        "setup_ws_ns": m(["finish__timing__setup__ws"], r"^worst slack max\s+(-?[\d.]+)"),
+        "hold_ws_ns": m(["finish__timing__hold__ws"], r"^worst slack min\s+(-?[\d.]+)"),
+        "setup_tns_ns": m(["finish__timing__setup__tns"], r"^tns(?: max)?\s+(-?[\d.]+)"),
+        "area_um2": m(["finish__design__instance__area"], r"^Design area\s+([\d.]+)\s+u\^2"),
+        "util_pct": m(["finish__design__instance__utilization"], r"^Design area\s+[\d.]+\s+u\^2\s+([\d.]+)%"),
+        "core_area_um2": m(["finish__design__core__area", "floorplan__design__core__area"]),
+        "die_area_um2": m(["finish__design__die__area", "floorplan__design__die__area"]),
+        "stdcells": m(["finish__design__instance__count__stdcell"]),
+        "power_total_w": m(["finish__power__total"], r"^Total\s+\S+\s+\S+\s+\S+\s+([\d.eE+-]+)"),
+        "drc_errors": m(["detailedroute__route__drc_errors", "route__drc_errors"]),
+        "clock_period_ns": m(["finish__timing__clock__period"]),
+    }
+    if isinstance(r["util_pct"], float) and r["util_pct"] <= 1.0 and "finish__design__instance__utilization" in metrics:
+        r["util_pct"] = round(100 * r["util_pct"], 2)           # metrics JSON ghi tỉ lệ 0..1
+    # Đếm cell theo loại trong netlist cuối (không tính cell vật lý: tap, decap, fill).
+    cells = {}
+    for t in re.findall(r"^\s*sky130_fd_sc_hd__(\w+?)_\d+\s+\S+\s*\(", _read(os.path.join(P["results"], "6_final.v")), re.M):
+        cells[t] = cells.get(t, 0) + 1
+    phys = ("tapvpwrvgnd", "decap", "fill", "tap")
+    logic = {k: v for k, v in cells.items() if not k.startswith(phys)}
+    r["cells"] = dict(sorted(logic.items(), key=lambda kv: -kv[1]))
+    r["n_flop"] = sum(v for k, v in logic.items() if re.match(r"(s?df|edf|sedf|dlx|dlr)", k))
+    r["n_icg"] = sum(v for k, v in logic.items() if "dlclkp" in k)
+    r["n_clkbuf"] = sum(v for k, v in logic.items() if k.startswith(("clkbuf", "clkinv", "clkdlybuf")))
+    r["n_logic_cells"] = sum(logic.values())
+    # Thời gian từng bước con của ORFS (dòng "Elapsed time" ở cuối mỗi log).
+    steps = {}
+    for f in sorted(Path(P["logs"]).glob("*.log")):
+        mm = re.search(r"Elapsed time: (?:(\d+):)?(\d+):([\d.]+)", _read(str(f)))
+        if mm:
+            steps[f.stem] = round(int(mm.group(1) or 0) * 3600 + int(mm.group(2)) * 60 + float(mm.group(3)), 1)
+    r["orfs_step_seconds"] = steps
+    # Ảnh layout cho slide/video (không thuộc gate).
+    png = os.path.join(P["asic"], "layout.png")
+    if r["gds"]:
+        lyp = next(iter(sorted(Path(ORFS_FLOW, "platforms", "sky130hd").glob("*.lyp"))), None)
+        cmd = f"klayout -zz -r render_gds.py -rd gds={r['gds']} -rd png={png}" + (f" -rd lyp={lyp}" if lyp else "")
+        rc, out, _ = _sh(cmd, P["asic"], timeout=600)
+        r["layout_png"] = png if os.path.isfile(png) else None
+        if not r["layout_png"]:
+            r["layout_png_error"] = out[-1000:]
+    r["reports"] = P["reports"]
+    r["metrics_json"] = {k: v for k, v in metrics.items() if isinstance(v, (int, float, str))}
+    r["gate_ok"] = (r["gds"] is not None and r["setup_ws_ns"] is not None and r["setup_ws_ns"] >= 0
+                    and (r["hold_ws_ns"] is None or r["hold_ws_ns"] >= 0) and not r["drc_errors"])
+    return r
+
+
 @ChiaFunction(resources={"verilator_run": 1})
 def sim_run(run_dir: str, plusargs: list[str]) -> dict:
     """Chạy binary đã build. Gate: dòng RESULT là PASS."""
@@ -142,7 +266,7 @@ def main() -> None:
     ap.add_argument("--work-dir", default=os.path.realpath(os.path.expanduser("~/chia_demo")),
                     help="thư mục làm việc chung (WORK_DIR của cluster), mặc định ~/chia_demo")
     ap.add_argument("--run-id", default=time.strftime("baseline-%Y%m%d-%H%M%S"))
-    ap.add_argument("--stages", default="sim,fpga", help="các bước cần chạy, theo thứ tự (mặc định sim,fpga)")
+    ap.add_argument("--stages", default="sim,fpga,asic", help="các bước cần chạy, theo thứ tự (mặc định sim,fpga,asic)")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--cycles", type=int, default=20000)
     ap.add_argument("--en-pct", type=int, default=30)
@@ -153,14 +277,15 @@ def main() -> None:
     if run_dir.exists():
         raise SystemExit(f"LỖI: {run_dir} đã có, chọn --run-id khác")
     stages = [x.strip() for x in args.stages.split(",") if x.strip()]
-    for sub in ("rtl", "sim", "fpga"):
+    for sub in ("rtl", "sim", "fpga", "asic"):
         shutil.copytree(src / sub, run_dir / sub, ignore=shutil.ignore_patterns("build"))
     (run_dir / "results").mkdir()
 
     ray.init(address="auto", ignore_reinit_error=True)
-    if "fpga" in stages and not ray.cluster_resources().get("vivado"):
-        raise SystemExit("LỖI: cluster không có khối vivado: bật bằng `python scripts/chia-up-blocks.py --fpga`, "
-                         "hoặc chạy --stages sim")
+    for st, res_name, flag in (("fpga", "vivado", "--fpga"), ("asic", "asic", "--asic")):
+        if st in stages and not ray.cluster_resources().get(res_name):
+            raise SystemExit(f"LỖI: cluster không có khối {res_name}: bật bằng `python scripts/chia-up-blocks.py "
+                             f"--fpga --asic`, hoặc bỏ {st} khỏi --stages")
     start_collector(log_dir=str(run_dir / "profile"))
 
     report = {"demo": DEMO, "dut": DUT, "phase": "baseline", "run_id": args.run_id, "run_dir": str(run_dir),
@@ -171,7 +296,7 @@ def main() -> None:
 
     def done(step: str, res: dict) -> bool:
         report["steps"][step] = res
-        print(f"[baseline {DEMO}] {step:10s} {'OK  ' if res['ok'] else 'FAIL'} {res['seconds']:7.2f}s"
+        print(f"[baseline {DEMO}] {step:15s} {'OK  ' if res['ok'] else 'FAIL'} {res['seconds']:7.2f}s"
               f"  @ {res.get('host', '?')}", flush=True)
         if not res["ok"]:
             report["stopped_at"] = step
@@ -198,7 +323,20 @@ def main() -> None:
               f"WHS={r.get('whs_ns')} ns  P={r['power_total_w']} W (động {r['power_dynamic_w']} W)  "
               f"cảnh báo={r['warnings']} (critical {r['critical_warnings']})", flush=True)
         print(f"[baseline {DEMO}] bitstream: {r['bitstream']}", flush=True)
-    # 4. ASIC: thêm sau.
+    if ok and "asic" in stages:
+        # 4. ASIC: ORFS ở khối asic, từng bước make là một task (timeline thấy rõ từng bước).
+        for stage in ASIC_STAGES:
+            r = get(asic_stage.chia_remote(str(run_dir), stage))
+            ok = done(f"asic_{stage}", r)
+            if not ok:
+                break
+        if "gds" in r:
+            print(f"[baseline {DEMO}] asic: diện tích {r['area_um2']} um2 (util {r['util_pct']} %), "
+                  f"{r['n_logic_cells']} cell (flop {r['n_flop']}, ICG {r['n_icg']}, buffer clock {r['n_clkbuf']}), "
+                  f"setup WS={r['setup_ws_ns']} hold WS={r['hold_ws_ns']} ns, P={r['power_total_w']} W, "
+                  f"DRC={r['drc_errors']}", flush=True)
+            print(f"[baseline {DEMO}] gds: {r['gds']}", flush=True)
+            print(f"[baseline {DEMO}] layout: {r.get('layout_png')}", flush=True)
 
     stop_collector()                                 # đợi sự kiện cuối ghi xong vào log
     prof = run_dir / "profile" / "ChiaProfileCollector.log"

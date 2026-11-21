@@ -184,5 +184,16 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
 1. **Board cụ thể** (hãng, part). Có board mới chốt được nhánh FPGA.
 2. **Lõi CPU cho Demo 2:** đề xuất PicoRV32, chốt khi bắt đầu Demo 2.
 3. **RTL cho Demo 1:** đã duyệt. Bước Sim mỗi demo ở `projects/demo-alu/<NoCG|CG>/sim/` (`tb_<module>.v`, `run_sim.sh`).
-   Baseline bước Sim qua CHIA (`baseline.py`) đã chạy thật 20/11/2026, cả hai demo `RESULT: PASS`. Bước FPGA đã viết
-   (`--stages sim,fpga`), chưa chạy với Vivado thật.
+   Baseline bước Sim qua CHIA (`baseline.py`) đã chạy thật 20/11/2026, cả hai demo `RESULT: PASS`. Bước FPGA **đã chạy
+   thật 21/11/2026** (Vivado 2025.1 ở khối vivado, khoảng 64 s mỗi demo, cả hai `KẾT QUẢ: OK`):
+
+   | Demo | LUT | FF | BUFG | WNS (ns) | WHS (ns) | Công suất tổng / động (W) | Cảnh báo |
+   |---|---|---|---|---|---|---|---|
+   | NoCG | 138 | 139 | 1 | 4,579 | 0,024 | 0,099 / 0,002 | 1 |
+   | CG | 140 | 141 | 1 | 1,502 | 0,052 | 0,102 / 0,005 | 4 |
+
+   Số liệu tính cả vỏ `fpga_top` (LFSR, MISR, bộ đếm). CG trên FPGA **kém hơn** NoCG: clock đi qua latch + LUT nên WNS
+   giảm khoảng 3 ns và công suất động tăng. Đây là chỗ cho agent ở pha 2 (đổi sang `BUFGCE`).
+   Bước ASIC đã viết (`asic/config.mk`, `constraint.sdc`; CG thêm `asic/icg_sky130.v` dùng `sky130_fd_sc_hd__dlclkp_1`),
+   mặc định `--stages sim,fpga,asic`, chưa chạy với ORFS thật. Đã kiểm trong sandbox: điều phối 6 bước make qua ORFS giả,
+   đường lỗi, và testbench Sim của CG vẫn `PASS` khi thay `icg_sim.v` bằng `icg_sky130.v` + mô hình hành vi của cell.
