@@ -1,8 +1,8 @@
 """status_page.py - trang trạng thái HTML cho demo (baseline.py, agent.py), để xem trực quan khi quay video/chụp slide.
 
 baseline.py và agent.py ghi lại <run_dir>/status.html sau mỗi sự kiện (bắt đầu/xong một task CHIA, agent sửa xong,
-nhận/loại một vòng). Trang tự làm mới mỗi 3 giây khi lần chạy chưa xong: mở thẳng bằng trình duyệt, không cần server:
-  firefox ~/chia_demo/demo-alu/NoCG/<run_id>/status.html
+nhận/loại một vòng). Trang tự làm mới mỗi 3 giây khi lần chạy chưa xong. Cách xem tiện nhất là ../run_demo.py: nó
+submit job, phục vụ trang ở http://127.0.0.1 và tự mở trình duyệt (giao diện tối).
 Dựng lại trang từ kết quả của một lần chạy đã xong (results/agent.json hoặc results/baseline.json):
   python status_page.py <run_dir>
 Chỉ đọc số liệu, không ảnh hưởng gate hay việc đo. File này giống hệt nhau ở NoCG/ và CG/ (job chỉ mang theo
@@ -42,8 +42,9 @@ ROWS = {
 }
 
 CSS = """
-:root{--bg:#f6f7f9;--card:#fff;--ink:#1d232b;--mute:#6a7380;--line:#dde1e6;--ok:#1d8a4e;--okbg:#e5f5ec;
---bad:#c0392b;--badbg:#fbe9e7;--run:#1f6fd1;--runbg:#e6f0fc;--wait:#8a929c;--waitbg:#eef0f2}
+:root{color-scheme:dark;--bg:#0f1419;--card:#171d24;--ink:#e6e9ed;--mute:#8b95a1;--line:#2a323c;--ok:#3fcf7f;
+--okbg:#163323;--bad:#ff6b5b;--badbg:#3a1a17;--run:#5aa9ff;--runbg:#152a44;--wait:#8b95a1;--waitbg:#232a32}
+a{color:var(--run)}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,
 "Segoe UI",Roboto,sans-serif}main{max-width:1280px;margin:0 auto;padding:20px 16px 48px}
 h1{font-size:26px;margin:0 0 4px}h2{font-size:21px;margin:28px 0 10px}.sub{color:var(--mute);font-size:14px}

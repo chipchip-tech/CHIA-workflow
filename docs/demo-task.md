@@ -260,3 +260,9 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    và bản tốt nhất. Trang tự làm mới 3 giây khi chưa xong; mở bằng trình duyệt (`file://`), không cần server. Dựng lại từ
    lần chạy đã xong: `python status_page.py <run_dir>`. Đã thử trong sandbox với dữ liệu giả (render, chụp Chromium);
    chưa thử với job thật.
+   Giao diện tối. Mở `file://` trên máy người dùng không được: `xdg-open` trong PATH là bản distrobox (`You must run
+   distrobox-host-exec inside a container!`), và job chạy dưới Ray job server nên không tự mở trình duyệt được. Vì vậy
+   có `projects/demo-alu/run_demo.py`: chọn run_id, phục vụ `<WORK_DIR>/demo-alu` ở `http://127.0.0.1:8765` (trang chờ tự
+   làm mới khi job chưa ghi trang), mở trình duyệt (`/usr/bin/xdg-open`, `gio open`, Firefox Flatpak), rồi `chia job submit`.
+   `run_demo.py show <run_dir>` xem lại lần chạy cũ. Đã thử trong sandbox (server, trang chờ, lệnh submit với `chia` giả);
+   chưa thử trên máy người dùng.
