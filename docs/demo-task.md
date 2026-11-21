@@ -227,3 +227,28 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    - Lỗi lộ ra và đã sửa: (1) bước FPGA/ASIC lấy báo cáo từ thư mục vòng sim được nhận (không có báo cáo FPGA/ASIC), nên
      agent ASIC chỉ thấy `metrics.json`; giờ mỗi bước lấy báo cáo từ baseline hoặc vòng được nhận của chính bước đó;
      (2) câu gate Sim trong prompt ghi ngược ("accepted if checked does not increase"), agent tự nhận ra; đã sửa.
+
+   **Chạy chính `--rounds 2`, cả hai demo (21/11/2026, `KẾT QUẢ: OK`, không có `CẢNH BÁO: context`):** NoCG
+   `agent-20261121-141430`, CG `agent-20261121-143619`. Vòng được nhận ở cả hai: `sim-r1`, `sim-r2`, `asic-r1`, `asic-r2`.
+
+   | | NoCG baseline → agent | CG baseline → agent |
+   |---|---|---|
+   | Sim: số lần kiểm tra (PASS) | 6272 → 542 046 | 6272 → 1 509 090 |
+   | FPGA | cả 2 vòng LOẠI, giữ baseline | cả 2 vòng LOẠI, giữ baseline |
+   | ASIC: diện tích cell (µm²) | 3077,95 → 3021,65 (−1,8 %) | 2975,35 → 2835,22 (−4,7 %) |
+   | ASIC: diện tích die (µm²) | 7534,24 → 4641,70 (−38,4 %) | 6925,57 → 5504,90 (−20,5 %) |
+   | ASIC: công suất (mW) | 0,368 → 0,361 (−1,8 %) | 0,324 → 0,302 (−6,8 %) |
+   | ASIC: setup / hold WS (ns) | 6,815 → 7,034 / 0,493 → 0,481 | 6,957 → 7,042 / 0,406 → 0,404 |
+   | ASIC: số cell, DRC | 356 → 468, 0 | 306 → 386, 0 |
+
+   - Sim: vòng 1 thêm quét op × a × biên b, mẫu `en`, reset giữa chừng, độ trễ valid; vòng 2 vét cạn ADD/SUB/SLT 256×256 và
+     đếm các kiểm tra giữ giá trị. CG thêm đếm cạnh `gclk_in`/`gclk_out` (không xung giả). VCD mặc định lên khoảng 90 MB.
+   - ASIC: NoCG `ABC_AREA=1`, rồi nén `CORE_UTILIZATION` 40 → 55 → 65, `PLACE_DENSITY` 0,65 → 0,75 → 0,85. CG `ABC_AREA=1`, rồi
+     `CORE_UTILIZATION` 40 → 50 và `DONT_BUFFER_PORTS=1`. Số cell tăng vì ABC theo diện tích dùng nhiều cell nhỏ hơn. NoCG r2
+     được nhận dù công suất +0,4 % (trong ngưỡng 1 % của luật ASIC).
+   - FPGA, 4 vòng LOẠI theo luật Pareto chặt (không chỉ số nào kém hơn; LUT+FF chỉ cho lệch 0,5 ô):
+     - NoCG r1 (retiming + ánh xạ tay LUT6_2/CARRY4 + directive): WNS 4,579 → 4,94 nhưng P động 0,002 → 0,005, LUT+FF 277 → 302.
+     - NoCG r2 (dùng chung bộ cộng ADD/SUB/SLT): LUT+FF 277 → 262 nhưng WNS 4,579 → 4,212.
+     - CG r1 (`icg_fpga.v` là AND khi tổng hợp + `-gated_clock_conversion auto`): WNS 1,502 → 4,499, P động 0,005 → 0,002, nhưng
+       LUT+FF 281 → 284 (+3 ô, +1,1 %). Vòng đáng nhận nhất về kỹ thuật nhưng bị luật chặn.
+     - CG r2 (`CG_alu_fpga.v` dùng CE, không latch, retiming): WNS 1,502 → 4,436 nhưng LUT+FF 281 → 312.
