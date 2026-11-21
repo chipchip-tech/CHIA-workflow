@@ -252,3 +252,11 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
      - CG r1 (`icg_fpga.v` là AND khi tổng hợp + `-gated_clock_conversion auto`): WNS 1,502 → 4,499, P động 0,005 → 0,002, nhưng
        LUT+FF 281 → 284 (+3 ô, +1,1 %). Vòng đáng nhận nhất về kỹ thuật nhưng bị luật chặn.
      - CG r2 (`CG_alu_fpga.v` dùng CE, không latch, retiming): WNS 1,502 → 4,436 nhưng LUT+FF 281 → 312.
+   - Quyết định (21/11/2026): **giữ nguyên luật FPGA**; slide trình bày CG r1 như một đánh đổi bị luật chặn.
+
+   **Trang trạng thái `status.html` (21/11/2026, chưa chạy thật):** `status_page.py` (giống hệt ở `NoCG/` và `CG/`).
+   `baseline.py` và `agent.py` ghi `<run_dir>/status.html` sau mỗi sự kiện: ba ô Sim → FPGA → ASIC, task CHIA đang chạy
+   trên khối nào, bảng baseline / tốt nhất, thẻ từng vòng (NHẬN/LOẠI, lý do, phần tóm tắt của agent), ảnh layout baseline
+   và bản tốt nhất. Trang tự làm mới 3 giây khi chưa xong; mở bằng trình duyệt (`file://`), không cần server. Dựng lại từ
+   lần chạy đã xong: `python status_page.py <run_dir>`. Đã thử trong sandbox với dữ liệu giả (render, chụp Chromium);
+   chưa thử với job thật.

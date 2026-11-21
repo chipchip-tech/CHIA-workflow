@@ -23,6 +23,7 @@ Mỗi lần chạy có một thư mục riêng trong thư mục làm việc chun
       asic/orfs/                WORK_HOME của ORFS: logs/, reports/, results/ (6_final.gds), objects/
       asic/layout.png           ảnh layout
       results/baseline.json     số liệu từng bước (đầu vào cho pha 2: agent)
+      status.html               trang trạng thái (tự làm mới, mở bằng trình duyệt; xem status_page.py)
       profile/                  timeline của CHIA: ChiaProfileCollector.log (JSONL) và _profile.html (tự sinh)
 """
 import argparse
@@ -39,6 +40,8 @@ from pathlib import Path
 import ray
 from chia.base.ChiaFunction import ChiaFunction, get
 from chia.trace.profiler import get_profiler, start_collector, stop_collector
+
+import status_page as S
 
 DEMO = "NoCG"
 DUT = "NoCG_alu"
@@ -291,11 +294,15 @@ def main() -> None:
     report = {"demo": DEMO, "dut": DUT, "phase": "baseline", "run_id": args.run_id, "run_dir": str(run_dir),
               "rtl_sha256": _sha256(sorted((run_dir / "rtl").glob("*.v"))),
               "params": {"seed": args.seed, "cycles": args.cycles, "en_pct": args.en_pct, "stages": stages},
-              "steps": {}, "stopped_at": None}
+              "steps": {}, "stopped_at": None, "t0": time.time()}
     print(f"[baseline {DEMO}] run_dir = {run_dir}", flush=True)
+    S.write(report)
+    print(f"[baseline {DEMO}] trạng thái: {run_dir / 'status.html'}", flush=True)
 
     def done(step: str, res: dict) -> bool:
         report["steps"][step] = res
+        report["live"] = None
+        S.write(report)
         print(f"[baseline {DEMO}] {step:15s} {'OK  ' if res['ok'] else 'FAIL'} {res['seconds']:7.2f}s"
               f"  @ {res.get('host', '?')}", flush=True)
         if not res["ok"]:
@@ -307,9 +314,11 @@ def main() -> None:
     ok = True
     if "sim" in stages:
         # 1-2. Sim: build ở khối chipyard, chạy ở khối verilator.
+        S.set_live(report, task="sim_build")
         ok = done("sim_build", get(sim_build.chia_remote(str(run_dir))))
         if ok:
             plus = [f"+seed={args.seed}", f"+cycles={args.cycles}", f"+en_pct={args.en_pct}"]
+            S.set_live(report, task="sim_run")
             r = get(sim_run.chia_remote(str(run_dir), plus))
             ok = done("sim_run", r)
             if ok:
@@ -317,6 +326,7 @@ def main() -> None:
                 print(f"[baseline {DEMO}] waveform: {r['vcd']} ({r['vcd_bytes']} byte)", flush=True)
     if ok and "fpga" in stages:
         # 3. FPGA: Vivado ở khối vivado.
+        S.set_live(report, task="fpga")
         r = get(fpga_build.chia_remote(str(run_dir)))
         ok = done("fpga", r)
         print(f"[baseline {DEMO}] fpga: LUT={r['lut']} FF={r['ff']} BUFG={r['bufg']} WNS={r.get('wns_ns')} "
@@ -326,6 +336,7 @@ def main() -> None:
     if ok and "asic" in stages:
         # 4. ASIC: ORFS ở khối asic, từng bước make là một task (timeline thấy rõ từng bước).
         for stage in ASIC_STAGES:
+            S.set_live(report, task=f"asic_{stage}")
             r = get(asic_stage.chia_remote(str(run_dir), stage))
             ok = done(f"asic_{stage}", r)
             if not ok:
@@ -346,6 +357,7 @@ def main() -> None:
 
     out = run_dir / "results" / "baseline.json"
     out.write_text(json.dumps(report, indent=2, ensure_ascii=False))
+    S.write(report, final=True)
     ok = report["stopped_at"] is None
     print(f"[baseline {DEMO}] số liệu: {out}", flush=True)
     if report.get("profile"):

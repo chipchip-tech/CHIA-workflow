@@ -22,6 +22,7 @@ rtl/ không ai sửa: tối ưu riêng của FPGA không mang sang ASIC (docs/de
 Kết quả: <WORK_DIR>/demo-alu/CG/<run_id>/
     <step>-r<k>/          cây nguồn của vòng + kết quả đo; agent/ (TASK.md, context/, summary.md, stream.log)
     results/agent.json    mọi vòng; results/compare.md bảng baseline / agent cho slide
+    status.html           trang trạng thái (tự làm mới, mở bằng trình duyệt; xem status_page.py)
     profile/              timeline CHIA
 Vòng bị loại được dọn file lớn (bitstream, checkpoint, GDS, VCD, binary) để tiết kiệm đĩa.
 """
@@ -42,6 +43,7 @@ from chia.base.ChiaFunction import ChiaFunction, get
 from chia.trace.profiler import get_profiler, start_collector, stop_collector
 
 import baseline as B
+import status_page as S
 
 DEMO, DUT = B.DEMO, B.DUT
 SRC_DIRS = ("rtl", "sim", "fpga", "asic")
@@ -281,11 +283,14 @@ def _diff(cand: Path, before: dict[str, bytes], files: list[str]) -> str:
 # Đo và so sánh
 # ---------------------------------------------------------------------------
 
-def measure(step: str, cand: Path, params: dict) -> dict:
-    """Chạy lại bước trên các khối như baseline. Trả {ok, metrics, sub: {task: kết quả}, failed_at}."""
+def measure(step: str, cand: Path, params: dict, on_task=None) -> dict:
+    """Chạy lại bước trên các khối như baseline. Trả {ok, metrics, sub: {task: kết quả}, failed_at}.
+    on_task(tên task) được gọi khi mỗi task bắt đầu (trang trạng thái)."""
     sub = {}
 
     def run(name, ref):
+        if on_task:
+            on_task(name)
         r = get(ref)
         sub[name] = r
         return r["ok"]
@@ -591,9 +596,11 @@ def main() -> None:
     params = base_rep["params"]
     report = {"demo": DEMO, "dut": DUT, "phase": "agent", "run_id": args.run_id, "run_dir": str(run_dir),
               "baseline": str(base_dir), "steps": steps, "model": args.model, "effort": args.effort,
-              "rounds": [], "result": {}, "stopped": None}
+              "rounds": [], "result": {}, "stopped": None, "t0": time.time()}
     tag = f"[agent {DEMO}]"
     print(f"{tag} run_dir = {run_dir}\n{tag} baseline = {base_dir}", flush=True)
+    S.write(report)
+    print(f"{tag} trạng thái: {run_dir / 'status.html'}", flush=True)
 
     # Nguồn của vòng đầu: cây của project (cùng RTL với baseline, kiểm bằng sha256); kết quả/báo cáo: thư mục baseline.
     # Bước sau xây trên bản tốt nhất của bước trước.
@@ -607,6 +614,7 @@ def main() -> None:
     for step in steps:
         best_m = dict(base_m[step])
         step_best_src, step_best_dir = best_src, base_dir
+        report["result"][step] = {"baseline": base_m[step], "best": best_m, "best_dir": str(step_best_dir)}
         for k in range(1, args.rounds + 1):
             name = f"{step}-r{k}"
             cand = run_dir / name
@@ -617,6 +625,7 @@ def main() -> None:
             prompt = build_prompt(step)
             (cand / "agent" / "TASK.md").write_text(prompt)
             print(f"{tag} {name}: agent đang đánh giá ...", flush=True)
+            S.set_live(report, step=step, round=name, state="agent")
             s = get(agent_session.chia_remote(str(cand), prompt, args.model, args.effort, args.max_turns,
                                               args.agent_timeout))
             (cand / "agent" / "summary.md").write_text(s.get("summary", ""))
@@ -643,7 +652,8 @@ def main() -> None:
                 print(f"{tag} {name}: LOẠI ({rnd['verdict']})", flush=True)
                 slim(cand, keep_outputs=False)
                 continue
-            m = measure(step, cand, params)
+            m = measure(step, cand, params,
+                        on_task=lambda t: S.set_live(report, step=step, round=name, state="measure", task=t))
             rnd["measure"] = m
             if not m["ok"]:
                 rnd["verdict"] = f"không qua gate ở {m['failed_at']}"
@@ -655,7 +665,11 @@ def main() -> None:
                 rnd["accepted"], rnd["verdict"] = ok, why
                 if ok:
                     best_m, step_best_src, step_best_dir = m["metrics"], cand, cand
+                    report["result"][step] = {"baseline": base_m[step], "best": best_m,
+                                              "best_dir": str(step_best_dir)}
             print(f"{tag} {name}: {'NHẬN' if rnd['accepted'] else 'LOẠI'} ({rnd['verdict']})", flush=True)
+            report["live"] = None
+            S.write(report)
             slim(cand, keep_outputs=rnd["accepted"])
         report["result"][step] = {"baseline": base_m[step], "best": best_m, "best_dir": str(step_best_dir)}
         best_src = step_best_src
@@ -669,6 +683,8 @@ def main() -> None:
         report["profile"] = str(prof.with_name("ChiaProfileCollector_profile.html"))
     (run_dir / "results" / "agent.json").write_text(json.dumps(report, indent=2, ensure_ascii=False, default=str))
     (run_dir / "results" / "compare.md").write_text(compare_md(report))
+    report["live"] = None
+    S.write(report, final=True)
     print(f"{tag} so sánh: {run_dir / 'results' / 'compare.md'}", flush=True)
     if report.get("profile"):
         print(f"{tag} timeline: {report['profile']}", flush=True)
