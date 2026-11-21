@@ -388,8 +388,8 @@ corner cases are not checked yet (each op with edge operands, zero/carry flags, 
 Allowed file: sim/tb_{dut}.v only. Add checks; keep the plusargs, the final `RESULT:` line format and the counters
 (`checked` must count every comparison). The RTL is the reference behaviour: a new check that fails means your round
 is rejected, so make sure the expected values follow the RTL exactly.
-Gate: Verilator build + run with the same plusargs as baseline prints RESULT: PASS. Accepted if `checked` does not
-increase.""",
+Gate: Verilator build + run with the same plusargs as baseline prints RESULT: PASS. The round is accepted only if
+`checked` is strictly greater than in the current best version (a round that does not add checks is rejected).""",
     "fpga": """STEP: FPGA. Vivado 2025.1, part xc7a100tcsg324-1, 100 MHz clock from fpga/arty_a7_100t.xdc. The ALU is
 wrapped in fpga/fpga_top.v (LFSR stimulus, MISR self-check, LEDs). Read the reports of the current best build in
 agent/context/ (timing, utilization, power, clock utilization, methodology, warnings).
@@ -447,6 +447,9 @@ def write_context(step: str, cand: Path, best_dir: Path, best_m: dict, base_m: d
         (c / "asic_metrics.json").write_text(json.dumps(metrics, indent=1))
         files.append("asic_metrics.json")
         put(Path(ORFS_HOST, "flow", "scripts", "variables.yaml"), "orfs_variables.yaml", 2_000_000)
+    if not [f for f in files if f not in ("asic_metrics.json", "orfs_variables.yaml")] or (
+            step == "asic" and not metrics):
+        print(f"[agent {DEMO}] CẢNH BÁO: context {step} không có báo cáo từ {best_dir}", flush=True)
     (c / "metrics.json").write_text(json.dumps({"baseline": base_m, "current_best": best_m}, indent=2,
                                                ensure_ascii=False, default=str))
     (c / "history.json").write_text(json.dumps(history, indent=2, ensure_ascii=False, default=str))
@@ -598,10 +601,12 @@ def main() -> None:
     sha = B._sha256(sorted((src / "rtl").glob("*.v")))
     if sha != base_rep.get("rtl_sha256"):
         raise SystemExit(f"LỖI: rtl/ của project khác rtl/ của baseline {base_dir}: chạy lại baseline.py")
-    best_src, best_dir = src, base_dir
+    # Nguồn: bản tốt nhất của bước trước (sửa dồn qua các bước). Báo cáo cho context: thư mục nơi BƯỚC NÀY được đo lần
+    # tốt nhất (baseline, vì bước sau chưa đo lại bước trước: vòng sim được nhận không có báo cáo FPGA/ASIC).
+    best_src = src
     for step in steps:
         best_m = dict(base_m[step])
-        step_best_src, step_best_dir = best_src, best_dir
+        step_best_src, step_best_dir = best_src, base_dir
         for k in range(1, args.rounds + 1):
             name = f"{step}-r{k}"
             cand = run_dir / name
@@ -653,7 +658,7 @@ def main() -> None:
             print(f"{tag} {name}: {'NHẬN' if rnd['accepted'] else 'LOẠI'} ({rnd['verdict']})", flush=True)
             slim(cand, keep_outputs=rnd["accepted"])
         report["result"][step] = {"baseline": base_m[step], "best": best_m, "best_dir": str(step_best_dir)}
-        best_src, best_dir = step_best_src, step_best_dir
+        best_src = step_best_src
         if report["stopped"]:
             break
 

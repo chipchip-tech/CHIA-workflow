@@ -208,7 +208,7 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    lại để xem có phải nhiễu).
    Baseline chạy lần hai (21/11/2026) ra **đúng từng số** ở cả ba bước, kể cả thời gian route (CG vẫn 113 s): công cụ
    tất định, nhiễu bằng 0, nên ngưỡng so sánh ở pha 2 chỉ bỏ qua sai khác làm tròn.
-   **Pha 2** (`agent.py`, mỗi demo một bản) đã viết, chưa chạy với Claude thật. Mỗi bước tối đa `--rounds` vòng (mặc định
+   **Pha 2** (`agent.py`, mỗi demo một bản). Mỗi bước tối đa `--rounds` vòng (mặc định
    2): Claude Code ở khối `claude` đọc báo cáo của bản tốt nhất, sửa file được phép ngay trong thư mục vòng, CHIA đo lại
    trên các khối như baseline. Phạm vi sửa: Sim chỉ `sim/tb_*.v` (thêm kiểm tra, nhận khi số lần kiểm tra tăng); FPGA chỉ
    `fpga/` (`build.tcl`, `sources.f`, file `.v` mới riêng cho FPGA; gate thêm `tb_fpga_top` trong xsim có UNISIM); ASIC
@@ -217,3 +217,13 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    Claude, Vivado, ORFS giả (Verilator thật): nhận/loại đúng, sửa `rtl/` bị hoàn lại. `fpga/build.tcl` giờ đọc danh sách
    file từ `fpga/sources.f` (cùng tập file như trước). `projects/demo-alu/clean_runs.py` dọn các lần chạy cũ trong
    `WORK_DIR`.
+   **Chạy thử thật NoCG `--rounds 1` (21/11/2026, `KẾT QUẢ: OK`):** Claude ở khối `claude`, Verilator/Vivado/xsim/ORFS
+   thật, `build.tcl` đọc `sources.f` chạy được.
+   - Sim NHẬN: thêm kiểm tra độ trễ đúng 2 cạnh, giá trị biên, dịch với `b[7:3]≠0`, reset giữa chừng; checked 6272 → 6888.
+   - FPGA LOẠI: agent ánh xạ tay ALU lên LUT6_2 + CARRY4 (`fpga/NoCG_alu.v`) và thêm directive place/route; đo thật kém
+     hơn (WNS 4,579 → 4,373, LUT+FF 277 → 309). Gate chặn đúng, bản baseline giữ nguyên.
+   - ASIC NHẬN: `ABC_AREA=1`, `CORE_UTILIZATION` 40 → 55, `PLACE_DENSITY` 0,65 → 0,75: diện tích cell −1,2 %, die −27,5 %,
+     công suất −2,2 %, setup WS 6,815 → 7,025 ns, DRC 0.
+   - Lỗi lộ ra và đã sửa: (1) bước FPGA/ASIC lấy báo cáo từ thư mục vòng sim được nhận (không có báo cáo FPGA/ASIC), nên
+     agent ASIC chỉ thấy `metrics.json`; giờ mỗi bước lấy báo cáo từ baseline hoặc vòng được nhận của chính bước đó;
+     (2) câu gate Sim trong prompt ghi ngược ("accepted if checked does not increase"), agent tự nhận ra; đã sửa.
