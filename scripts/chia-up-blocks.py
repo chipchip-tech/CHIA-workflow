@@ -17,6 +17,7 @@ Tắt cluster (đặt THIS_MACHINE như lúc bật rồi gọi `chia down cluste
 """
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -62,6 +63,10 @@ def main() -> None:
                     help="tắt cluster của --out (chia down -y) với THIS_MACHINE tự dò; thiếu biến này thì chia down "
                          "SSH vào host rỗng và không gỡ được gì")
     args = ap.parse_args()
+
+    if not args.dry_run and shutil.which("chia") is None:
+        fail("không thấy lệnh `chia` trên PATH: chưa `conda activate chia_env`? "
+             f"(python đang chạy: {sys.executable})")
 
     if args.down:
         if not os.environ.get("THIS_MACHINE"):
