@@ -6,8 +6,8 @@ Mặc định CHỈ LIỆT KÊ (không xoá gì). Thêm --yes để xoá thật.
   python projects/demo-alu/clean_runs.py --yes           # làm theo kế hoạch
 
 Kế hoạch, cho từng demo (NoCG, CG):
-  - giữ --keep-baseline lần baseline OK mới nhất (mặc định 1: agent.py dùng bản này làm mốc), xoá các baseline khác
-    (kể cả bản lỗi);
+  - giữ --keep-baseline lần baseline OK mới nhất (mặc định 1: agent.py dùng bản này làm mốc) và baseline mà các lần
+    agent được giữ đã dùng làm mốc; xoá các baseline khác (kể cả bản lỗi);
   - giữ --keep-agent lần agent mới nhất (mặc định 2), xoá các lần cũ hơn;
   - ở các lần được giữ: xoá file trung gian lớn (binary Verilator obj/, checkpoint Vivado .dcp, .Xil, xsim.dir,
     ORFS objects/ và các .odb trừ 6_final.odb). Giữ log, báo cáo, VCD, bitstream, GDS, ảnh layout, results/, profile/.
@@ -89,6 +89,13 @@ def main() -> None:
         keep_b = [b for b in bases if baseline_ok(b)][:args.keep_baseline]
         agents = sorted(d.glob("agent-*"), reverse=True)
         keep_a = agents[:args.keep_agent]
+        # Baseline mà lần agent được giữ dùng làm mốc cũng phải giữ (compare.md, ảnh layout trên status.html).
+        for a in keep_a:
+            try:
+                ref = Path(json.loads((a / "results" / "agent.json").read_text())["baseline"]).name
+            except (OSError, ValueError, KeyError):
+                continue
+            keep_b += [b for b in bases if b.name == ref and b not in keep_b]
         print(f"== {demo}")
         for run in bases + agents:
             keep = run in keep_b or run in keep_a
