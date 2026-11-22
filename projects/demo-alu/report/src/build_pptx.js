@@ -56,7 +56,7 @@ function stat(s, big, small, x, y, w) {
 {
   const s = pres.addSlide();
   s.addText("PROGRESS REPORT · 22/11/2026", { x: 0.4, y: 1.45, w: 8, h: 0.35, fontFace: F, fontSize: 13, color: K.mute, charSpacing: 3, margin: 0, isTextBox: true });
-  s.addText([{ text: "Demo: Sim → FPGA → ASIC Flow", options: { breakLine: true } }, { text: "with an Agentic CHIA Loop" }],
+  s.addText([{ text: "Demo: Sim -> FPGA -> ASIC Flow", options: { breakLine: true } }, { text: "with an Agentic CHIA Loop" }],
     { x: 0.4, y: 2.0, w: 11, h: 1.5, fontFace: F, fontSize: 34, bold: true, color: K.black, valign: "middle", margin: 0, isTextBox: true });
   s.addText("8-bit ALU, with and without clock gating · Verilator, Vivado, Yosys + OpenROAD (sky130hd)",
     { x: 0.4, y: 3.55, w: 11, h: 0.4, fontFace: F, fontSize: 16, color: K.mute, margin: 0, isTextBox: true });
@@ -85,7 +85,7 @@ function stat(s, big, small, x, y, w) {
     ["Design", "8-bit ALU, 8 ops (ADD, SUB, AND, OR, XOR, SHL, SHR, SLT), 2-stage pipeline, zero / carry / valid flags"],
     ["CG variant", "icg module: latch + AND in simulation, sky130_fd_sc_hd__dlclkp in ASIC"],
     ["Sim", "Verilator 5.022, self-checking testbench against a reference model"],
-    ["FPGA", "Vivado 2025.1, xc7a100tcsg324-1 (Arty A7-100T), 100 MHz; fpga_top wrapper drives inputs with an LFSR and checks outputs with a MISR"],
+    ["FPGA", "Vivado 2025.1, targeting Arty A7-100T, 100 MHz; fpga_top wrapper drives inputs with an LFSR and checks outputs with a MISR"],
     ["ASIC", "Yosys 0.68 + OpenROAD (ORFS), sky130hd, 10 ns clock, RTL to GDS"],
     ["Agent", "Claude Code (Opus) on the claude block; edits a copy in the round's folder, cannot build"],
   ], { x: 6.5, y: 1.35, w: 6.0, colW: [1.2, 4.8], boldFirstCol: true, fs: 12 });
@@ -95,25 +95,23 @@ function stat(s, big, small, x, y, w) {
 {
   const s = pres.addSlide(); title(s, "2. Inputs, Outputs and the Agent Loop", 3);
   table(s, [
-    ["Step", "Block", "Input (written by us)", "Output"],
-    ["Sim", "chipyard, verilator", "rtl/<demo>_alu.v, sim/tb_<demo>_alu.v, run_sim.sh", "log with RESULT: PASS + checks, VCD"],
-    ["FPGA", "vivado", "RTL, fpga_top.v, tb_fpga_top.v, golden_sig.py, .xdc, build.tcl, sources.f", ".bit, timing / utilization / power reports"],
+    ["Step", "Block", "Input (written beforehand)", "Output"],
+    ["Sim", "chipyard, verilator", "<NoCG/CG>_alu.v, tb_<NoCG/CG>_alu.v", "log with RESULT: PASS + checks, VCD"],
+    ["FPGA", "vivado", "RTL, fpga_top.v, tb_fpga_top.v, .xdc, build.tcl, sources.f", ".bit, timing / utilization / power reports"],
     ["ASIC", "asic", "RTL, config.mk, constraint.sdc", "GDS, layout.png, area / timing / power / DRC reports"],
     ["Agent", "claude", "TASK.md, context/ (best reports, round history)", "edited files, summary.md, changes.diff"],
-    ["Flow", "head", "baseline.py or agent.py", "results/*.json, compare.md, status.html, profile/"],
-  ], { x: 0.85, y: 1.3, w: 8.4, colW: [0.7, 1.35, 3.45, 2.9], boldFirstCol: true, fs: 10 });
-  caption(s, "Each step is a @ChiaFunction(resources=...) that Ray sends to its block. Every run copies the inputs to ~/chia_demo/demo-alu/<demo>/<run_id>/ and writes all outputs there.", 0.85, 3.08, 8.4, 0.45);
-  placeholder(s, "[Insert figure: CHIA timeline of one baseline run\n(profile/ChiaProfileCollector_profile.html)]", 9.55, 1.3, 2.95, 2.1);
-  head(s, "One agent round (Sim → FPGA → ASIC, at most 2 rounds per step)", 0.85, 3.58, 11.65);
+    ["Flow", "head", "baseline.py or agent.py", "results/*.json, compare.md, status.html"],
+  ], { x: 0.85, y: 1.3, w: 11.65, colW: [0.9, 1.75, 4.8, 4.2], boldFirstCol: true, fs: 11.5 });
+  head(s, "One agent round (Sim -> FPGA -> ASIC, at most 2 rounds per step)", 0.85, 3.58, 11.65);
   const p2 = [["Copy best", "into the round's folder"], ["Agent edits", "reads reports + history"], ["CHIA reverts", "out-of-scope edits"], ["Re-measure", "real tool on its block"], ["Gate + rule", "accept or reject"]];
   p2.forEach((b, i) => { const x = 0.85 + i * 2.38; box(s, b[0], b[1], x, 3.98, 1.95, 0.6, i === 4); if (i < 4) arrow(s, x + 1.95, 4.28, x + 2.38); });
   caption(s, "Accepted round = base for the next round and step; a rejected round's reason goes into the next prompt. CHIA reverts every edit outside the allowed files before measuring.", 0.85, 4.62, 11.65, 0.4);
   table(s, [
     ["Step", "Agent may edit", "Gate", "Accept when", "Why only these files"],
-    ["Sim", "sim/tb_<DUT>.v", "RESULT: PASS", "number of checks increases", "Tests the design harder without touching it"],
-    ["FPGA", "build.tcl, sources.f, new .v in fpga/", "xsim PASS, bitstream, WNS ≥ 0", "no worse in WNS, dyn. power, LUT+FF; better in one (strict Pareto)", "FPGA-only build; new files keep rtl/ unchanged for ASIC"],
-    ["ASIC", "asic/config.mk", "GDS, setup/hold slack ≥ 0, DRC = 0", "cell area, die area, power no worse than 1 %; one better by > 1 %", "ORFS knobs only: how to build, not what"],
-    ["Locked", "rtl/, .xdc, .sdc, part, clock, fpga_top + MISR checker", "", "", "Shared by FPGA and ASIC, or define the target and the yardstick"],
+    ["Sim", "tb_<DUT>.v", "RESULT: PASS", "number of checks increases", "Tests the design harder without touching it"],
+    ["FPGA", "build.tcl, sources.f, new .v", "xsim PASS, bitstream, WNS ≥ 0", "no worse in WNS, dyn. power, LUT+FF and better in at least one", "FPGA-only build; new files for FPGA don’t affect ASIC"],
+    ["ASIC", "config.mk", "GDS, setup/hold slack ≥ 0, DRC = 0", "cell area, die area, power no worse than 1 %; one better by > 1 %", "ORFS settings only: how to build, not what"],
+    ["Locked", ".v (design), .xdc, .sdc, part, clock, fpga_top + MISR checker", "-", "-", "Shared by FPGA and ASIC, or define the target and the yardstick"],
   ], { x: 0.85, y: 5.05, w: 11.65, colW: [0.75, 2.4, 2.05, 3.35, 3.1], boldFirstCol: true, fs: 10.5 });
 }
 
@@ -133,8 +131,8 @@ function stat(s, big, small, x, y, w) {
     ["", "power (mW), DRC", "0.368, 0", "0.324, 0"],
   ], { x: 0.85, y: 1.35, w: 6.6, colW: [0.8, 2.5, 1.65, 1.65], boldFirstCol: true });
   head(s, "Same RTL, opposite results", 7.95, 1.35, 4.55);
-  stat(s, "4.58 → 1.50 ns", "FPGA WNS with CG: the clock passes a latch and a LUT, leaving half a cycle. Dynamic power 2 → 5 mW; Vivado warns of a gated clock.", 7.95, 1.85, 4.55);
-  stat(s, "−12 %", "ASIC power with CG: the ICG replaces the feedback mux, so 50 fewer cells and cell area −3 %, but clock buffers double (9 → 18). OpenROAD CTS handles the ICG correctly.", 7.95, 3.55, 4.55);
+  stat(s, "4.58 -> 1.50 ns", "FPGA WNS with CG: the clock passes a latch and a LUT, leaving half a cycle. Dynamic power 2 -> 5 mW; Vivado warns of a gated clock.", 7.95, 1.85, 4.55);
+  stat(s, "−12 %", "ASIC power with CG: the ICG replaces the feedback mux, so 50 fewer cells and cell area −3 %, but clock buffers double (9 -> 18). OpenROAD CTS handles the ICG correctly.", 7.95, 3.55, 4.55);
   bullets(s, [
     "This is why an FPGA optimization must not reach the ASIC branch.",
     "Run time per demo: FPGA ≈ 64 s, ASIC ≈ 2.5 min.",
@@ -145,13 +143,13 @@ function stat(s, big, small, x, y, w) {
 {
   const s = pres.addSlide(); title(s, "4. Agent Results vs Baseline", 5);
   table(s, [
-    ["Metric", "NoCG: baseline → agent", "CG: baseline → agent"],
-    ["Sim checks (still PASS)", "6 272 → 542 046 (×86)", "6 272 → 1 509 090 (×241)"],
+    ["Metric", "NoCG: baseline -> agent", "CG: baseline -> agent"],
+    ["Sim checks (still PASS)", "6 272 -> 542 046 (×86)", "6 272 -> 1 509 090 (×241)"],
     ["FPGA", "2 rounds rejected, baseline kept", "2 rounds rejected, baseline kept"],
-    ["ASIC cell area (µm²)", "3 077.95 → 3 021.65 (−1.8 %)", "2 975.35 → 2 835.22 (−4.7 %)"],
-    ["ASIC die area (µm²)", "7 534.24 → 4 641.70 (−38.4 %)", "6 925.57 → 5 504.90 (−20.5 %)"],
-    ["ASIC power (mW)", "0.368 → 0.361 (−1.8 %)", "0.324 → 0.302 (−6.8 %)"],
-    ["ASIC setup slack (ns), DRC", "6.815 → 7.034, 0", "6.957 → 7.042, 0"],
+    ["ASIC cell area (µm²)", "3 077.95 -> 3 021.65 (−1.8 %)", "2 975.35 -> 2 835.22 (−4.7 %)"],
+    ["ASIC die area (µm²)", "7 534.24 -> 4 641.70 (−38.4 %)", "6 925.57 -> 5 504.90 (−20.5 %)"],
+    ["ASIC power (mW)", "0.368 -> 0.361 (−1.8 %)", "0.324 -> 0.302 (−6.8 %)"],
+    ["ASIC setup slack (ns), DRC", "6.815 -> 7.034, 0", "6.957 -> 7.042, 0"],
   ], { x: 0.85, y: 1.35, w: 7.6, colW: [2.3, 2.65, 2.65], boldFirstCol: true, fs: 12 });
   caption(s, "agent.py --rounds 2, both demos finished OK. Accepted: sim-r1, sim-r2, asic-r1, asic-r2. About 22 min per demo.", 0.85, 3.6, 7.6, 0.45);
   s.addChart(pres.charts.BAR, [
@@ -175,13 +173,13 @@ function stat(s, big, small, x, y, w) {
   const s = pres.addSlide(); title(s, "5. FPGA: All Four Agent Rounds Rejected", 6);
   table(s, [
     ["Round", "What the agent did", "Measured", "Result"],
-    ["NoCG r1", "Retiming, hand-mapped LUT6_2/CARRY4, Explore directives", "WNS 4.58 → 4.94 ns; dyn. power 2 → 5 mW; LUT+FF 277 → 302", "Rejected"],
-    ["NoCG r2", "Keep input registers, one shared adder for ADD/SUB/SLT", "LUT+FF 277 → 262; WNS 4.58 → 4.21 ns", "Rejected"],
-    ["CG r1", "ICG as an AND gate + gated_clock_conversion, so Vivado turns gating into FF clock enables", "WNS 1.50 → 4.50 ns; dyn. power 5 → 2 mW; LUT+FF 281 → 284", "Rejected"],
-    ["CG r2", "FPGA-only ALU using clock enables, no latch on the clock, plus retiming", "WNS 1.50 → 4.44 ns; LUT+FF 281 → 312", "Rejected"],
+    ["NoCG r1", "Retiming, hand-mapped LUT6_2/CARRY4, Explore directives", "WNS 4.58 -> 4.94 ns; dyn. power 2 -> 5 mW; LUT+FF 277 -> 302", "Rejected"],
+    ["NoCG r2", "Keep input registers, one shared adder for ADD/SUB/SLT", "LUT+FF 277 -> 262; WNS 4.58 -> 4.21 ns", "Rejected"],
+    ["CG r1", "ICG as an AND gate + gated_clock_conversion, so Vivado turns gating into FF clock enables", "WNS 1.50 -> 4.50 ns; dyn. power 5 -> 2 mW; LUT+FF 281 -> 284", "Rejected"],
+    ["CG r2", "FPGA-only ALU using clock enables, no latch on the clock, plus retiming", "WNS 1.50 -> 4.44 ns; LUT+FF 281 -> 312", "Rejected"],
   ], { x: 0.85, y: 1.35, w: 11.65, colW: [1.1, 4.6, 4.75, 1.2], boldFirstCol: true });
   bullets(s, [
-    "Each proposal improves one metric and worsens another, so the strict Pareto rule rejects all four and the baseline stays.",
+    "Each proposal improves one metric and worsens another, so the strict rule rejects all four and the baseline stays.",
     "Before submitting, the agent checked its logic with a Python model over all 524 288 op × a × b cases (0 errors). Its resource predictions were still wrong; only the real Vivado run showed that.",
     "The agent learns from rejection: in NoCG r2 it read why r1 failed (dynamic power) and went back to keeping the input registers.",
     "CG r1 is the notable trade-off. It fixed the real FPGA problem of clock gating (WNS ×3, dynamic power −60 %) at the cost of 3 LUT+FF cells. The rule was fixed before the run and is not relaxed after seeing results.",
@@ -193,8 +191,8 @@ function stat(s, big, small, x, y, w) {
   const s = pres.addSlide(); title(s, "6. ASIC: Agent Tunes the ORFS Config", 7);
   table(s, [
     ["Round", "NoCG", "CG"],
-    ["r1", "ABC_AREA=1, CORE_UTILIZATION 40 → 55, PLACE_DENSITY 0.65 → 0.75: die −27.5 %", "ABC_AREA=1 only, because the earlier CG route needed 6 iterations to clear DRC: power −7.1 %"],
-    ["r2", "CORE_UTILIZATION 55 → 65, PLACE_DENSITY 0.75 → 0.85: die a further −15 %", "CORE_UTILIZATION 40 → 50, DONT_BUFFER_PORTS=1: cell area −4 %, die −19.5 %"],
+    ["r1", "ABC_AREA=1, CORE_UTILIZATION 40 -> 55, PLACE_DENSITY 0.65 -> 0.75: die −27.5 %", "ABC_AREA=1 only, because the earlier CG route needed 6 iterations to clear DRC: power −7.1 %"],
+    ["r2", "CORE_UTILIZATION 55 -> 65, PLACE_DENSITY 0.75 -> 0.85: die a further −15 %", "CORE_UTILIZATION 40 -> 50, DONT_BUFFER_PORTS=1: cell area −4 %, die −19.5 %"],
   ], { x: 0.85, y: 1.35, w: 6.6, colW: [0.7, 2.95, 2.95], boldFirstCol: true, fs: 12 });
   bullets(s, [
     "The agent may edit only config.mk.",
@@ -203,19 +201,23 @@ function stat(s, big, small, x, y, w) {
     "Cell count rises 26 to 31 % because area-driven synthesis picks more, smaller cells.",
     "The agent noted the limit of this step: flops and the clock tree are about 70 % of NoCG power, set by the RTL, not by config.mk.",
   ], { x: 0.85, y: 3.15, w: 6.6, h: 3.5, fs: 14 });
-  placeholder(s, "[Insert figure: NoCG baseline layout\nasic/layout.png]", 7.95, 1.35, 2.2, 2.6);
-  placeholder(s, "[Insert figure: NoCG agent layout\nasic/layout.png]", 10.3, 1.35, 2.2, 2.6);
-  placeholder(s, "[Insert figure: CG baseline layout]", 7.95, 4.1, 2.2, 2.6);
-  placeholder(s, "[Insert figure: CG agent layout]", 10.3, 4.1, 2.2, 2.6);
+  const IMG = __dirname + "/../img/";
+  [["NoCG_baseline", 7.95, 1.35, 1, "NoCG baseline · 7 534 µm²"], ["NoCG_agent", 10.3, 1.35, Math.sqrt(4641.70 / 7534.24), "NoCG agent · 4 642 µm²"],
+   ["CG_baseline", 7.95, 4.05, 1, "CG baseline · 6 926 µm²"], ["CG_agent", 10.3, 4.05, Math.sqrt(5504.90 / 6925.57), "CG agent · 5 505 µm²"]].forEach(([f, x, y, k, t]) => {
+    const S = 2.2, d = S * k;  // cùng tỉ lệ: cạnh ảnh tỉ lệ với căn diện tích die
+    s.addImage({ path: IMG + f + "_layout.png", x: x + (S - d) / 2, y: y + S - d, w: d, h: d });
+    s.addText(t, { x, y: y + S + 0.05, w: S, h: 0.3, fontFace: F, fontSize: 11, color: K.ink, align: "center", margin: 0, isTextBox: true });
+  });
+  s.addText("Images drawn to the same scale (side ∝ √die area)", { x: 7.95, y: 6.72, w: 4.55, h: 0.3, fontFace: F, fontSize: 10, italic: true, color: K.mute, align: "center", margin: 0, isTextBox: true });
 }
 
 // 8. Kết luận
 {
-  const s = pres.addSlide(); title(s, "Conclusions, Limitations and Next Steps", 8);
+  const s = pres.addSlide(); title(s, "Conclusions and Limitations", 8);
   head(s, "Conclusions", 0.85, 1.35, 5.6);
   bullets(s, [
     "The flow runs end to end: CHIA schedules Sim (Verilator), FPGA (Vivado, bitstream) and ASIC (Yosys + OpenROAD, GDS) on 5 blocks, with a gate at every step.",
-    "The agent contributes at every step: Sim checks ×86 to ×241, ASIC die −20 to −38 %, CG power −6.8 %. No FPGA round was accepted, but it found the clock-gating problem.",
+    "The agent contributes at every step: Sim checks ×86 / ×241, ASIC die −38 / −20 % (NoCG / CG), CG power −6.8 %. No FPGA round was accepted, but it found the clock-gating problem.",
     "Real measurement is required: some agent predictions were wrong, and the propose, measure, accept-or-reject loop never ends worse than baseline.",
     "FPGA and ASIC must stay separate: clock gating helps ASIC and hurts FPGA. With rtl/ fixed, FPGA-only edits do not reach ASIC.",
   ], { x: 0.85, y: 1.8, w: 5.6, h: 5.0, fs: 14 });
@@ -226,13 +228,6 @@ function stat(s, big, small, x, y, w) {
     "Power is estimated: OpenSTA default activity, Vivado vector-less.",
     "One agent sample per round; no board test yet (FPGA stops at bitstream).",
   ], { x: 6.9, y: 1.8, w: 5.6, h: 2.6, fs: 13.5 });
-  head(s, "Next steps", 6.9, 4.0, 5.6);
-  table(s, [
-    ["Task", "Status"],
-    ["Video of a run with the live status page", "Not started"],
-    ["Gate-level sim of the ASIC netlist, Verilator coverage", "Proposed"],
-    ["Demo 2: PicoRV32 mini-SoC, same loop and blocks", "Optional"],
-  ], { x: 6.9, y: 4.45, w: 5.6, colW: [4.1, 1.5], fs: 12.5 });
 }
 
 pres.writeFile({ fileName: "/home/user/CHIA-workflow/projects/demo-alu/report/ProgressReport_22-11.pptx" }).then(f => console.log("wrote", f));
