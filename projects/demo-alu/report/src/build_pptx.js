@@ -103,16 +103,17 @@ function stat(s, big, small, x, y, w) {
   ], { x: 0.85, y: 1.3, w: 7.3, colW: [2.0, 1.75, 3.55], boldFirstCol: true, fs: 11.5 });
   caption(s, "Each step is a @ChiaFunction(resources=...) that Ray sends to the block with that tool. All blocks mount ~/chia_demo at the same path; status.html shows progress.", 0.85, 3.0, 7.3, 0.45);
   placeholder(s, "[Insert figure: CHIA timeline of one baseline run\n(profile/ChiaProfileCollector_profile.html)]", 8.5, 1.3, 4.0, 2.15);
-  head(s, "One agent round (Sim → FPGA → ASIC, at most 2 rounds per step)", 0.85, 3.55, 11.65);
+  head(s, "One agent round (Sim → FPGA → ASIC, at most 2 rounds per step)", 0.85, 3.5, 11.65);
   const p2 = [["Copy best", "into the round's folder"], ["Agent edits", "reads reports + history"], ["CHIA reverts", "out-of-scope edits"], ["Re-measure", "real tool on its block"], ["Gate + rule", "accept or reject"]];
-  p2.forEach((b, i) => { const x = 0.85 + i * 2.38; box(s, b[0], b[1], x, 4.0, 1.95, 0.7, i === 4); if (i < 4) arrow(s, x + 1.95, 4.35, x + 2.38); });
-  caption(s, "An accepted round becomes the base for the next round and step; a rejected round's reason goes into the next prompt. rtl/, .xdc, .sdc are fixed: FPGA-only changes go into new files under fpga/.", 0.85, 4.75, 11.65, 0.45);
+  p2.forEach((b, i) => { const x = 0.85 + i * 2.38; box(s, b[0], b[1], x, 3.92, 1.95, 0.6, i === 4); if (i < 4) arrow(s, x + 1.95, 4.22, x + 2.38); });
+  caption(s, "Accepted round = base for the next round and step; a rejected round's reason goes into the next prompt. CHIA reverts every edit outside the allowed files before measuring.", 0.85, 4.57, 11.65, 0.4);
   table(s, [
-    ["Step", "Agent may edit", "Gate", "Accept when"],
-    ["Sim", "sim/tb_<DUT>.v", "RESULT: PASS", "number of checks increases"],
-    ["FPGA", "build.tcl, sources.f, new .v in fpga/", "xsim PASS, bitstream, WNS ≥ 0", "no worse in WNS, dynamic power, LUT+FF; better in one (strict Pareto)"],
-    ["ASIC", "asic/config.mk", "GDS, setup/hold slack ≥ 0, DRC = 0", "cell area, die area, power no worse than 1 %; one better by > 1 %"],
-  ], { x: 0.85, y: 5.25, w: 11.65, colW: [0.8, 2.95, 2.9, 5.0], boldFirstCol: true, fs: 11.5 });
+    ["Step", "Agent may edit", "Gate", "Accept when", "Why only these files"],
+    ["Sim", "sim/tb_<DUT>.v", "RESULT: PASS", "number of checks increases", "Tests the design harder without touching it"],
+    ["FPGA", "build.tcl, sources.f, new .v in fpga/", "xsim PASS, bitstream, WNS ≥ 0", "no worse in WNS, dyn. power, LUT+FF; better in one (strict Pareto)", "FPGA-only build; new files keep rtl/ unchanged for ASIC"],
+    ["ASIC", "asic/config.mk", "GDS, setup/hold slack ≥ 0, DRC = 0", "cell area, die area, power no worse than 1 %; one better by > 1 %", "ORFS knobs only: how to build, not what"],
+    ["Locked", "rtl/, .xdc, .sdc, part, clock, fpga_top + MISR checker", "", "", "Shared by FPGA and ASIC, or define the target and the yardstick"],
+  ], { x: 0.85, y: 5.0, w: 11.65, colW: [0.75, 2.4, 2.05, 3.35, 3.1], boldFirstCol: true, fs: 10.5 });
 }
 
 // 4. Baseline

@@ -137,8 +137,30 @@ B += [table([
     ['ASIC', '`asic/config.mk`', 'Có GDS, slack setup và hold ≥ 0, DRC = 0',
      'Diện tích cell, diện tích die, công suất không kém quá 1 %; ít nhất một chỉ số tốt hơn quá 1 %'],
 ], [900, 2400, 2526, 3200])]
-B += [para('Agent không được sửa thư mục `rtl/` và các file ràng buộc `.xdc`, `.sdc`. Muốn tối ưu riêng cho FPGA, agent phải '
-           'viết file mới trong `fpga/`. Nhờ vậy thay đổi dành cho FPGA không lọt sang nhánh ASIC.')]
+B += [para('Phạm vi sửa được chọn theo một nguyên tắc: agent chỉ được sửa phần thuộc về *cách làm* của bước đó. Những gì '
+           'quyết định *đo cái gì* và *đo bằng thước nào* đều bị khóa. Nếu sửa được thước đo, agent có thể làm số liệu đẹp lên mà '
+           'thiết kế không tốt hơn.')]
+B += [para('Những phần bị khóa và lý do:')]
+B += [bullet('Thư mục `rtl/`: cùng một RTL đi vào cả FPGA lẫn ASIC. Baseline cho thấy clock gating có lợi trên ASIC nhưng có hại '
+             'trên FPGA (mục 2.4), nên sửa RTL cho FPGA có thể làm ASIC kém đi. Đổi RTL cũng biến phép so sánh thành so sánh với '
+             'một thiết kế khác, và phải mô phỏng lại từ đầu.'),
+      bullet('File ràng buộc `.xdc`, `.sdc`, chip FPGA và chu kỳ clock: đây là mục tiêu của bài toán (100 MHz trên Arty A7, 10 ns '
+             'trên sky130). Nếu nới clock từ 10 lên 20 ns, slack tăng mà mạch không nhanh hơn. Khóa ràng buộc thì mọi cải thiện '
+             'timing đều là thật.'),
+      bullet('Bộ kiểm tra của bước FPGA (`fpga_top.v` với LFSR và MISR, `tb_fpga_top.v`, chữ ký chuẩn): đây là nơi xác nhận mạch '
+             'trên FPGA vẫn đúng chức năng. Agent được sửa cách build, không được sửa bộ chấm điểm.')]
+B += [para('Những phần được mở và lý do:')]
+B += [bullet('Sim, chỉ testbench: bước Sim nhằm kiểm thiết kế kỹ hơn, và testbench là nơi duy nhất làm được việc đó mà không chạm '
+             'vào thiết kế. Gate `RESULT: PASS` buộc testbench mới vẫn chạy qua RTL thật.'),
+      bullet('FPGA, `build.tcl`, `sources.f` và file `.v` mới trong `fpga/`: đây là phần triển khai riêng cho FPGA (directive của '
+             'Vivado, chọn nguồn để tổng hợp). Muốn đổi kiến trúc cho FPGA thì viết file mới, như CG r2 viết ALU riêng dùng CE; '
+             'nhánh ASIC vẫn đọc `rtl/` gốc nên không bị ảnh hưởng.'),
+      bullet('ASIC, chỉ `config.mk`: file này chứa tham số của ORFS (chiến lược tổng hợp, mật độ đặt cell, kích thước core), đúng '
+             'là phần cách làm của bước ASIC.')]
+B += [para('Luật được CHIA ép bằng máy chứ không chỉ dặn trong lời nhắc: trước khi đo, CHIA hoàn lại mọi file ngoài danh sách '
+           'cho phép. Vì mỗi bước chỉ có một vùng được sửa, khi một vòng được nhận ta biết chính xác cải thiện đến từ thay đổi '
+           'nào; file `changes.diff` của vòng ghi lại thay đổi đó. Giới hạn còn lại nằm ở bước Sim: thước đo số lần kiểm tra do '
+           'chính testbench của agent đếm, nên tăng số lần kiểm tra chưa chắc là tăng độ phủ (mục 2.7).')]
 
 B += [h2('2.4. Kết quả baseline')]
 B += [table([
