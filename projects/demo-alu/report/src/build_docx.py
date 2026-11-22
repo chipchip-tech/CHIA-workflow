@@ -120,7 +120,28 @@ B += [table([
     ['Gate', 'Điều kiện tối thiểu một bước phải đạt (ví dụ mô phỏng PASS) thì kết quả mới được xét tiếp'],
 ], [2200, 6826])]
 
-B += [h2('2.3. Vòng lặp agent')]
+B += [h2('2.3. Đầu vào và đầu ra')]
+B += [para('Đầu vào duy nhất mô tả thiết kế là file RTL. Các file còn lại là testbench, ràng buộc và cấu hình công cụ, do người '
+           'viết sẵn cho từng bước. Mỗi lần chạy, CHIA chép toàn bộ đầu vào sang một thư mục riêng '
+           '`~/chia_demo/demo-alu/<demo>/<run_id>/` rồi ghi mọi đầu ra vào đó, nên bản gốc trong repo không bị đổi. '
+           'Bảng dưới dùng tên file của NoCG; CG có cùng bố cục.')]
+B += [table([
+    ['Bước', 'Khối', 'Đầu vào', 'Đầu ra'],
+    ['Sim', 'chipyard, verilator', '`rtl/NoCG_alu.v`, `sim/tb_NoCG_alu.v`, `sim/run_sim.sh`',
+     'Log có `RESULT: PASS` và số lần kiểm tra, dạng sóng VCD'],
+    ['FPGA', 'vivado', 'RTL, `fpga/fpga_top.v`, `tb_fpga_top.v`, `golden_sig.py`, `arty_a7_100t.xdc`, `build.tcl`, `sources.f`',
+     'Bitstream `.bit`, báo cáo timing, tài nguyên và công suất'],
+    ['ASIC', 'asic', 'RTL, `asic/config.mk`, `constraint.sdc`',
+     'GDS, ảnh `asic/layout.png`, báo cáo diện tích, timing, công suất, DRC'],
+    ['Agent (mỗi vòng)', 'claude', '`TASK.md` (đề bài), `context/` (báo cáo của bản tốt nhất, lịch sử các vòng)',
+     'File đã sửa, `summary.md` (agent giải thích), `changes.diff`'],
+    ['Cả flow', 'head', '`baseline.py` hoặc `agent.py` (số vòng, luật nhận)',
+     '`results/*.json`, `results/compare.md` (bảng so sánh), `status.html`, timeline trong `profile/`'],
+], [1250, 1150, 3626, 3000])]
+B += [para('Ở pha 2, mỗi vòng có thư mục riêng `<step>-r<k>/` chứa đủ đầu vào và đầu ra của vòng đó, nên có thể xem lại agent '
+           'đã nhận gì, sửa gì và kết quả đo ra sao.')]
+
+B += [h2('2.4. Vòng lặp agent')]
 B += [para('Agent làm lần lượt Sim, FPGA rồi ASIC. Mỗi bước có tối đa 2 vòng, và mỗi vòng diễn ra như sau:')]
 B += [bullet('CHIA chép bản tốt nhất hiện có sang một thư mục riêng của vòng.'),
       bullet('Agent đọc báo cáo của bản tốt nhất cùng lịch sử các vòng trước, rồi sửa những file được phép. Khối `claude` không có '
@@ -142,7 +163,7 @@ B += [para('Phạm vi sửa được chọn theo một nguyên tắc: agent ch�
            'thiết kế không tốt hơn.')]
 B += [para('Những phần bị khóa và lý do:')]
 B += [bullet('Thư mục `rtl/`: cùng một RTL đi vào cả FPGA lẫn ASIC. Baseline cho thấy clock gating có lợi trên ASIC nhưng có hại '
-             'trên FPGA (mục 2.4), nên sửa RTL cho FPGA có thể làm ASIC kém đi. Đổi RTL cũng biến phép so sánh thành so sánh với '
+             'trên FPGA (mục 2.5), nên sửa RTL cho FPGA có thể làm ASIC kém đi. Đổi RTL cũng biến phép so sánh thành so sánh với '
              'một thiết kế khác, và phải mô phỏng lại từ đầu.'),
       bullet('File ràng buộc `.xdc`, `.sdc`, chip FPGA và chu kỳ clock: đây là mục tiêu của bài toán (100 MHz trên Arty A7, 10 ns '
              'trên sky130). Nếu nới clock từ 10 lên 20 ns, slack tăng mà mạch không nhanh hơn. Khóa ràng buộc thì mọi cải thiện '
@@ -160,9 +181,9 @@ B += [bullet('Sim, chỉ testbench: bước Sim nhằm kiểm thiết kế kỹ 
 B += [para('Luật được CHIA ép bằng máy chứ không chỉ dặn trong lời nhắc: trước khi đo, CHIA hoàn lại mọi file ngoài danh sách '
            'cho phép. Vì mỗi bước chỉ có một vùng được sửa, khi một vòng được nhận ta biết chính xác cải thiện đến từ thay đổi '
            'nào; file `changes.diff` của vòng ghi lại thay đổi đó. Giới hạn còn lại nằm ở bước Sim: thước đo số lần kiểm tra do '
-           'chính testbench của agent đếm, nên tăng số lần kiểm tra chưa chắc là tăng độ phủ (mục 2.7).')]
+           'chính testbench của agent đếm, nên tăng số lần kiểm tra chưa chắc là tăng độ phủ (mục 2.8).')]
 
-B += [h2('2.4. Kết quả baseline')]
+B += [h2('2.5. Kết quả baseline')]
 B += [table([
     ['Bước', 'Chỉ số', 'NoCG', 'CG'],
     ['Sim', 'Kết quả, số lần kiểm tra', 'PASS, 6 272', 'PASS, 6 272'],
@@ -180,12 +201,12 @@ B += [para('Trên FPGA, CG kém hơn NoCG. Ở CG, clock phải đi qua latch v�
            'nửa chu kỳ: WNS giảm từ 4,579 xuống 1,502 ns. Công suất động tăng từ 2 lên 5 mW, và Vivado cảnh báo gated clock.')]
 B += [para('Trên ASIC, CG tốt hơn. Cell ICG thay cho mux hồi tiếp của NoCG, nên thiết kế ít hơn 50 cell, diện tích cell giảm 3 % '
            'và công suất giảm 12 %. Đổi lại, số buffer clock tăng gấp đôi, từ 9 lên 18. Bước CTS của OpenROAD xử lý đúng cell ICG.')]
-B += [para('Vì kết quả ngược nhau như vậy, tối ưu cho FPGA không được mang sang ASIC (luật ở mục 2.3). Mỗi demo chạy baseline '
+B += [para('Vì kết quả ngược nhau như vậy, tối ưu cho FPGA không được mang sang ASIC (luật ở mục 2.4). Mỗi demo chạy baseline '
            'mất khoảng 64 s cho FPGA và 2,5 phút cho ASIC.')]
 B += [figure('[Chèn hình: timeline CHIA của một lần chạy baseline, profile/ChiaProfileCollector_profile.html]')]
 B += [caption('Hình 1. Timeline CHIA: các task Sim, FPGA, ASIC chạy trên từng khối của cluster')]
 
-B += [h2('2.5. Kết quả agent so với baseline')]
+B += [h2('2.6. Kết quả agent so với baseline')]
 B += [para('Cả hai demo chạy `agent.py --rounds 2` (NoCG `agent-20261121-141430`, CG `agent-20261121-143619`) và kết thúc với '
            '`KẾT QUẢ: OK`. Ở cả hai demo, các vòng được nhận là `sim-r1`, `sim-r2`, `asic-r1`, `asic-r2`; mọi vòng FPGA bị loại. '
            'Mỗi demo chạy khoảng 22 phút.')]
@@ -239,7 +260,7 @@ B += [para('`ABC_AREA=1` cho Yosys tổng hợp theo diện tích thay vì theo 
 B += [figure('[Chèn hình: layout GDS NoCG và CG, baseline (trái) và agent (phải), asic/layout.png của mỗi lần chạy]')]
 B += [caption('Hình 2. Layout ASIC trước và sau agent')]
 
-B += [h2('2.6. Kết luận')]
+B += [h2('2.7. Kết luận')]
 B += [bullet('Flow chạy trọn và đúng: CHIA điều phối Sim (Verilator), FPGA (Vivado, ra bitstream) và ASIC (Yosys và OpenROAD, ra GDS) '
              'trên năm khối, bước nào cũng có gate.'),
       bullet('Agent đóng góp được ở cả ba bước: số lần kiểm tra Sim tăng 86 đến 241 lần, die ASIC giảm 20 đến 38 %, công suất CG giảm '
@@ -248,7 +269,7 @@ B += [bullet('Flow chạy trọn và đúng: CHIA điều phối Sim (Verilator)
              'không bao giờ kém baseline.'),
       bullet('FPGA và ASIC cần tách riêng: clock gating có lợi trên ASIC nhưng có hại trên FPGA. Vì `rtl/` cố định, sửa riêng cho FPGA '
              'không ảnh hưởng ASIC.')]
-B += [h2('2.7. Hạn chế')]
+B += [h2('2.8. Hạn chế')]
 B += [bullet('Thiết kế rất nhỏ (khoảng 300 cell) và RTL cố định, nên ít chỗ để tối ưu.'),
       bullet('Thước đo của Sim chỉ đếm số phép so sánh (`checked`), không đo độ phủ. Chưa có mô phỏng mức cổng hay kiểm LVS sau khi agent đổi cấu hình ASIC.'),
       bullet('Công suất chỉ là ước lượng: OpenSTA dùng hoạt động mặc định, Vivado ước lượng không có vector kích thích.'),
