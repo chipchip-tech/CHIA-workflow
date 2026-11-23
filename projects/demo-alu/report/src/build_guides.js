@@ -1,4 +1,4 @@
-// build_guides.js - 4 deck hướng dẫn từng bước (tiếng Anh), cùng style với ProgressReport_22-11.pptx:
+// build_guides.js - 4 deck hướng dẫn từng bước (tiếng Anh; 0_Setup chung, không gắn demo), cùng style với ProgressReport_22-11.pptx:
 //   guides/0_Setup.pptx, 1_Sim.pptx, 2_FPGA.pptx, 3_ASIC.pptx
 // Chạy: NODE_PATH=<thư mục có pptxgenjs>/node_modules node build_guides.js [thư mục ra]
 // Số liệu lấy từ REPORT.md và docs/demo-task.md (chạy thật 20–21/11/2026).
@@ -129,39 +129,55 @@ function step(H, t, why, cmds, expect, notes, o) {
 }
 
 // ====================================================================================
-// 0. SETUP
+// 0. SETUP (chung, không gắn với demo): cluster một máy + worker remote/cloud
 // ====================================================================================
 async function setupDeck() {
   const H = deck("Guide 0 · Setting up CHIA", "Guide 0: Setting up the CHIA Framework");
-  H.cover("GUIDE 0 · FRAMEWORK SETUP", "Setting up CHIA for the", "Sim -> FPGA -> ASIC Flow",
-    "One-machine CHIA cluster with five tool blocks: Chipyard, Verilator, Vivado, OpenROAD, Claude");
+  H.cover("GUIDE 0 · FRAMEWORK SETUP", "Setting up the CHIA Framework:", "Local and Remote Workers",
+    "Ray cluster of Docker workers for hardware tools (Chipyard, Verilator, Vivado, OpenROAD) and LLM agents");
 
-  // 2. Bức tranh tổng
+  // 2. Mô hình CHIA
   {
-    const s = H.slide("What You Are Building",
-      "CHIA runs on Ray. The head runs the driver script (baseline.py or agent.py). Each block is a Docker container that joins Ray as a worker and advertises one resource. A task decorated with @ChiaFunction(resources={...}) is scheduled on the block that has that resource.\n\nAll tools live on the host under ~/tools and are mounted into the containers at the same real path (Bazzite: /home is a symlink to /var/home, so mounts use realpath).\n\nWORK_DIR (default ~/chia_demo) is mounted read-write into every block. All run outputs land there, so a later task on another block can read what an earlier task wrote.\n\nVerified on the user's machine (Bazzite, 20 CPU, 23 GB RAM): full reinstall 14/11/2026, demo runs 20-21/11/2026.");
-    H.box(s, "Head (your machine)", "Ray head · driver: baseline.py / agent.py · chia job submit", 3.9, 1.35, 5.5, 0.85, true);
-    const bl = [["chipyard", "Verilator build", "chipyard"], ["verilator", "run sim binary", "verilator_run"], ["vivado", "xsim, Vivado", "vivado"],
-                ["asic", "ORFS: Yosys + OpenROAD", "asic"], ["claude", "Claude Code agent", "claude_creds"]];
+    const s = H.slide("How CHIA Runs Work",
+      "CHIA (UC Berkeley, pip package chialoops) is a hardware/software co-design framework built on Ray. Docs: docs.chialoops.ai; paper arXiv:2606.27350.\n\nThe head runs Ray and your driver script. Each worker is a Docker container with one set of tools, and it advertises resources (names you choose, such as chipyard or vivado). A function decorated with @ChiaFunction(resources=...) runs on any worker that has those resources, on whichever machine it lives.\n\nchia job submit --working-dir . copies the current folder to every worker, so the modules that define your tasks can be imported there.\n\nCHIA also gives LLM wrappers, tool servers (BashTool), a result cache and a profiler with a timeline view (chia viz-profile).");
+    H.box(s, "Head", "Ray head · your driver script · chia job submit", 3.9, 1.35, 5.5, 0.8, true);
+    const bl = [["worker A", "e.g. Chipyard build", "chipyard"], ["worker B", "e.g. run simulator", "verilator_run"], ["worker C", "e.g. Vivado", "vivado"],
+                ["worker D", "e.g. OpenROAD", "asic"], ["worker E", "e.g. LLM agent", "claude_creds"]];
     bl.forEach(([a, b, r], i) => {
       const x = 0.85 + i * 2.37;
-      H.box(s, a, b + "\nresource: " + r, x, 2.75, 2.15, 1.05, false, 12.5);
-      H.arrow(s, 6.65, 2.2, x + 1.075, 2.75);
+      H.box(s, a, b + "\nresource: " + r, x, 2.7, 2.15, 1.0, false, 12.5);
+      H.arrow(s, 6.65, 2.15, x + 1.075, 2.7);
     });
-    s.addText("WORK_DIR = ~/chia_demo  (shared, mounted read-write into every block: sources, logs, VCD, bitstream, GDS)",
-      { x: 0.85, y: 4.0, w: 11.65, h: 0.45, fontFace: F, fontSize: 13, color: K.black, align: "center", valign: "middle", fill: { color: K.soft }, line: { color: K.line, width: 0.75 }, margin: 4 });
-    H.head(s, "Tools on the host", 0.85, 4.75, 5.5);
-    H.code(s, ["~/tools/", "├── chipyard/                Chipyard 1.15.0", "├── OpenROAD-flow-scripts/   ORFS (asic block)", "└── Xilinx/2025.1/           Vivado (read-only)"], 0.85, 5.15, 5.6, 11);
-    H.head(s, "Order of the setup steps", 6.85, 4.75, 5.6);
-    H.bullets(s, ["1 Host prerequisites · 2 Python env + CHIA", "3 Chipyard (chipyard, verilator blocks)", "4 Vivado (vivado block) · 5 ORFS (asic block)",
-      "6 Claude login (claude block) · 7 Bring up + smoke test"], { x: 6.85, y: 5.15, w: 5.6, h: 1.6, fs: 13.5 });
+    H.caption(s, "Each worker is a Docker container; workers can sit on the head machine or on remote / cloud machines.", 0.85, 3.8, 11.6);
+    H.head(s, "A task and a job", 0.85, 4.3, 6.5);
+    H.code(s, ["from chia.base.ChiaFunction import ChiaFunction, get", "", '@ChiaFunction(resources={"verilator_run": 1})',
+      "def run_sim(path):            # runs on a worker with that resource", '    return subprocess.run(["./sim"], cwd=path).returncode', "",
+      "rc = get(run_sim.chia_remote(path))   # the driver waits here"], 0.85, 4.7, 6.6, 10.5);
+    H.head(s, "Submit from the head", 7.8, 4.3, 4.7);
+    H.code(s, ["conda activate chia_env", "chia job submit --working-dir . \\", "  -- python my_loop.py", "chia job logs -f <id>", "chia job stop <id>"], 7.8, 4.7, 4.7, 10.5);
   }
 
-  step(H, "Step 1 · Host Prerequisites", [
+  // 3. Local vs remote
+  {
+    const s = H.slide("Two Ways to Run the Cluster",
+      "Part A (local) has been run end to end on the user's machine (Bazzite, 20 CPU, 23 GB RAM): full reinstall on 14/11/2026, all five tool blocks with KẾT QUẢ: OK.\n\nPart B (remote) is written from the CHIA documentation and source (cluster_config_reference.rst, chia/cluster/*.py). It has NOT been run yet because there is no second machine. Treat its commands as a plan to check, not as verified steps.");
+    H.table(s, [["", "A. Local (one machine)", "B. Remote / cloud workers"],
+      ["Machines", "Head and all workers on one PC", "Head on your PC; workers also on other PCs or cloud VMs"],
+      ["When", "Tools fit in one machine's CPU, RAM and disk", "More parallel builds or simulations, more RAM, tools only on another machine"],
+      ["Network", "None beyond SSH to yourself", "SSH head → remote; Ray ports open both ways; Tailscale across networks"],
+      ["Remote needs", "-", "sshd, Docker without sudo, rsync. No conda, no CHIA"],
+      ["Config", "scripts/chia-up-blocks.py (generates the cluster file)", "configs/cluster-lan.yaml (HEAD_IP, REMOTE_IP, REMOTE_USER)"],
+      ["Status", "verified 14/11/2026", "not tested yet"]],
+      { x: 0.85, y: 1.35, w: 11.65, colW: [1.75, 4.6, 5.3], fs: 13, boldFirstCol: true });
+    H.caption(s, "Do Part A first: a remote cluster is the local one plus extra workers.", 0.85, 5.6, 11.6);
+  }
+
+  // ---------------- Part A ----------------
+  step(H, "A1 · Host Prerequisites", [
     "CHIA always calls the docker command, so Docker must work without sudo.",
-    "chia up opens an SSH session to the head IP, even with one machine: you need sshd and a key that logs into your own machine without a password.",
+    "chia up opens an SSH session to the head IP even with one machine: you need sshd and a key that logs into your own machine without a password.",
     "loginctl enable-linger keeps the Ray head alive after that SSH session closes. Without it the head dies right after chia up (worker log: Failed to connect to GCS).",
-    "Miniforge (conda) provides the Python environment in step 2.",
+    "Miniforge (conda) provides the Python environment in A2.",
   ], [
     "Docker without sudo (Bazzite-DX: ujust dx-group, then log in again)",
     ["docker run --rm hello-world"],
@@ -172,122 +188,149 @@ async function setupDeck() {
     "Keep user processes alive after logout",
     ["loginctl enable-linger $USER"],
   ], "hello-world prints its greeting; the ssh line lists containers without asking for a password.",
-  "Machine used: Bazzite-DX (ghcr.io/ublue-os/bazzite-dx-nvidia:stable). On Bazzite without DX there is only Podman; CHIA does not support Podman officially (see docs/setup-bazzite.md).\n\nIf ssh asks for a passphrase, load the key into ssh-agent: eval \"$(ssh-agent -s)\"; ssh-add ~/.ssh/id_ed25519.\n\nVerified on the user's machine (sshd, linger, docker group).", { eh: 0.6 });
+  "Machine used: Bazzite-DX (ghcr.io/ublue-os/bazzite-dx-nvidia:stable). On Bazzite without DX there is only Podman; CHIA does not support Podman officially (see docs/setup-bazzite.md).\n\nIf ssh asks for a passphrase, load the key into ssh-agent: eval \"$(ssh-agent -s)\"; ssh-add ~/.ssh/id_ed25519.\n\nVerified on the user's machine.", { eh: 0.6 });
 
-  step(H, "Step 2 · Python Environment, CHIA and This Repo", [
+  step(H, "A2 · Python Environment, CHIA and the Workflow Repo", [
     "CHIA is the pip package chialoops; it brings Ray 2.54.0.",
-    "Ray checks that every worker has the same Python as the head, down to the patch version, so pin 3.10.19.",
+    "Ray checks that every worker has the same Python as the head, down to the patch version, so pin 3.10.19 (the worker images use it).",
     "PYTHONNOUSERSITE=1 stops pip from picking packages out of ~/.local (an old anyio/httpx clash).",
-    "The repo holds the cluster template, the setup scripts and the demo projects. check-bazzite-env.sh checks docker, ssh, linger and disk.",
+    "CHIA-workflow holds the cluster templates, setup scripts and notes; check-bazzite-env.sh checks docker, ssh, linger and disk.",
   ], [
     ["conda create -n chia_env python=3.10.19 -y", "conda env config vars set PYTHONNOUSERSITE=1 -n chia_env",
      "conda activate chia_env", "pip install chialoops==2.0.1", "python -V; ray --version; chia --help | head -3"],
     ["git clone -b setup \\", "  https://github.com/chipchip-tech/CHIA-workflow.git \\", "  ~/CHIA-workflow",
      "cd ~/CHIA-workflow && scripts/check-bazzite-env.sh"],
   ], "Python 3.10.19, ray 2.54.0, chia --help runs; the check script passes (a RAM warning under 32 GB is normal).",
-  "The demo lives on branch demo: git checkout demo after cloning (or clone with -b demo).\n\nThe user's GitHub login is through Google, so git push does not work from the machine; changes come back through the Claude session.\n\nVerified 14/11/2026 (docs/reinstall.md steps 3-4).", { eh: 0.75 });
+  "Verified 14/11/2026 (docs/reinstall.md steps 3-4).", { eh: 0.75 });
 
-  step(H, "Step 3 · Chipyard 1.15.0 (chipyard and verilator blocks)", [
-    "The chipyard block builds the simulation with Chipyard's own Verilator 5.022. The verilator block only runs the binary (its image has no Verilator).",
-    "The script clones ucb-bar/chipyard, checks out tag 1.15.0 as branch local-1.15.0 and runs all 11 steps of build-setup.sh in a temporary container.",
+  step(H, "A3 · Chipyard (chipyard and verilator workers)", [
+    "Tools live on the host under ~/tools and are mounted into the workers at the same real path, so you can edit them with a normal editor.",
+    "setup-chipyard.sh clones ucb-bar/chipyard, checks out tag 1.15.0 as branch local-1.15.0 and runs all 11 steps of build-setup.sh in a temporary container.",
     "This takes hours. Leave the machine on, run one copy at a time, use tmux if you are on SSH.",
     "If it stops, the script prints the step number and the exact command to resume. Steps 8-9 (FireMarshal) need --privileged.",
   ], [
-    ["cd ~/CHIA-workflow", "scripts/setup-chipyard.sh --verify"],
-    "Log while it runs",
-    ["tail -f ~/tools/chipyard/setup.log"],
+    ["cd ~/CHIA-workflow", "scripts/setup-chipyard.sh --verify", "tail -f ~/tools/chipyard/setup.log"],
     "Only if step 9 fails at 'sudo mount -o loop'",
     ["scripts/setup-chipyard.sh --privileged ~/tools/chipyard \\", "  -- -s 1 -s 2 -s 3 -s 4 -s 5 -s 6 -s 7 -s 10 -s 11"],
-  ], "Setup complete!, then VERIFY_OK (a RocketConfig Verilator build and a test program with EXIT=0).",
-  "Errors seen on the real run (14/11/2026, 8 attempts) and their fixes are in docs/reinstall.md step 5: conda network errors, two setup containers at once, the deleted ibm/rocc-software repo, half-fetched FireSim submodules after a stop in step 6, FireMarshal needing --privileged and loop devices.\n\n'Storing main conda environment' can sit silent for tens of minutes while it downloads several GB; watch NET I/O in docker stats.\n\nVerified 14/11/2026.", { eh: 0.6 });
+    "Host layout after A3 and A4",
+    ["~/tools/chipyard/               Chipyard 1.15.0", "~/tools/Xilinx/2025.1/          Vivado (read-only)", "~/tools/OpenROAD-flow-scripts/  ORFS"],
+  ], "Setup complete!, then VERIFY_OK (RocketConfig Verilator build and a test program with EXIT=0).",
+  "Errors seen on the real run (14/11/2026, 8 attempts) and their fixes are in docs/reinstall.md step 5.\n\nBazzite: /home is a symlink to /var/home, so every mount uses realpath; Chipyard writes absolute paths into env.sh.\n\nVerified 14/11/2026.", { eh: 0.6 });
 
-  step(H, "Step 4 · Vivado 2025.1 (vivado block)", [
-    "Install Vivado on the host under ~/tools/Xilinx; the block mounts it read-only at the same real path, because settings64.sh hard-codes the install path.",
-    "The demo only needs the part xc7a100tcsg324-1. Digilent board files are needed for Chipyard's Arty flow, so install them once.",
-    "Vivado 2025.1 crashes after 'Routing Is Done' if the container lacks --net=host (license check through libudev). CHIA containers always have it; remember it only for manual docker runs.",
+  step(H, "A4 · Vivado, OpenROAD and the Agent Login", [
+    "Vivado: install under ~/tools/Xilinx; the worker mounts it read-only at the same real path, since settings64.sh hard-codes it. Vivado 2025.1 crashes after routing without --net=host; CHIA containers always have it.",
+    "OpenROAD-flow-scripts: build the chia-orfs image (Ray added to openroad/orfs, own Python 3.10.19), then copy ORFS out of it to ~/tools.",
+    "LLM agent (Claude Code): log in once on the host; the claude worker reuses ~/.claude. CHIA also ships an OpenCode image (chia-opencode).",
+    "All three are optional: enable only the workers your project needs.",
   ], [
-    "Expected layout",
-    ["~/tools/Xilinx/2025.1/Vivado/settings64.sh"],
-    "Board files (once)",
-    ["git clone --depth 1 \\", "  https://github.com/Digilent/vivado-boards.git /tmp/vb",
-     "B=~/tools/Xilinx/2025.1/Vivado/data/boards/board_files", "mkdir -p $B && cp -r /tmp/vb/new/board_files/arty-a7-100 $B/"],
-    "Other path or version",
-    ["export XILINX_DIR=/path/to/Xilinx VIVADO_VERSION=2025.1"],
-  ], "In step 7 the smoke test prints 'vivado v2025.1' from inside the vivado block.",
-  "The block uses image ghcr.io/ucb-bar/chia-chisel-build, which ships its own /usr/local/bin/vivado (2024.2); chia-up-blocks.py puts the host Vivado first on PATH.\n\nCheck the board part: source settings64.sh, then in Vivado batch: get_board_parts digilentinc.com:arty-a7-100:* should print digilentinc.com:arty-a7-100:part0:1.1.\n\nVerified 09/11 and 14/11/2026 (bitstream for RocketArty100TConfig through a CHIA job).", { eh: 0.6 });
+    "Vivado board files (once, for Digilent boards)",
+    ["B=~/tools/Xilinx/2025.1/Vivado/data/boards/board_files", "git clone --depth 1 https://github.com/Digilent/vivado-boards /tmp/vb", "mkdir -p $B && cp -r /tmp/vb/new/board_files/arty-a7-100 $B/"],
+    "OpenROAD-flow-scripts",
+    ["docker build -t chia-orfs:latest -f docker/orfs-ray.Dockerfile docker", "scripts/setup-orfs.sh --verify"],
+    "Claude Code login",
+    ["claude && cp ~/.claude.json ~/.claude/.claude.json"],
+  ], "setup-orfs.sh prints VERIFY_OK (nangate45/gcd end to end).",
+  "Other Xilinx path or version: export XILINX_DIR=... VIVADO_VERSION=.... RAM limit of the asic worker: ASIC_MEM=20g (default 12g).\n\nopenroad -version prints 'unknown' inside the worker (image built without a git SHA); not an error.\n\nVerified 08-14/11/2026.", { eh: 0.55, cfs: 9.5 });
 
-  step(H, "Step 5 · OpenROAD-flow-scripts (asic block)", [
-    "The asic block runs ORFS: Yosys for synthesis, OpenROAD for floorplan, place, CTS and route, KLayout for the GDS picture.",
-    "docker/orfs-ray.Dockerfile adds Ray to the openroad/orfs image. ORFS uses Python 3.14, so Ray gets its own Python 3.10.19 in /opt/raypy.",
-    "setup-orfs.sh copies ORFS out of the image to ~/tools/OpenROAD-flow-scripts, so the scripts match the built OpenROAD and Yosys exactly. The block mounts it back.",
-    "--verify runs the sample nangate45/gcd design end to end.",
-  ], [
-    ["cd ~/CHIA-workflow", "docker build -t chia-orfs:latest \\", "  -f docker/orfs-ray.Dockerfile docker", "scripts/setup-orfs.sh --verify"],
-    "RAM limit of the asic container (default 12g)",
-    ["export ASIC_MEM=20g"],
-  ], "VERIFY_OK. About 1.4 GB is copied to ~/tools/OpenROAD-flow-scripts.",
-  "openroad -version prints 'unknown' inside the block because the image was built without a git SHA; this is not an error.\n\nThe block runs with the host UID, so files written under flow/ can be edited or deleted on the host.\n\nVerified 08/11/2026 and again 14/11/2026.", { eh: 0.6 });
-
-  step(H, "Step 6 · Claude Code (claude block)", [
-    "The claude block runs Claude Code, the agent that reads reports and edits files in phase 2.",
-    "It reuses your own login: log in once on the host, then copy the login file to where the block reads it.",
-    "chia-up-blocks.py refuses to start the claude block if ~/.claude/.claude.json is missing (use --no-claude to skip it).",
-    "The block has no Verilator, Vivado or ORFS. The agent cannot build anything; CHIA measures every edit on the other blocks.",
-  ], [
-    "Log in once on the host",
-    ["claude", "cp ~/.claude.json ~/.claude/.claude.json"],
-    "What the block mounts",
-    ["~/.claude      login and settings", "~/chia_demo    WORK_DIR, read-write", "~/tools/chipyard  read-only"],
-  ], "The smoke test in step 7 reports the claude block; phase 2 shows 'agent ... @ chia-claude-...' for each round.",
-  "The model used in the demo is opus (agent.py --model opus, the default). Each agent session has a 1200 s limit (--agent-timeout).\n\nVerified: the claude block ran all agent rounds of the main demo run on 21/11/2026.", { eh: 0.75 });
-
-  step(H, "Step 7 · Bring Up the Cluster and Smoke Test", [
-    "chia-up-blocks.py writes cluster.gen.yaml from the template with only the blocks you ask for, then runs chia up. It checks the prerequisites first (Chipyard env.sh, Vivado settings64.sh, chia-orfs image, Claude login).",
-    "Default blocks: chipyard, verilator, claude. --fpga adds vivado, --asic adds asic. The demo needs all five.",
-    "blocks_smoke.py sends a small task to each block and prints what it finds.",
+  step(H, "A5 · Bring Up the Local Cluster and Smoke Test", [
+    "chia-up-blocks.py writes cluster.gen.yaml from the template with only the workers you ask for, then runs chia up. It checks prerequisites first (Chipyard env.sh, Vivado settings64.sh, chia-orfs image, Claude login).",
+    "Default: chipyard, verilator, claude. --fpga adds vivado, --asic adds asic, --no-claude drops the agent.",
+    "A shared work folder (WORK_DIR, default ~/chia_demo) is mounted read-write into every worker, so one task can read what another wrote.",
     "Always shut down with --down: plain chia down without THIS_MACHINE removes nothing.",
   ], [
     ["conda activate chia_env && cd ~/CHIA-workflow", "python scripts/chia-up-blocks.py --fpga --asic", "ray status"],
-    ["cd ~/CHIA-workflow/examples", "chia job submit --working-dir . -- \\", "  python blocks_smoke.py"],
+    ["cd examples && chia job submit --working-dir . -- \\", "  python blocks_smoke.py"],
     "When you are done",
     ["python ~/CHIA-workflow/scripts/chia-up-blocks.py --down"],
-  ], "ray status lists the five resources; the smoke test ends with SUCCESS=True, vivado v2025.1 and KẾT QUẢ: OK.",
-  "--dry-run shows the generated config without starting anything. --verilator-slots N lets N simulations run at once.\n\nchia up reuses a container that is still running, so after changing mounts (WORK_DIR, XILINX_DIR) run --down first.\n\nThe first chipyard build after a fresh install downloads the JVM cache once (~/chia_cache/jvm).\n\nVerified 14/11/2026 (all five blocks, KẾT QUẢ: OK) and 15/11/2026 (--down removes every container).", { eh: 0.75 });
+  ], "ray status lists every resource; the smoke test ends with SUCCESS=True, vivado v2025.1 and KẾT QUẢ: OK.",
+  "--dry-run shows the generated config without starting anything. --verilator-slots N lets N simulations run at once. WORK_DIR=/path changes the shared folder.\n\nchia up reuses a container that is still running, so after changing mounts run --down first.\n\nDashboard: http://127.0.0.1:8265.\n\nVerified 14/11/2026 (all five workers) and 15/11/2026 (--down removes every container).", { eh: 0.75 });
 
-  // Troubleshooting
+  // ---------------- Part B ----------------
   {
-    const s = H.slide("Errors We Hit and Their Fixes",
-      "All entries come from real runs on the user's machine. The full list is in CLAUDE.md and docs/cluster-blocks.md.");
-    H.table(s, [
-      ["Symptom", "Cause", "Fix"],
-      ["Ray head dies right after chia up; worker: Failed to connect to GCS", "systemd-logind kills the SSH session's processes", "loginctl enable-linger $USER"],
-      ["chia down prints an empty Head: and removes nothing", "THIS_MACHINE not set in the shell", "python scripts/chia-up-blocks.py --down"],
-      ["Version mismatch ... Python 3.10.22", "Ray compares Python down to the patch version", "Pin python=3.10.19 everywhere"],
-      ["Vivado crashes after Routing Is Done", "Manual container without --net=host", "Add --net=host (CHIA blocks have it)"],
-      ["Not a conda environment: /var/home/...", "/home is a symlink to /var/home", "Mount with $(realpath ...)"],
-      ["sbt / coursier hangs, java at 0 % CPU", "Dead TCP socket to Maven Central, no read timeout", "JVM cache mount + JAVA_TOOL_OPTIONS timeouts (built into the template)"],
-      ["Ctrl+C does not stop a job", "The job runs in the Ray job server", "chia job stop <id>"],
-    ], { x: 0.85, y: 1.35, w: 11.65, colW: [4.2, 3.85, 3.6], fs: 12.5 });
+    const s = H.slide("B1 · Remote Workers: Architecture and Network",
+      "Ray has no login: anyone who can reach the Ray ports can run code on the cluster. Allow only the cluster machines' IPs, never the Internet.\n\nThe remote machine does not need conda or CHIA. chia up SSHes into it (ssh -A ... bash --login), pulls the images, starts containers with --net=host --init and runs ray start --address=<HEAD_IP>:6379 inside them.\n\nThe driver still runs on the head; Ray sends tasks to the remote by resource and moves results between machines.\n\nNot tested yet (no second machine).");
+    H.box(s, "HEAD (your PC)", "Ray head :6379 · driver · local workers", 0.85, 1.4, 4.2, 1.0, true);
+    H.box(s, "REMOTE (PC or cloud VM)", "sshd · Docker · worker containers", 8.3, 1.4, 4.2, 1.0);
+    H.arrow(s, 5.05, 1.7, 8.3, 1.7);
+    H.arrow(s, 8.3, 2.1, 5.05, 2.1);
+    H.para(s, "SSH, docker, ray start", { x: 5.2, y: 1.35, w: 3.0, h: 0.3, fs: 11.5, align: "center" });
+    H.para(s, "GCS 6379 + random Ray ports, both ways", { x: 5.1, y: 2.15, w: 3.1, h: 0.3, fs: 11.5, align: "center" });
+    H.head(s, "Ports that must be open between the machines", 0.85, 2.85, 5.7);
+    H.bullets(s, ["Remote → head: GCS 6379, and random raylet / object manager / worker ports (10002-19999).",
+      "Head → remote: random ports on the remote as well.",
+      "Tool servers (BashTool, MCP) listen on 8000+ on the machine that runs them."], { x: 0.85, y: 3.25, w: 5.7, h: 2.2, fs: 13.5 });
+    H.head(s, "Simplest safe rule: each machine trusts the other's IP", 6.85, 2.85, 5.65);
+    H.code(s, ["# head (firewalld)", "sudo firewall-cmd --permanent --zone=trusted \\", "  --add-source=<REMOTE_IP>", "sudo firewall-cmd --reload", "",
+      "# remote (ufw)", "sudo ufw allow from <HEAD_IP>"], 6.85, 3.25, 5.65, 10.5);
+    H.head(s, "Suggested remote hardware", 0.85, 5.55, 5.7);
+    H.para(s, "x86_64, ≥ 16 GB RAM per Chipyard worker, ≥ 120 GB free disk.", { x: 0.85, y: 5.95, w: 5.7, h: 0.5, fs: 13.5 });
   }
 
-  // Next
+  step(H, "B2 · Prepare and Check the Remote Machine", [
+    "prepare-remote-worker.sh runs on the remote and asks before each step: enable sshd, install Docker and add the user to the docker group, install rsync, open the firewall for the head, pre-pull the large images.",
+    "It supports Ubuntu/Debian, Fedora and Fedora Atomic (Bazzite). Log out and in after joining the docker group.",
+    "CHIA uses ssh -A, so the key must be in ssh-agent on the head.",
+    "check-remote-worker.sh runs on the head and only reads: SSH, CPU architecture, Docker without sudo, rsync, RAM and disk, and (when the cluster is up) whether the remote reaches HEAD:6379.",
+  ], [
+    "On the head: copy the script over",
+    ["scp ~/CHIA-workflow/scripts/prepare-remote-worker.sh \\", "  <user>@<REMOTE_IP>:"],
+    "On the remote",
+    ["bash prepare-remote-worker.sh <HEAD_IP>"],
+    "On the head: key, SSH test, readiness check",
+    ["ssh-copy-id <user>@<REMOTE_IP>", "eval \"$(ssh-agent -s)\"; ssh-add", "ssh <user>@<REMOTE_IP> 'bash --login -c \"docker ps\"'",
+     "bash scripts/check-remote-worker.sh <user>@<REMOTE_IP> <HEAD_IP>"],
+  ], "No password prompt, docker ps works over SSH, and the check prints no [FAIL].",
+  "Fix every [FAIL] before chia up, and run the check again after the cluster is up to test the remote → head direction.\n\nIf the remote user differs from the head user, set REMOTE_USER; the template puts it in auth.overrides.\n\nNot tested yet: written from the CHIA docs and source.", { eh: 0.55, cfs: 10 });
+
   {
-    const s = H.slide("Next: Run the Demo",
-      "run_demo.py submits the job with chia job submit, serves WORK_DIR/demo-alu on http://127.0.0.1:8765 and opens the status page in a browser. On Bazzite, xdg-open on PATH is a distrobox shim, so the script calls /usr/bin/xdg-open, gio open or Flatpak Firefox.\n\nrun_demo.py itself has only been tested in the sandbox (fake chia); the baseline and agent scripts it calls ran for real on 20-21/11/2026.");
-    H.head(s, "Two demos, same flow", 0.85, 1.3, 5.5);
-    H.bullets(s, ["projects/demo-alu/NoCG: 8-bit ALU, registers hold with a clock enable (feedback mux).",
-      "projects/demo-alu/CG: same ALU, input and output registers clocked through an ICG cell.",
-      "Each demo has rtl/, sim/, fpga/, asic/, baseline.py (phase 1) and agent.py (phases 2 and 3)."], { x: 0.85, y: 1.75, w: 5.5, h: 2.2, fs: 14 });
-    H.head(s, "Guides that follow", 0.85, 4.1, 5.5);
-    H.bullets(s, ["Guide 1: Sim (Verilator)", "Guide 2: FPGA (Vivado)", "Guide 3: ASIC (Yosys + OpenROAD)",
-      "Each goes baseline -> agent -> NoCG/CG example."], { x: 0.85, y: 4.5, w: 5.5, h: 2.0, fs: 14 });
-    H.head(s, "Whole flow in three commands", 6.55, 1.3, 5.95);
-    let y = H.code(s, ["cd ~/CHIA-workflow/projects/demo-alu", "python run_demo.py NoCG baseline          # ~4 min",
-      "python run_demo.py NoCG agent --rounds 2  # ~20-25 min", "python run_demo.py show ~/chia_demo/demo-alu/NoCG/<run_id>"], 6.55, 1.75, 5.95, 10.5);
-    H.caption(s, "Replace NoCG with CG for the other demo. Without run_demo.py:", 6.55, y + 0.15, 5.95);
-    y = H.code(s, ["cd ~/CHIA-workflow/projects/demo-alu/NoCG", "chia job submit --working-dir . -- python baseline.py"], 6.55, y + 0.5, 5.95, 10.5);
-    H.caption(s, "Clean old runs (lists only; add --yes to delete):", 6.55, y + 0.15, 5.95);
-    H.code(s, ["python clean_runs.py --keep-agent 1"], 6.55, y + 0.5, 5.95, 10.5);
+    const s = H.slide("B3 · Describe the Cluster and Bring It Up",
+      "Run only one head per machine: shut the local cluster down first (chia-up-blocks.py --down), because both use port 6379.\n\nThe template's remote workers use the tools built into the CHIA images (/home/ray/chipyard). The local blocks mount tools from ~/tools instead; to do the same on a remote, the same folders must exist there at the same path.\n\nchia up --add creates only the missing workers and leaves running ones alone. To add a third machine, copy the *_remote node types, change compatible_ips, and add an auth.overrides entry if the user differs. Several identical machines can share one node type with balance_level: worker.\n\nNot tested yet.");
+    H.head(s, "configs/cluster-lan.yaml (excerpt)", 0.85, 1.3, 6.3);
+    H.code(s, ["provider:   { head_ip: ${HEAD_IP} }", "auth:", "  ssh_user: ${USER}", "  overrides: { \"${REMOTE_IP}\": { ssh_user: ${REMOTE_USER} } }",
+      "available_node_types:", "  chipyard_remote:", '    resources: {"chipyard": 1, "cy_remote": 1}', "    num_workers: 1",
+      '    compatible_ips: ["${REMOTE_IP}"]', '    docker: { image: "ghcr.io/ucb-bar/chia-chisel-build:latest" }', "  verilator_remote:",
+      '    resources: {"verilator_run": 1}', "    num_workers: 2", '    compatible_ips: ["${REMOTE_IP}"]'], 0.85, 1.7, 6.5, 10);
+    H.head(s, "Bring up, check, grow, shut down", 7.65, 1.3, 4.85);
+    let y = H.code(s, ["conda activate chia_env", "CL=~/CHIA-workflow/configs/cluster-lan.yaml", "export HEAD_IP=<head ip>", "export REMOTE_IP=<remote ip>",
+      "export REMOTE_USER=<remote user>", "chia up $CL -y", "chia status", "", "# after editing the yaml", "chia up --add $CL -y", "", "chia down $CL -y"], 7.65, 1.7, 4.85, 10);
+    H.expect(s, "chia status shows 7 active nodes; resources chipyard: 2, cy_head: 1, cy_remote: 1, verilator_run: 3.", 7.65, y + 0.15, 4.85, 0.75);
+  }
+
+  {
+    const s = H.slide("B4 · Other Networks, Cloud VMs and Writing Jobs",
+      "Cloud VM: any provider works if the VM has a public or Tailscale-reachable SSH, Docker and enough disk for the images. Keep the provider's security group closed to the Ray ports and join the VM to the tailnet instead.\n\ntailnet: mode (no root): CHIA routes all Ray traffic over userspace Tailscale through a relay. On Bazzite, do not add --node-ip-address (CHIA adds it), keep systemd-run, and set ssh_proxy_command to ncat --proxy 127.0.0.1:1055 --proxy-type socks5 %h %p because Fedora's nc is Ncat. All workers must be on the tailnet or on the head machine.\n\nNot tested yet.");
+    H.head(s, "Different networks or a cloud VM: Tailscale", 0.85, 1.3, 5.7);
+    H.code(s, ["# on each machine (needs sudo)", "sudo systemctl enable --now tailscaled", "sudo tailscale up", "tailscale ip -4            # 100.x.y.z",
+      "sudo firewall-cmd --permanent --zone=trusted \\", "  --add-interface=tailscale0 && sudo firewall-cmd --reload", "", "# then as on a LAN, with Tailscale IPs",
+      "export HEAD_IP=$(tailscale ip -4) REMOTE_IP=100.x.y.z"], 0.85, 1.7, 5.7, 10);
+    H.bullets(s, ["No root on the remote: CHIA's own tailnet: mode (see notes).", "Links over the Internet are slower than a LAN: keep heavy data on one machine."],
+      { x: 0.85, y: 4.15, w: 5.7, h: 1.4, fs: 13 });
+    H.head(s, "Jobs across machines", 6.85, 1.3, 5.65);
+    H.bullets(s, ["The loop code does not change when machines are added: Ray places tasks by resource.",
+      "Pin a tool and the build that uses its edits to the same container with a per-machine resource (cy_head, cy_remote).",
+      "Spread independent tasks (simulations, builds) to use every machine; SPREAD forces it."], { x: 6.85, y: 1.7, w: 5.65, h: 2.2, fs: 13 });
+    H.code(s, ['pin = {"chipyard": 1, "cy_remote": 0.01}', 'bash = BashTool("cy_bash", "/home/ray/chipyard",', '                task_options={"resources": pin})',
+      "...agent edits through bash...; bash.stop()", "art = get(cb.build.options(resources=pin).chia_remote(cb))", "",
+      "refs = [sim.run.chia_remote(...) for t in tests]  # all machines", 'r = f.options(scheduling_strategy="SPREAD").chia_remote(x)'], 6.85, 4.0, 5.65, 9.5);
+  }
+
+  // Lỗi
+  {
+    const s = H.slide("Common Errors and Fixes",
+      "Local rows come from real runs on the user's machine. Remote rows are the expected failure modes listed in docs/usage-remote.md, not yet observed. Full lists: CLAUDE.md, docs/cluster-blocks.md, docs/usage-remote.md.");
+    H.table(s, [
+      ["", "Symptom", "Fix"],
+      ["local", "Ray head dies right after chia up; worker: Failed to connect to GCS", "loginctl enable-linger $USER"],
+      ["local", "chia down prints an empty Head: and removes nothing", "python scripts/chia-up-blocks.py --down"],
+      ["local", "Version mismatch ... Python 3.10.22", "Same Python patch version everywhere (3.10.19)"],
+      ["local", "Vivado crashes after Routing Is Done (manual container)", "Add --net=host"],
+      ["local", "Ctrl+C does not stop a job", "chia job stop <id>"],
+      ["remote", "chia up hangs at Waiting for SSH to worker", "ssh-copy-id, ssh-add, REMOTE_USER, sshd on the remote"],
+      ["remote", "permission denied ... docker.sock", "Add the user to the docker group, log in again"],
+      ["remote", "Remote worker: Failed to connect to GCS at <HEAD_IP>:6379", "Open the head firewall for the remote; HEAD_IP must be reachable from it"],
+      ["remote", "Remote node comes and goes; tasks hang on results", "Open the remote firewall for the head too"],
+      ["remote", "Agent edits code but the build has no change", "Tool and build ran in different containers: pin both"],
+    ], { x: 0.85, y: 1.35, w: 11.65, colW: [1.0, 5.6, 5.05], fs: 12, boldFirstCol: true });
   }
   await H.save("0_Setup.pptx");
 }
