@@ -14,7 +14,8 @@ Với từng bước (Sim → FPGA → ASIC), tối đa --rounds vòng:
        sim   chỉ sửa sim/tb_*.v (thêm kiểm tra); nhận nếu vẫn PASS và số lần kiểm tra tăng
        fpga  chỉ sửa fpga/ (build.tcl, sources.f, file .v mới riêng cho FPGA); gate: tb_fpga_top PASS trong xsim
              (thư viện UNISIM), có .bit, WNS >= 0; nhận nếu không kém ở WNS, công suất động, LUT+FF và tốt hơn ở một
-       asic  chỉ sửa asic/config.mk (không đổi design, file nguồn, SDC); gate như baseline; nhận nếu không kém ở
+       asic  chỉ sửa asic/config.mk (không đổi design, file nguồn, SDC); gate như baseline (GDS, slack >= 0,
+             DRC = 0, LVS khớp); nhận nếu không kém ở
              diện tích cell, diện tích die, công suất và tốt hơn ít nhất 1 % ở một
   4. agent không đổi gì (cho là không còn gì đáng sửa) thì dừng bước đó.
 rtl/ không ai sửa: tối ưu riêng của FPGA không mang sang ASIC (docs/demo-task.md).
@@ -306,7 +307,9 @@ def measure(step: str, cand: Path, params: dict, on_task=None) -> dict:
             if not run(f"asic_{st}", B.asic_stage.chia_remote(d, st)):
                 break
     failed = next((k for k, v in sub.items() if not v["ok"]), None)
-    last = list(sub.values())[-1] if sub else {}
+    # ASIC: số liệu ở finish, kết quả LVS ở lvs; gộp lại. Các bước khác: task cuối.
+    last = {**sub.get("asic_finish", {}), **sub.get("asic_lvs", {})} if step == "asic" else \
+        (list(sub.values())[-1] if sub else {})
     return {"ok": failed is None and bool(sub), "failed_at": failed, "metrics": metrics_of(step, last),
             "sub": {k: {kk: vv for kk, vv in v.items() if kk not in ("metrics_json", "cells")} for k, v in sub.items()}}
 
@@ -319,7 +322,7 @@ def metrics_of(step: str, r: dict) -> dict:
                                       "power_dynamic_w", "warnings", "critical_warnings", "warning_ids", "bitstream")}
     return {k: r.get(k) for k in ("area_um2", "die_area_um2", "core_area_um2", "util_pct", "n_logic_cells", "n_flop",
                                   "n_icg", "n_clkbuf", "setup_ws_ns", "hold_ws_ns", "power_total_w", "drc_errors",
-                                  "gds", "layout_png")}
+                                  "lvs", "gds", "layout_png")}
 
 
 def _int(v):
@@ -413,7 +416,8 @@ Goal: reduce standard-cell area, die area and/or power (power is OpenSTA's defau
 in one of them without making the others worse, with timing still closed (setup and hold slack >= 0) and no DRC.
 Allowed file: asic/config.mk (ORFS variables such as CORE_UTILIZATION, PLACE_DENSITY, ABC_AREA, synthesis, repair and
 CTS options). Do NOT change PLATFORM, DESIGN_NAME, DESIGN_NICKNAME, VERILOG_FILES or SDC_FILE.
-Gate: GDS written, setup/hold slack >= 0, DRC errors = 0. Too high a utilization fails placement or routing and the
+Gate: GDS written, setup/hold slack >= 0, DRC errors = 0, LVS clean (KLayout: the layout GDS matches the CDL netlist).
+Too high a utilization fails placement or routing and the
 round is rejected.""",
 }
 
@@ -511,7 +515,7 @@ def latest_baseline(work: Path) -> Path | None:
 def base_metrics(rep: dict) -> dict:
     s = rep["steps"]
     return {"sim": metrics_of("sim", s.get("sim_run", {})), "fpga": metrics_of("fpga", s.get("fpga", {})),
-            "asic": metrics_of("asic", s.get("asic_finish", {}))}
+            "asic": metrics_of("asic", {**s.get("asic_finish", {}), **s.get("asic_lvs", {})})}
 
 
 # ---------------------------------------------------------------------------
@@ -526,7 +530,7 @@ ROWS = {
     "asic": [("Diện tích cell (µm²)", "area_um2"), ("Diện tích die (µm²)", "die_area_um2"), ("Util (%)", "util_pct"),
              ("Số cell", "n_logic_cells"), ("ICG", "n_icg"), ("Buffer clock", "n_clkbuf"),
              ("Setup WS (ns)", "setup_ws_ns"), ("Hold WS (ns)", "hold_ws_ns"), ("Công suất (W)", "power_total_w"),
-             ("DRC", "drc_errors")],
+             ("DRC", "drc_errors"), ("LVS", "lvs")],
 }
 
 

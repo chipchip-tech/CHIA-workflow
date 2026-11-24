@@ -10,9 +10,10 @@ Các bước (mỗi bước là một task CHIA, chạy trên khối có resourc
   3. fpga       khối vivado     Vivado (thiết lập mặc định) build fpga/fpga_top.v cho xc7a100tcsg324-1 tới bitstream;
                                 gate: có .bit và WNS >= 0; số liệu: LUT, FF, BUFG, WNS/WHS, công suất, cảnh báo
   4. asic_*     khối asic       ORFS sky130hd theo asic/config.mk, mỗi bước make là một task CHIA:
-                                synth → floorplan → place → cts → route → finish (GDS, ảnh layout bằng KLayout);
-                                gate: có .gds, setup/hold slack >= 0, không lỗi DRC; số liệu: diện tích, số cell
-                                (flop, ICG, buffer clock), slack, công suất
+                                synth → floorplan → place → cts → route → finish (GDS, ảnh layout bằng KLayout)
+                                → lvs (`make lvs` của ORFS: KLayout so layout GDS với netlist CDL);
+                                gate: có .gds, setup/hold slack >= 0, không lỗi DRC, LVS khớp; số liệu: diện tích,
+                                số cell (flop, ICG, buffer clock), slack, công suất
   Mỗi bước chỉ chạy khi bước trước qua gate.
 
 Mỗi lần chạy có một thư mục riêng trong thư mục làm việc chung (mount vào mọi khối, xem docs/cluster-blocks.md):
@@ -20,7 +21,7 @@ Mỗi lần chạy có một thư mục riêng trong thư mục làm việc chun
       rtl/, sim/, fpga/, asic/  bản chép của project (đầu vào cố định của lần chạy)
       sim/build/                build.log, sim.log, wave.vcd, obj/Vtb
       fpga/out/, fpga/reports/  fpga_top.bit, post_route.dcp, vivado.log; util, timing, power, methodology, drc
-      asic/orfs/                WORK_HOME của ORFS: logs/, reports/, results/ (6_final.gds), objects/
+      asic/orfs/                WORK_HOME của ORFS: logs/, reports/, results/ (6_final.gds, 6_lvs.lvsdb), objects/
       asic/layout.png           ảnh layout
       results/baseline.json     số liệu từng bước (đầu vào cho pha 2: agent)
       status.html               trang trạng thái (tự làm mới, mở bằng trình duyệt; xem status_page.py)
@@ -128,7 +129,7 @@ def fpga_build(run_dir: str, timeout_s: int = 3600) -> dict:
 
 # ---------------- ASIC (ORFS) ----------------
 ORFS_FLOW = "/OpenROAD-flow-scripts/flow"            # trong khối asic (ORFS của host mount vào đây)
-ASIC_STAGES = ["synth", "floorplan", "place", "cts", "route", "finish"]
+ASIC_STAGES = ["synth", "floorplan", "place", "cts", "route", "finish", "lvs"]
 
 
 def _orfs_paths(run_dir: str) -> dict:
@@ -172,6 +173,9 @@ def asic_stage(run_dir: str, stage: str, timeout_s: int = 3600) -> dict:
     if stage == "finish" and rc == 0:
         res.update(_asic_metrics(P))
         res["ok"] = res["gate_ok"]
+    if stage == "lvs":
+        res.update(_lvs_result(P, tail))
+        res["ok"] = rc == 0 and res["lvs"] == "match"
     get_profiler().add_info({"step": f"asic_{stage}", "ok": res["ok"], "seconds": sec})
     return res
 
@@ -240,6 +244,32 @@ def _asic_metrics(P: dict) -> dict:
     r["metrics_json"] = {k: v for k, v in metrics.items() if isinstance(v, (int, float, str))}
     r["gate_ok"] = (r["gds"] is not None and r["setup_ws_ns"] is not None and r["setup_ws_ns"] >= 0
                     and (r["hold_ws_ns"] is None or r["hold_ws_ns"] >= 0) and not r["drc_errors"])
+    return r
+
+
+def _lvs_result(P: dict, make_tail: str) -> dict:
+    """Kết quả `make lvs` của ORFS. Deck Python (klayout_lvs.py) in "Congratulations! Netlists match." hoặc
+    "Netlists don't match" và luôn thoát 0, nên phải đọc chữ; deck Ruby cũ ghi trạng thái vào 6_lvs.lvsdb. Platform
+    không có deck thì ORFS ghi "LVS not supported on this platform" vào lvsdb (không phải lỗi make)."""
+    lvsdb = os.path.join(P["results"], "6_lvs.lvsdb")
+    db = _read(lvsdb)
+    log = _read(os.path.join(P["logs"], "6_lvs.log")) + _read(os.path.join(P["asic"], "make", "lvs.log"))
+    if "not supported" in db[:200]:
+        st = "unsupported"
+    elif re.search(r"Netlists don'?t match|Netlists do not match", log):
+        st = "mismatch"
+    elif re.search(r"Netlists match", log):
+        st = "match"
+    else:
+        # lvsdb (định dạng chữ của KLayout): dòng xref của mạch top, ví dụ " circuit(NoCG_alu NoCG_alu match".
+        m = re.search(rf"circuit\({DUT} {DUT} (\w+)", db)
+        st = {"match": "match", "nomatch": "mismatch", "mismatch": "mismatch"}.get(m.group(1), "unknown") if m \
+            else "unknown"
+    r = {"lvs": st, "lvsdb": lvsdb if os.path.isfile(lvsdb) else None,
+         "lvs_log": os.path.join(P["logs"], "6_lvs.log")}
+    if st == "unsupported":
+        r["log_tail"] = ("ORFS này không có deck LVS cho sky130hd (KLAYOUT_LVS_FILE rỗng): xem "
+                         f"{ORFS_FLOW}/platforms/sky130hd/config.mk\n") + make_tail
     return r
 
 
@@ -341,6 +371,9 @@ def main() -> None:
             ok = done(f"asic_{stage}", r)
             if not ok:
                 break
+        if "asic_lvs" in report["steps"]:
+            print(f"[baseline {DEMO}] lvs: {report['steps']['asic_lvs']['lvs']}", flush=True)
+        r = report["steps"].get("asic_finish", {})
         if "gds" in r:
             print(f"[baseline {DEMO}] asic: diện tích {r['area_um2']} um2 (util {r['util_pct']} %), "
                   f"{r['n_logic_cells']} cell (flop {r['n_flop']}, ICG {r['n_icg']}, buffer clock {r['n_clkbuf']}), "

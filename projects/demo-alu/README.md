@@ -41,7 +41,7 @@ Mỗi bước là một task CHIA (`@ChiaFunction(resources=...)`), chạy trên
 | `sim_build` | `chipyard` | Verilator 5.022 của Chipyard |
 | `sim_run` | `verilator` (`verilator_run`) | chạy binary `Vtb` |
 | `fpga_sim` (chỉ pha 2), `fpga_build` | `vivado` | xsim + UNISIM, Vivado synth → P&R → bitstream |
-| `asic_stage` × 6 | `asic` | ORFS: synth, floorplan, place, cts, route, finish (GDS + ảnh layout) |
+| `asic_stage` × 7 | `asic` | ORFS: synth, floorplan, place, cts, route, finish (GDS + ảnh layout), lvs (KLayout so GDS với netlist) |
 | `agent_session` (pha 2) | `claude` (`claude_creds`) | Claude Code, chạy trong thư mục của vòng |
 
 Gate và điều kiện nhận ở pha 2:
@@ -50,7 +50,7 @@ Gate và điều kiện nhận ở pha 2:
 |---|---|---|---|
 | Sim | `sim/tb_<DUT>.v` | `RESULT: PASS` | số lần kiểm tra (`checked`) tăng |
 | FPGA | `fpga/build.tcl`, `fpga/sources.f`, file `.v` mới trong `fpga/` | `tb_fpga_top` PASS trong xsim, có `.bit`, WNS ≥ 0 | không kém ở WNS, công suất động, LUT+FF và tốt hơn ở ít nhất một |
-| ASIC | `asic/config.mk` (không đổi design, file nguồn, SDC) | có GDS, setup/hold slack ≥ 0, DRC = 0 | không kém quá 1 % ở diện tích cell, diện tích die, công suất và tốt hơn quá 1 % ở ít nhất một |
+| ASIC | `asic/config.mk` (không đổi design, file nguồn, SDC) | có GDS, setup/hold slack ≥ 0, DRC = 0, LVS khớp | không kém quá 1 % ở diện tích cell, diện tích die, công suất và tốt hơn quá 1 % ở ít nhất một |
 
 - `rtl/`, `.xdc` và `.sdc` cố định: tối ưu riêng cho FPGA không lan sang ASIC.
 - Sửa ngoài phạm vi bị hoàn lại tự động.
@@ -129,5 +129,6 @@ chia job submit --working-dir . -- python baseline.py
 | `status_page.py` ghi trực tiếp trong lúc job chạy | Chỉ thử trong sandbox với dữ liệu giả |
 | `run_demo.py` | Chỉ thử trong sandbox (server, trang chờ, `chia` giả); chưa chạy trên máy người dùng |
 | `clean_runs.py` | Chạy thật (bản cũ). Luật giữ baseline được tham chiếu mới thử trên dữ liệu giả |
+| Bước LVS (`asic_lvs`, thêm 24/11/2026) | Mới thử phần đọc kết quả với dữ liệu giả; chưa chạy thật |
 | Nạp bitstream xuống board | Chưa (chưa có board) |
 | Slide, video | Chưa làm |
