@@ -222,6 +222,9 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   chạy binary). **Bước FPGA đã chạy thật 21/11/2026** (vỏ `fpga/fpga_top.v`, Vivado 2025.1, bitstream, cả hai demo OK; số liệu
   trong `docs/demo-task.md`). **Bước ASIC đã chạy thật 21/11/2026** (ORFS sky130hd, `WORK_HOME` trong thư mục run, 6 task make, ra GDS, cả hai demo OK; CTS xử lý được ICG). Pha 1 baseline xong (chạy 2 lần ra đúng từng số: tất định). Pha 2 `agent.py` (Claude ở khối `claude`, mỗi bước tối đa 2 vòng, sửa trong thư mục vòng, CHIA đo lại, nhận/loại) chạy thử thật NoCG `--rounds 1` 21/11/2026 (`KẾT QUẢ: OK`: Sim nhận, FPGA loại vì kém hơn, ASIC nhận; die −27,5 %); sửa 2 lỗi lộ ra (context báo cáo, câu gate Sim). **Chạy chính `--rounds 2` cả hai demo 21/11/2026 (`KẾT QUẢ: OK`)**: Sim và ASIC nhận cả 2 vòng (die NoCG −38,4 %, CG −20,5 %; công suất CG −6,8 %), FPGA cả 4 vòng loại theo luật Pareto chặt (CG r1 WNS 1,5 → 4,5 ns, P động −60 % nhưng LUT+FF +3 ô); số liệu trong `docs/demo-task.md`; giữ nguyên luật FPGA. Trang trạng thái `status.html` (`status_page.py`, ghi bởi baseline/agent, tự làm mới, giao diện tối) xem qua `run_demo.py` (submit job + http 127.0.0.1 + tự mở trình duyệt; `xdg-open` trong PATH của host là shim distrobox, dùng `/usr/bin/xdg-open`); mới thử với dữ liệu giả. `clean_runs.py` dọn `WORK_DIR` (mặc định chỉ liệt kê). Tổng quan và lệnh chạy: `projects/demo-alu/README.md`; báo cáo kết quả: `projects/demo-alu/REPORT.md`.
   Chạy `chia-up-blocks.py` phải trong `chia_env` (env `base` không có lệnh `chia`).
+  **Từ 24/11/2026 chia 2 session trên nhánh `demo`:** session làm việc (củng cố demo ALU, sửa mọi thứ trừ `report/`) và
+  session slide (chỉ sửa `projects/demo-alu/report/**`, brief ở `report/REPORT.md`, 4 deck tiếng Anh `report/guides/`).
+  Báo cáo cũ `ProgressReport_22-11.pptx`, `Draft_22-11-2026.docx` đã xoá khỏi nhánh (còn trong lịch sử git).
 
 ## Việc tiếp theo (gợi ý)
 

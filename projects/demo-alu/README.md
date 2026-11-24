@@ -63,6 +63,7 @@ projects/demo-alu/
 ├── README.md, REPORT.md
 ├── run_demo.py        submit job + phục vụ status.html qua http://127.0.0.1 + tự mở trình duyệt
 ├── clean_runs.py      dọn các lần chạy cũ trong WORK_DIR (mặc định chỉ liệt kê)
+├── report/            slide báo cáo (session slide): REPORT.md (brief), guides/*.pptx, src/build_guides.js, img/
 └── NoCG/, CG/         mỗi demo một bộ riêng (CG là bản sed NoCG→CG của script, cộng phần ICG)
     ├── rtl/           <DUT>.v (CG thêm icg_sim.v); RTL đưa sẵn, không ai sửa
     ├── sim/           tb_<DUT>.v (testbench tự kiểm, mô hình tham chiếu), run_sim.sh

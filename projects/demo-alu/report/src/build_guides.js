@@ -1,9 +1,9 @@
-// build_guides.js - 4 deck báo cáo cho thầy hướng dẫn (tiếng Anh), cùng style với ProgressReport_22-11.pptx:
+// build_guides.js - 4 deck báo cáo cho thầy hướng dẫn (tiếng Anh), nền trắng, Times New Roman, thang xám:
 //   guides/0_Setup.pptx  cách đã setup CHIA (máy thật) + kế hoạch worker remote/cloud
 //   guides/1_Sim.pptx, 2_FPGA.pptx, 3_ASIC.pptx  từng bước của demo ALU, ví dụ NoCG/CG
 // Quy ước (phỏng vấn 23/11/2026): không dùng speaker notes, mọi thứ trình bày nằm trên slide; chữ ≥ 14 pt;
 // mỗi slide một dòng kết luận đậm ở cuối; mỗi bước một dòng lệnh chính; chỉ giữ vài tên file quan trọng.
-// Chạy: NODE_PATH=<thư mục có pptxgenjs>/node_modules node build_guides.js [thư mục ra]
+// Chạy: xem report/REPORT.md mục "Build" (cài pptxgenjs, build, fix_pptx.py, validate, render).
 // Số liệu lấy từ REPORT.md và docs/demo-task.md (chạy thật 20–21/11/2026).
 const pptxgen = require("pptxgenjs");
 const path = require("path");
