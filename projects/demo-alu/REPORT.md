@@ -204,6 +204,8 @@ Cả bốn vòng được nhận, và vẫn PASS trên Verilator thật.
 - **Công suất ASIC vẫn là ước lượng** của OpenSTA với hoạt động mặc định, không lấy từ VCD. Công suất FPGA đã đo bằng
   SAIF từ 25/11 (mục 9).
 - ~~**ASIC chưa chạy LVS.**~~ Đã thêm 25/11 (mục 9).
+- **STA chỉ có corner tt.** Máy chỉ có `.lib` tt_025C_1v80, nên corner chậm/nhanh thay bằng tt + OCV ±10 %; chưa phải
+  sign-off ss/ff thật (mục 9). Chưa có kiểm tra tương đương hình thức (LEC) và phân tích IR drop.
 - **Fmax FPGA có sai số cỡ 0,1–0,2 ns**: kết quả của Vivado không đơn điệu theo chu kỳ, bản latch còn có time borrowing.
 - **Clock > 100 MHz chưa chạy được trên board** vì chưa có MMCM; số ở 188,7 MHz là số của công cụ.
 - **Mỗi bước chỉ 2 vòng, mỗi cấu hình chạy một lần.** Công cụ tất định, nhưng agent thì không: chạy lại có thể ra đề
@@ -288,6 +290,32 @@ Vivado tính công suất từ đó (khớp 74–77 % net, độ tin cậy High)
   cả một khối lớn.
 - Trên ASIC thì ngược lại: CG giảm 12 % công suất (mục 4). Cây clock do CTS dựng vừa đủ cho thiết kế, cell ICG cắt cả
   nhánh cây phía sau, và CG bỏ được mux hồi tiếp. Lưu ý: số ASIC vẫn là ước lượng của OpenSTA với hoạt động mặc định.
+
+### Gate sign-off bổ sung (chạy thật 25/11/2026)
+
+Câu hỏi "flow đã đúng chuẩn chưa" dẫn tới bốn nhóm kiểm tra mới. Baseline đủ 3 bước ở 188,7 MHz
+(NoCG `baseline-20261125-230550`, CG `baseline-20261125-231121`), cả hai `KẾT QUẢ: OK`:
+
+| Kiểm tra | Công cụ | NoCG | CG |
+|---|---|---|---|
+| Lint RTL | `verilator --lint-only -Wall` | 0 cảnh báo | 0 cảnh báo |
+| FPGA methodology | `report_methodology` | 0 critical | **2 critical (TIMING-14)** |
+| FPGA mô phỏng gate-level | xsim trên netlist sau route, 1 khung | PASS | PASS |
+| ASIC DRC sign-off | KLayout, `sky130hd.lydrc` | 0 vi phạm | 0 vi phạm |
+| ASIC antenna | detailed route | 0 net | 0 net |
+| ASIC LVS | KLayout | khớp | khớp |
+| ASIC STA tt (SPEF) setup / hold WS (ns) | OpenSTA, `asic/signoff.tcl` | 6,815 / 0,493 | 6,957 / 0,406 |
+| ASIC STA tt + OCV ±10 % setup / hold WS (ns) | như trên, `set_timing_derate` | 6,477 / 0,447 | 6,789 / 0,350 |
+| ASIC mô phỏng gate-level | Verilator, `6_final.v` + model cell từ `.lib` | PASS (6 272/6 272) | PASS (6 272/6 272) |
+
+- Mọi số khác (coverage, LUT/FF, WNS, công suất SAIF, diện tích, công suất ASIC) trùng từng số với baseline trước đó.
+- **CG latch trên FPGA chưa đạt sign-off:** TIMING-14 báo LUT nằm trên cây clock, đúng chỗ yếu mà agent FPGA đã tự sửa ở
+  vòng CG r1 (xem dưới). Baseline vẫn ghi lại làm mốc; từ giờ agent phải đạt methodology mới được nhận.
+- STA corner tt khớp số ORFS báo ở bước finish (6,815 ns), nghĩa là `signoff.tcl` đọc đúng thiết kế và SDC.
+- GLS ASIC chạy cùng testbench với bước Sim (bỏ phần kiểm tra hộp trắng vì netlist đổi tên tín hiệu). Trong sandbox, cố
+  ý bỏ latch trong model ICG thì testbench báo lỗi, nên GLS bắt được lỗi clock gating.
+- Lỗi lộ ra khi chạy và đã sửa: ORFS trên máy là bản mới, `load_design` chỉ nhận file `.odb`; gate STA giờ đòi có ít nhất
+  một clock để tránh "đạt" giả khi SDC không được đọc.
 
 ### Luật nhận đổi cho lần chạy lại agent
 

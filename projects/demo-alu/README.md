@@ -38,23 +38,24 @@ Mỗi bước là một task CHIA (`@ChiaFunction(resources=...)`), chạy trên
 
 | Task | Khối (resource) | Công cụ |
 |---|---|---|
-| `sim_build` | `chipyard` | Verilator 5.022 của Chipyard |
+| `sim_build` | `chipyard` | Verilator 5.022 của Chipyard; lint `verilator --lint-only -Wall` trên RTL |
 | `sim_run` | `verilator` (`verilator_run`) | chạy binary `Vtb` |
-| `fpga_sim` (chỉ pha 2), `fpga_build` | `vivado` | xsim + UNISIM, Vivado synth → P&R → bitstream |
-| `asic_stage` × 7 | `asic` | ORFS: synth, floorplan, place, cts, route, finish (GDS + ảnh layout), lvs (KLayout so GDS với netlist) |
+| `fpga_sim` (chỉ pha 2), `fpga_build` | `vivado` | xsim + UNISIM, Vivado synth → P&R → bitstream, methodology, công suất SAIF, mô phỏng gate-level netlist sau route (`tb_gls.v`) |
+| `asic_stage` × 10 | `asic` | ORFS: synth, floorplan, place, cts, route, finish (GDS + ảnh layout), drc (KLayout), lvs (KLayout so GDS với netlist), sta (`asic/signoff.tcl`, corner tt và tt + OCV ±10 %, parasitic SPEF), gls_prep (model cell Yosys từ `.lib`) |
+| `asic_gls` | `chipyard` | Verilator chạy testbench trên netlist `6_final.v` |
 | `agent_session` (pha 2) | `claude` (`claude_creds`) | Claude Code, chạy trong thư mục của vòng |
 
 Gate và điều kiện nhận ở pha 2:
 
 | Bước | Agent được sửa | Gate | Nhận khi |
 |---|---|---|---|
-| Sim | `sim/tb_<DUT>.v` | `RESULT: PASS` | từ 25/11/2026: số bin functional coverage (`sim/fcov_<DUT>.sv`, cố định) tăng, line/toggle/branch của DUT không giảm (trước đó: `checked` tăng) |
-| FPGA | `fpga/build.tcl`, `fpga/sources.f`, file `.v` mới trong `fpga/` | `tb_fpga_top` PASS trong xsim, có `.bit`, đúng clock của baseline, WNS ≥ 0 và WHS ≥ 0, SAIF khớp ≥ 50 % net | từ 25/11/2026: bản tốt nhất chưa đạt timing thì nhận ngay; còn lại không kém ở WNS và công suất động SAIF, LUT+FF kém ≤ 3 %, tốt hơn ở ít nhất một (trước đó: Pareto chặt, công suất vector-less) |
-| ASIC | `asic/config.mk` (không đổi design, file nguồn, SDC) | có GDS, setup/hold slack ≥ 0, DRC = 0, LVS khớp | không kém quá 1 % ở diện tích cell, diện tích die, công suất và tốt hơn quá 1 % ở ít nhất một |
+| Sim | `sim/tb_<DUT>.v` | `RESULT: PASS`, lint sạch | từ 25/11/2026: số bin functional coverage (`sim/fcov_<DUT>.sv`, cố định) tăng, line/toggle/branch của DUT không giảm (trước đó: `checked` tăng) |
+| FPGA | `fpga/build.tcl`, `fpga/sources.f`, file `.v` mới trong `fpga/` | `tb_fpga_top` PASS trong xsim, có `.bit`, đúng clock của baseline, WNS ≥ 0 và WHS ≥ 0, methodology không có Critical Warning, GLS netlist sau route PASS, SAIF khớp ≥ 50 % net | từ 25/11/2026: bản tốt nhất chưa đạt timing thì nhận ngay; còn lại không kém ở WNS và công suất động SAIF, LUT+FF kém ≤ 3 %, tốt hơn ở ít nhất một (trước đó: Pareto chặt, công suất vector-less) |
+| ASIC | `asic/config.mk` (không đổi design, file nguồn, SDC) | có GDS, setup/hold slack ≥ 0, DRC router = 0, DRC KLayout = 0, antenna = 0, LVS khớp, STA sau route đạt ở mọi corner, GLS netlist PASS | không kém quá 1 % ở diện tích cell, diện tích die, công suất và tốt hơn quá 1 % ở ít nhất một |
 
 - `rtl/`, `.xdc` và `.sdc` cố định: tối ưu riêng cho FPGA không lan sang ASIC.
 - Sửa ngoài phạm vi bị hoàn lại tự động.
-- Mọi bước dùng cùng part, cùng PDK và cùng clock 10 ns như baseline.
+- Mọi bước dùng cùng part, cùng PDK và cùng clock như baseline (FPGA 5,3 ns từ 25/11/2026, ASIC 10 ns).
 
 ## Cấu trúc
 
@@ -137,5 +138,6 @@ chia job submit --working-dir . -- python baseline.py
 | Bước LVS (`asic_lvs`, thêm 24/11/2026) | **Chạy thật 25/11/2026** (`baseline.py --stages asic`), cả hai demo LVS khớp. Thử cố ý làm sai (đổi dây CLK/D một flop trong CDL): LVS báo không khớp, đúng. Agent ASIC với gate LVS: chưa chạy |
 | Coverage ở bước Sim (thêm 25/11/2026) | **Chạy thật 25/11/2026** (`baseline.py --stages sim`, Verilator 5.022 của Chipyard): NoCG 51/55 bin, CG 51/57 bin, trùng số trong sandbox. Agent với luật mới: chạy thật 25/11 (`REPORT.md` mục 9) |
 | FPGA: clock chung, biến thể BUFGCE/CE, công suất SAIF, `fpga_sweep.py` (thêm 25/11/2026) | **Chạy thật 25/11/2026** `baseline.py --stages fpga` ở 100 MHz (NoCG, CG `bufgce`, CG `ce`) có SAIF; `fpga_sweep.py fmax` và `power --period 5.3` chạy thật cả hai demo |
+| Gate sign-off (lint, DRC KLayout, antenna, STA corner, GLS FPGA và ASIC, methodology FPGA; thêm 25/11/2026) | **Chạy thật 25/11/2026** baseline đủ 3 bước cả hai demo (`baseline-20261125-230550`, `baseline-20261125-231121`), `KẾT QUẢ: OK`. Chỉ có corner tt (chưa có `.lib` ss/ff). Agent với các gate này: chưa chạy |
 | Nạp bitstream xuống board | Chưa (chưa có board) |
 | Slide, video | Chưa làm |

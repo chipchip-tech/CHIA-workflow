@@ -372,7 +372,7 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    (nếu `synth_opts.tcl` chưa có) và `-directive Explore` cho place/route. Agent chẩn đoán từ báo cáo: WNS 0 do time
    borrowing, đường găng cnt → en → latch nửa chu kỳ 2,65 ns, 2 TIMING-14, clock 3,28 mW; dự đoán P động "giảm nhẹ hoặc giữ
    nguyên", đo thật −21,6 %.
-   **Gate sign-off bổ sung (25/11/2026, viết xong, chưa chạy thật):** người dùng duyệt mục 1–4: (1) DRC KLayout `make drc`
+   **Gate sign-off bổ sung (25/11/2026, chạy thật baseline cả hai demo, `KẾT QUẢ: OK`):** người dùng duyệt mục 1–4: (1) DRC KLayout `make drc`
    (`asic_drc`, bộ luật `drc/sky130hd.lydrc` có trên máy); (2) mô phỏng gate-level: FPGA `fpga/tb_gls.v` trên netlist sau
    route (một khung 1 048 576 chu kỳ, kiểm LED PASS), ASIC `asic/gls/tb_gls_<DUT>.v` (testbench baseline bỏ kiểm tra hộp
    trắng) trên `6_final.v` + model cell Yosys từ `.lib` tt (`asic_gls_prep` ở khối asic) + `asic/gls/cells_extra.v` (dlclkp viết
@@ -383,3 +383,9 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    methodology FPGA: Critical Warning/Error = 0 (`signoff_met`; baseline ghi lại, agent phải đạt).
    Thử trong sandbox: GLS ASIC với netlist Yosys + `.lib` tt PASS cả hai demo; cố ý bỏ latch trong model dlclkp thì
    testbench báo lỗi (xung clock giả); `tb_gls.v` FPGA chạy trên RTL bằng iverilog PASS.
+   Chạy thật (`run_demo.py <demo> baseline --fpga-period 5.3`): NoCG `baseline-20261125-230550`, CG `baseline-20261125-231121`.
+   Lint 0 cảnh báo; methodology NoCG 0 critical, CG latch 2 critical TIMING-14 (cảnh báo, job chạy tiếp); GLS FPGA PASS cả hai;
+   DRC KLayout 0, antenna 0, LVS khớp; STA tt setup/hold WS NoCG 6,815/0,493, CG 6,957/0,406 ns; tt + OCV ±10 % NoCG
+   6,477/0,447, CG 6,789/0,350 ns; GLS ASIC PASS (6 272/6 272) cả hai. Số khác trùng baseline 21:44/21:47. Lần đầu STA lỗi
+   `wrong # args: should be "load_design design_file"` (ORFS bản mới chỉ nhận `.odb`); `signoff.tcl` giờ dò số tham số, đọc
+   lại SDC nếu không có clock, và gate đòi clocks > 0. `clean_runs.py` dọn thêm `sweep-*` và thư mục mô phỏng mới.

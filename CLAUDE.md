@@ -237,6 +237,10 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   mặc định đổi tên scope (`tb_power(PERIOD_PS=…)`), SAIF rỗng mà không báo lỗi; dùng `xvlog -d`. Luật FPGA đổi 25/11: LUT+FF được kém ≤ 3 %. Baseline + agent `--rounds 2` chạy lại 25/11 (Sim, ASIC), FPGA chạy lại
   riêng sau khi sửa lỗi vòng chép cây project (clock 10 ns thay vì 5,3 ns): CG fpga-r1 NHẬN (P động −21,6 %), NoCG giữ baseline.
   Bảng tổng hợp: `REPORT.md` mục 9. Chưa: agent ASIC/Sim chạy lại sau lần sửa (không phụ thuộc `fpga/`).
+  **Gate sign-off (25/11/2026, chạy thật baseline cả hai demo, `KẾT QUẢ: OK`):** lint `-Wall`, methodology Vivado (CG latch
+  báo TIMING-14, chỉ cảnh báo ở baseline), GLS FPGA (`tb_gls.v`) và ASIC (`6_final.v` + model cell Yosys, khối chipyard), DRC
+  KLayout, antenna, STA sau route `asic/signoff.tcl` (tt và tt + OCV ±10 %, chỉ có `.lib` tt). ORFS trên máy: `load_design`
+  chỉ nhận `.odb`. Chưa: agent với các gate này.
   **Từ 24/11/2026 chia 2 session trên nhánh `demo`:** session làm việc (củng cố demo ALU, sửa mọi thứ trừ `report/`) và
   session slide (chỉ sửa `projects/demo-alu/report/**`, brief ở `report/REPORT.md`, 4 deck tiếng Anh `report/guides/`).
   Báo cáo cũ `ProgressReport_22-11.pptx`, `Draft_22-11-2026.docx` đã xoá khỏi nhánh (còn trong lịch sử git).
