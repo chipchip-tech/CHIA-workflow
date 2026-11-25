@@ -131,6 +131,6 @@ chia job submit --working-dir . -- python baseline.py
 | `run_demo.py` | Chỉ thử trong sandbox (server, trang chờ, `chia` giả); chưa chạy trên máy người dùng |
 | `clean_runs.py` | Chạy thật (bản cũ). Luật giữ baseline được tham chiếu mới thử trên dữ liệu giả |
 | Bước LVS (`asic_lvs`, thêm 24/11/2026) | **Chạy thật 25/11/2026** (`baseline.py --stages asic`), cả hai demo LVS khớp. Thử cố ý làm sai (đổi dây CLK/D một flop trong CDL): LVS báo không khớp, đúng. Agent ASIC với gate LVS: chưa chạy |
-| Coverage ở bước Sim (thêm 25/11/2026) | Chạy thử trong sandbox bằng Verilator 5.020: NoCG 51/55 bin, CG 51/57 bin; chưa chạy trên cluster (Verilator 5.022 của Chipyard) |
+| Coverage ở bước Sim (thêm 25/11/2026) | **Chạy thật 25/11/2026** (`baseline.py --stages sim`, Verilator 5.022 của Chipyard): NoCG 51/55 bin, CG 51/57 bin, trùng số trong sandbox. Agent với luật mới: chưa chạy |
 | Nạp bitstream xuống board | Chưa (chưa có board) |
 | Slide, video | Chưa làm |

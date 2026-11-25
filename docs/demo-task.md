@@ -277,7 +277,7 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    Thử cố ý làm sai (25/11/2026, chạy thật): đổi chỗ dây CLK và D của flop `a_q[0]` trong `6_final_concat.cdl` thì LVS báo `ERROR : Netlists don't match`, nên gate chặn được
    lỗi thật (lần thử đầu không sửa được dòng nào vì CDL viết một instance trên nhiều dòng `+`). Chưa: chạy agent ASIC với
    gate LVS.
-   **Coverage ở bước Sim (25/11/2026, mới chạy trong sandbox bằng Verilator 5.020):** `sim/fcov_<DUT>.sv` (cố định, `bind`
+   **Coverage ở bước Sim (25/11/2026, chạy thật trên cluster bằng Verilator 5.022, trùng số với sandbox 5.020):** `sim/fcov_<DUT>.sv` (cố định, `bind`
    vào DUT) định nghĩa bin functional coverage theo đặc tả: kết quả 0/khác 0 từng phép, carry/borrow, mọi độ dịch và
    `b[7:3]≠0`, SLT có dấu, tràn có dấu, mẫu `en`, reset giữa chừng; CG thêm `en` đổi trong pha clk = 1. In
    `FCOV: hit= total=` và `FCOV_MISS:`. Verilator build có `--coverage`; `sim/sim_main.cpp` thay main của `--binary` (bản
