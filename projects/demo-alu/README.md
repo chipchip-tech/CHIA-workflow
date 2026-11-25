@@ -132,7 +132,7 @@ chia job submit --working-dir . -- python baseline.py
 | Pha 3 `compare.md` | **Chạy thật** (sinh bởi `agent.py`) |
 | `status_page.py`: `python status_page.py <run_dir>` dựng lại trang từ lần chạy agent thật | Chạy thật (ra file `status.html`); chưa xem trang trên trình duyệt |
 | `status_page.py` ghi trực tiếp trong lúc job chạy | Chỉ thử trong sandbox với dữ liệu giả |
-| `run_demo.py` | Chỉ thử trong sandbox (server, trang chờ, `chia` giả); chưa chạy trên máy người dùng |
+| `run_demo.py` | **Chạy thật 25/11/2026** (baseline NoCG, CG: submit job, mở trình duyệt, trang trạng thái) |
 | `clean_runs.py` | Chạy thật (bản cũ). Luật giữ baseline được tham chiếu mới thử trên dữ liệu giả |
 | Bước LVS (`asic_lvs`, thêm 24/11/2026) | **Chạy thật 25/11/2026** (`baseline.py --stages asic`), cả hai demo LVS khớp. Thử cố ý làm sai (đổi dây CLK/D một flop trong CDL): LVS báo không khớp, đúng. Agent ASIC với gate LVS: chưa chạy |
 | Coverage ở bước Sim (thêm 25/11/2026) | **Chạy thật 25/11/2026** (`baseline.py --stages sim`, Verilator 5.022 của Chipyard): NoCG 51/55 bin, CG 51/57 bin, trùng số trong sandbox. Agent với luật mới: chưa chạy |
