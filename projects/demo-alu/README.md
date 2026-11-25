@@ -69,9 +69,11 @@ projects/demo-alu/
     ├── sim/           tb_<DUT>.v (testbench tự kiểm, mô hình tham chiếu), run_sim.sh, fcov_<DUT>.sv (bin functional
     │                  coverage, bind vào DUT, cố định), sim_main.cpp (vòng mô phỏng Verilator, ghi coverage.dat)
     ├── fpga/          fpga_top.v (LFSR + MISR tự kiểm, 4 LED), arty_a7_100t.xdc, build.tcl, sources.f,
-    │                  tb_fpga_top.v, golden_sig.py
+    │                  tb_fpga_top.v, golden_sig.py; clock.xdc (chu kỳ, baseline.py ghi lại), power_saif.tcl +
+    │                  tb_power.v (công suất theo SAIF, cố định); CG thêm icg_fpga_bufgce.v, icg_fpga_ce.v
     ├── asic/          config.mk, constraint.sdc, render_gds.py (KLayout → PNG); CG thêm icg_sky130.v (dlclkp)
     ├── baseline.py    pha 1
+    ├── fpga_sweep.py  quét bước FPGA của baseline: Fmax từng biến thể, công suất SAIF theo tỉ lệ gửi phép
     ├── agent.py       pha 2 (+ pha 3: results/compare.md)
     └── status_page.py trang trạng thái HTML (giống hệt nhau ở hai demo)
 ```
@@ -116,7 +118,9 @@ chia job submit --working-dir . -- python baseline.py
 ```
 (hoặc `agent.py --rounds 2`). Các tham số khác:
 
-- `baseline.py`: `--stages sim,fpga,asic`, `--seed`, `--cycles`, `--en-pct`.
+- `baseline.py`: `--stages sim,fpga,asic`, `--seed`, `--cycles`, `--en-pct`; FPGA (từ 25/11/2026): `--fpga-period <ns>`
+  (mặc định 10), `--fpga-variant` (NoCG: `rtl`; CG: `latch` mặc định, `bufgce`, `ce`), `--fpga-en-pct`, `--power-cycles`.
+- `fpga_sweep.py fmax` (dò Fmax từng biến thể), `fpga_sweep.py power --period <ns> --en-pcts 10,30,70,100`.
 - `agent.py`: `--baseline <run_dir>`, `--steps`, `--rounds`, `--model`, `--agent-timeout`.
 
 ## Trạng thái kiểm chứng (21/11/2026)
@@ -132,5 +136,6 @@ chia job submit --working-dir . -- python baseline.py
 | `clean_runs.py` | Chạy thật (bản cũ). Luật giữ baseline được tham chiếu mới thử trên dữ liệu giả |
 | Bước LVS (`asic_lvs`, thêm 24/11/2026) | **Chạy thật 25/11/2026** (`baseline.py --stages asic`), cả hai demo LVS khớp. Thử cố ý làm sai (đổi dây CLK/D một flop trong CDL): LVS báo không khớp, đúng. Agent ASIC với gate LVS: chưa chạy |
 | Coverage ở bước Sim (thêm 25/11/2026) | **Chạy thật 25/11/2026** (`baseline.py --stages sim`, Verilator 5.022 của Chipyard): NoCG 51/55 bin, CG 51/57 bin, trùng số trong sandbox. Agent với luật mới: chưa chạy |
+| FPGA: clock chung, biến thể BUFGCE/CE, công suất SAIF, `fpga_sweep.py` (thêm 25/11/2026) | Chỉ thử trong sandbox (Vivado giả; `fpga_top` mới và biến thể CE qua testbench bằng iverilog); chưa chạy Vivado thật |
 | Nạp bitstream xuống board | Chưa (chưa có board) |
 | Slide, video | Chưa làm |

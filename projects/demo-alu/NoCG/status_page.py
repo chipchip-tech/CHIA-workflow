@@ -32,10 +32,15 @@ ROWS = {
     "sim": [("Functional coverage (bin)", "fcov", 1, 0, False), ("Line (DUT)", "cov_line_s", 1, 0, False),
             ("Toggle (DUT)", "cov_toggle_s", 1, 0, False), ("Branch (DUT)", "cov_branch_s", 1, 0, False),
             ("Số lần kiểm tra", "checked", 1, +1, False), ("Lỗi", "errors", 1, -1, False)],
-    "fpga": [("WNS (ns)", "wns_ns", 1, +1, True), ("WHS (ns)", "whs_ns", 1, +1, True), ("LUT", "lut", 1, -1, False),
+    "fpga": [("Clock (MHz)", "clock_mhz", 1, 0, False), ("Timing", "timing_s", 1, 0, False),
+             ("WNS (ns)", "wns_ns", 1, +1, True), ("WHS (ns)", "whs_ns", 1, +1, True),
+             ("Fmax ước lượng (MHz)", "fmax_est_mhz", 1, +1, False), ("LUT", "lut", 1, -1, False),
              ("FF", "ff", 1, -1, False), ("BUFG", "bufg", 1, 0, False),
-             ("Công suất động (W)", "power_dynamic_w", 1, -1, False),
-             ("Công suất tổng (W)", "power_total_w", 1, -1, False), ("Cảnh báo", "warnings", 1, -1, False)],
+             ("P động SAIF (mW)", "power_dynamic_w", 1000, -1, False),
+             ("P u_alu SAIF (mW)", "power_alu_w", 1000, -1, False),
+             ("P tổng SAIF (mW)", "power_total_w", 1000, -1, False),
+             ("P động vector-less (mW)", "power_dynamic_vl_w", 1000, -1, False),
+             ("Cảnh báo", "warnings", 1, -1, False)],
     "asic": [("Diện tích cell (µm²)", "area_um2", 1, -1, False), ("Diện tích die (µm²)", "die_area_um2", 1, -1, False),
              ("Util (%)", "util_pct", 1, 0, False), ("Số cell", "n_logic_cells", 1, 0, False),
              ("ICG", "n_icg", 1, 0, False), ("Buffer clock", "n_clkbuf", 1, 0, False),
@@ -137,9 +142,17 @@ def _cov_view(m: dict | None) -> dict | None:
     return m
 
 
+def _fpga_view(m: dict | None) -> dict | None:
+    if m is None or "timing_met" not in m:
+        return m
+    return {**m, "timing_s": "đạt" if m["timing_met"] else "KHÔNG đạt"}
+
+
 def table(step: str, base: dict, best: dict | None) -> str:
     if step == "sim":
         base, best = _cov_view(base), _cov_view(best)
+    if step == "fpga":
+        base, best = _fpga_view(base), _fpga_view(best)
     rows = []
     for name, k, sc, good, ns in ROWS[step]:
         if best is None:
@@ -234,7 +247,8 @@ def render_baseline(report: dict, final: bool) -> str:
         head = ""
         if last and last.get("ok"):
             head = {"sim": lambda r: f'PASS · coverage {r.get("fcov_hit")}/{r.get("fcov_total")} bin',
-                    "fpga": lambda r: f'WNS {fmt(r.get("wns_ns"))} ns · {fmt(r.get("lut"))} LUT',
+                    "fpga": lambda r: (f'{fmt(r.get("clock_mhz"))} MHz · WNS {fmt(r.get("wns_ns"))} ns'
+                                       + ("" if r.get("timing_met", True) else " (timing KHÔNG đạt)")),
                     "asic": lambda r: f'die {fmt(r.get("die_area_um2"))} µm² · GDS · LVS khớp'}[step](last)
         cards.append(stage_card(step, state, chip(state, txt), f'<ul class="tasks">{"".join(lis)}</ul>'
                                 + (f'<div class="headline">{e(head)}</div>' if head else "")))

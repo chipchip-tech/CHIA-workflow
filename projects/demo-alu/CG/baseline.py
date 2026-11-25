@@ -2,14 +2,19 @@
 
 Chạy từ thư mục chứa file này (projects/demo-alu/CG), cluster theo khối đang bật:
   chia job submit --working-dir . -- python baseline.py [--stages sim,fpga,asic] [--seed 1] [--cycles 20000] [--en-pct 30]
+      [--fpga-period 10] [--fpga-variant <tên>] [--fpga-en-pct 30] [--power-cycles 20000]
 Bước fpga cần khối vivado, bước asic cần khối asic: `python scripts/chia-up-blocks.py --fpga --asic`.
 
 Các bước (mỗi bước là một task CHIA, chạy trên khối có resource tương ứng):
   1. sim_build  khối chipyard   Verilator 5 của Chipyard build testbench (tb + RTL) thành binary Vtb
   2. sim_run    khối verilator  chạy Vtb; gate: dòng `RESULT: PASS`; ghi waveform VCD; số liệu: functional coverage
                                 (dòng FCOV của sim/fcov_<DUT>.sv) và line/toggle/branch của DUT (build/coverage.dat)
-  3. fpga       khối vivado     Vivado (thiết lập mặc định) build fpga/fpga_top.v cho xc7a100tcsg324-1 tới bitstream;
-                                gate: có .bit và WNS >= 0; số liệu: LUT, FF, BUFG, WNS/WHS, công suất, cảnh báo
+  3. fpga       khối vivado     Vivado (thiết lập mặc định) build fpga/fpga_top.v cho xc7a100tcsg324-1 tới bitstream,
+                                clock theo --fpga-period (fpga/clock.xdc), biến thể --fpga-variant; rồi công suất theo
+                                hoạt động thật (power_saif.tcl: xsim netlist sau route, SAIF, report_power);
+                                gate: có .bit, đúng clock, đo được công suất; WNS/WHS < 0 thì ghi "timing KHÔNG đạt"
+                                nhưng không dừng (ở clock cao bản baseline có thể không đạt; agent phải đạt); số liệu: LUT, FF, BUFG, WNS/WHS, Fmax ước lượng,
+                                công suất SAIF (tổng, động, u_alu) và vector-less, cảnh báo
   4. asic_*     khối asic       ORFS sky130hd theo asic/config.mk, mỗi bước make là một task CHIA:
                                 synth → floorplan → place → cts → route → finish (GDS, ảnh layout bằng KLayout)
                                 → lvs (`make lvs` của ORFS: KLayout so layout GDS với netlist CDL);
@@ -96,34 +101,128 @@ def _timing(text: str) -> dict:
     return {}
 
 
+# ---------------- FPGA (Vivado) ----------------
+# Biến thể của bước FPGA: thay file trong sources.f và thêm tuỳ chọn synth_design. Chỉ dành cho FPGA (rtl/ cố định).
+FPGA_VARIANTS = {
+    "latch": {"replace": {}, "synth": [], "note": "icg_sim.v nguyên bản: latch + LUT trên đường clock"},
+    "bufgce": {"replace": {"../rtl/icg_sim.v": "icg_fpga_bufgce.v"}, "synth": [],
+               "note": "icg bằng BUFGCE"},
+    "ce": {"replace": {"../rtl/icg_sim.v": "icg_fpga_ce.v"}, "synth": ["-gated_clock_conversion", "auto"],
+           "note": "Vivado đổi clock gating thành clock enable"},
+}
+FPGA_EN_THR_DEFAULT = 38                              # fpga_top: tỉ lệ gửi phép = EN_THR/128 (38 ~ 30 %)
+
+
+def en_thr(en_pct: float) -> int:
+    return FPGA_EN_THR_DEFAULT if round(en_pct) == 30 else max(0, min(128, round(en_pct * 128 / 100)))
+
+
+def prepare_fpga(run_dir: str, period_ns: float, variant: str, en_pct: float = 30) -> dict:
+    """Ghi các file cố định của lần chạy vào <run_dir>/fpga: clock.xdc (chu kỳ), sources.f (biến thể),
+    synth_opts.tcl (tuỳ chọn synth_design của biến thể, generic EN_THR/EXP_SIG khi đổi tỉ lệ gửi phép)."""
+    if variant not in FPGA_VARIANTS:
+        raise SystemExit(f"LỖI: biến thể FPGA {variant!r} không có; chọn trong {', '.join(FPGA_VARIANTS)}")
+    v = FPGA_VARIANTS[variant]
+    fpga = Path(run_dir, "fpga")
+    (fpga / "clock.xdc").write_text(
+        "## clock.xdc - chu kỳ clock của bước FPGA (baseline.py ghi theo --fpga-period; agent không sửa được).\n"
+        f"create_clock -name sys_clk -period {period_ns:.3f} [get_ports clk]\n")
+    srcs = (fpga / "sources.f").read_text().splitlines()
+    srcs = [v["replace"].get(ln.strip(), ln) for ln in srcs]
+    (fpga / "sources.f").write_text("\n".join(srcs) + "\n")
+    args = list(v["synth"])
+    thr = en_thr(en_pct)
+    if thr != FPGA_EN_THR_DEFAULT:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("golden_sig", fpga / "golden_sig.py")
+        g = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(g)
+        sig, _ = g.golden(1048576, 0xACE12025, thr)
+        args += ["-generic", f"EN_THR=8'd{thr}", "-generic", f"EXP_SIG=32'h{sig:08X}"]
+    (fpga / "synth_opts.tcl").write_text(
+        f"# synth_opts.tcl - biến thể {variant} ({v['note']}), tỉ lệ gửi phép {thr}/128. baseline.py ghi, cố định.\n"
+        "set synth_args {" + " ".join(args) + "}\n")
+    return {"period_ns": period_ns, "variant": variant, "en_thr": thr, "synth_args": args}
+
+
+def _period(fpga: str) -> float | None:
+    m = re.search(r"-period\s+([\d.]+)", _read(os.path.join(fpga, "clock.xdc")))
+    return float(m.group(1)) if m else None
+
+
+def _power(text: str) -> dict:
+    """report_power (đơn vị W hoặc mW): tổng, động, tĩnh, độ tin cậy, tỉ lệ net khớp SAIF, công suất của u_alu."""
+    unit = {"W": 1.0, "mW": 1e-3, "uW": 1e-6}
+
+    def val(label):
+        m = re.search(rf"^\|\s*{label} \((W|mW|uW)\)\s*\|\s*([\d.]+)", text, re.M)
+        return float(m.group(2)) * unit[m.group(1)] if m else None
+    hu = re.search(r"^\|\s*Name\s*\|\s*Power \((W|mW|uW)\)\s*\|", text, re.M)
+    alu = re.search(r"^\|\s+u_alu\s+\|\s*([\d.]+)", text, re.M)
+    conf = re.search(r"^\|\s*Confidence Level\s*\|\s*(\w+)", text, re.M)
+    match = re.search(r"^\|\s*Design Nets Matched\s*\|\s*([\d.]+)%", text, re.M)
+    return {"total_w": val("Total On-Chip Power"), "dynamic_w": val("Dynamic"),
+            "static_w": val("Device Static"),
+            "alu_w": float(alu.group(1)) * unit[hu.group(1)] if alu and hu else None,
+            "confidence": conf.group(1) if conf else None,
+            "nets_matched_pct": float(match.group(1)) if match else None}
+
+
 @ChiaFunction(resources={"vivado": 1})
-def fpga_build(run_dir: str, timeout_s: int = 3600) -> dict:
-    """Vivado batch theo fpga/build.tcl (worker vivado đã nạp settings64.sh). Gate: có .bit và WNS >= 0."""
+def fpga_build(run_dir: str, timeout_s: int = 3600, power_cycles: int = 20000) -> dict:
+    """Vivado batch theo fpga/build.tcl (worker vivado đã nạp settings64.sh), rồi power_saif.tcl: công suất theo
+    hoạt động thật (xsim netlist sau route với tb_power.v, SAIF) khi power_cycles > 0.
+    ok: có .bit, clock trong báo cáo timing đúng clock.xdc, đo được công suất SAIF. timing_met: WNS >= 0 và WHS >= 0
+    (gate của agent; baseline ghi lại cả khi không đạt, vì ở clock cao bản baseline có thể không đạt timing)."""
     fpga = os.path.join(run_dir, "fpga")
     os.makedirs(os.path.join(fpga, "out"), exist_ok=True)
     _, ver, _ = _sh("vivado -version | head -1", fpga)
     rc, out, sec = _sh("vivado -mode batch -nojournal -log out/vivado.log -source build.tcl", fpga, timeout=timeout_s)
     rep = lambda name: _read(os.path.join(fpga, "reports", name))
-    util, power, log = rep("util.rpt"), rep("power.rpt"), _read(os.path.join(fpga, "out", "vivado.log"))
+    util, log, timing = rep("util.rpt"), _read(os.path.join(fpga, "out", "vivado.log")), rep("timing.rpt")
+    vl = _power(rep("power.rpt"))
     bit = os.path.join(fpga, "out", "fpga_top.bit")
+    period = _period(fpga)
+    clk = re.search(r"^\s*sys_clk\s+\{[^}]*\}\s+([\d.]+)\s+([\d.]+)", timing, re.M)
     res = {
         "vivado": ver.strip(), "rc": rc, "seconds": sec, "host": os.uname().nodename,
         "bitstream": bit if os.path.isfile(bit) else None,
-        **_timing(rep("timing.rpt")),
+        **_timing(timing),
+        "clock_period_ns": period, "clock_mhz": round(1000 / period, 2) if period else None,
+        "clock_in_report_ns": float(clk.group(1)) if clk else None,
         "lut": _num(r"^\|\s*Slice LUTs\*?\s*\|\s*(\d+)", util, int),
         "ff": _num(r"^\|\s*Slice Registers\s*\|\s*(\d+)", util, int),
         "bufg": _num(r"^\|\s*BUFGCTRL\s*\|\s*(\d+)", util, int),
-        "power_total_w": _num(r"^\|\s*Total On-Chip Power \(W\)\s*\|\s*([\d.]+)", power),
-        "power_dynamic_w": _num(r"^\|\s*Dynamic \(W\)\s*\|\s*([\d.]+)", power),
+        # Ước lượng vector-less (cách đo cũ, chỉ để đối chiếu).
+        "power_total_vl_w": vl["total_w"], "power_dynamic_vl_w": vl["dynamic_w"],
         "critical_warnings": len(re.findall(r"^CRITICAL WARNING:", log, re.M)),
         "warnings": len(re.findall(r"^WARNING:", log, re.M)),
         # Các mã cảnh báo duy nhất (ví dụ PDRC-153 gated clock): đầu vào cho agent ở pha 2.
         "warning_ids": sorted(set(re.findall(r"^(?:CRITICAL )?WARNING: \[([^\]]+)\]", log, re.M))),
         "reports": os.path.join(fpga, "reports"),
     }
-    res["ok"] = rc == 0 and res["bitstream"] is not None and res.get("wns_ns") is not None and res["wns_ns"] >= 0
-    res["log_tail"] = out[-3000:]
-    get_profiler().add_info({"step": "fpga", "ok": res["ok"], "seconds": sec, "wns_ns": res.get("wns_ns"),
+    wns, whs = res.get("wns_ns"), res.get("whs_ns")
+    res["fmax_est_mhz"] = round(1000 / (period - wns), 1) if period and wns is not None and period - wns > 0 else None
+    res["timing_met"] = wns is not None and wns >= 0 and (whs is None or whs >= 0)
+    clock_ok = period is not None and res["clock_in_report_ns"] is not None and \
+        abs(res["clock_in_report_ns"] - period) < 1e-3
+    tail = out[-3000:]
+    power_ok = power_cycles <= 0
+    if res["bitstream"] and power_cycles > 0:
+        prc, pout, psec = _sh(f"vivado -mode batch -nojournal -log out/power.log -source power_saif.tcl "
+                              f"-tclargs {period} {power_cycles}", fpga, timeout=timeout_s)
+        p = _power(rep("power_saif.rpt"))
+        res.update({"power_seconds": psec, "power_cycles": power_cycles, "power_total_w": p["total_w"],
+                    "power_dynamic_w": p["dynamic_w"], "power_static_w": p["static_w"], "power_alu_w": p["alu_w"],
+                    "power_confidence": p["confidence"], "saif_nets_matched_pct": p["nets_matched_pct"]})
+        power_ok = prc == 0 and p["dynamic_w"] is not None
+        if not power_ok:
+            tail += "\n--- power_saif.tcl ---\n" + pout[-3000:]
+    res["ok"] = rc == 0 and res["bitstream"] is not None and wns is not None and clock_ok and power_ok
+    if not clock_ok:
+        tail += f"\nclock trong timing.rpt ({res['clock_in_report_ns']}) khác clock.xdc ({period})"
+    res["log_tail"] = tail
+    get_profiler().add_info({"step": "fpga", "ok": res["ok"], "seconds": sec, "wns_ns": wns,
                              "lut": res["lut"], "ff": res["ff"]})
     return res
 
@@ -333,6 +432,11 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--cycles", type=int, default=20000)
     ap.add_argument("--en-pct", type=int, default=30)
+    ap.add_argument("--fpga-period", type=float, default=10.0, help="chu kỳ clock của bước FPGA (ns), mặc định 10")
+    ap.add_argument("--fpga-variant", default=next(iter(FPGA_VARIANTS)),
+                    help="biến thể FPGA: " + ", ".join(f"{k} ({v['note']})" for k, v in FPGA_VARIANTS.items()))
+    ap.add_argument("--fpga-en-pct", type=float, default=30, help="tỉ lệ gửi phép của fpga_top (%%), mặc định 30")
+    ap.add_argument("--power-cycles", type=int, default=20000, help="số chu kỳ mô phỏng để ghi SAIF (0: không đo)")
     args = ap.parse_args()
 
     src = Path(__file__).resolve().parent            # bản chép --working-dir của project
@@ -343,6 +447,7 @@ def main() -> None:
     for sub in ("rtl", "sim", "fpga", "asic"):
         shutil.copytree(src / sub, run_dir / sub, ignore=shutil.ignore_patterns("build"))
     (run_dir / "results").mkdir()
+    fpga_cfg = prepare_fpga(str(run_dir), args.fpga_period, args.fpga_variant, args.fpga_en_pct)
 
     ray.init(address="auto", ignore_reinit_error=True)
     for st, res_name, flag in (("fpga", "vivado", "--fpga"), ("asic", "asic", "--asic")):
@@ -353,7 +458,8 @@ def main() -> None:
 
     report = {"demo": DEMO, "dut": DUT, "phase": "baseline", "run_id": args.run_id, "run_dir": str(run_dir),
               "rtl_sha256": _sha256(sorted((run_dir / "rtl").glob("*.v"))),
-              "params": {"seed": args.seed, "cycles": args.cycles, "en_pct": args.en_pct, "stages": stages},
+              "params": {"seed": args.seed, "cycles": args.cycles, "en_pct": args.en_pct, "stages": stages,
+                         "fpga": fpga_cfg, "power_cycles": args.power_cycles},
               "steps": {}, "stopped_at": None, "t0": time.time()}
     print(f"[baseline {DEMO}] run_dir = {run_dir}", flush=True)
     S.write(report)
@@ -391,12 +497,21 @@ def main() -> None:
     if ok and "fpga" in stages:
         # 3. FPGA: Vivado ở khối vivado.
         S.set_live(report, task="fpga")
-        r = get(fpga_build.chia_remote(str(run_dir)))
+        r = get(fpga_build.chia_remote(str(run_dir), power_cycles=args.power_cycles))
         ok = done("fpga", r)
-        print(f"[baseline {DEMO}] fpga: LUT={r['lut']} FF={r['ff']} BUFG={r['bufg']} WNS={r.get('wns_ns')} "
-              f"WHS={r.get('whs_ns')} ns  P={r['power_total_w']} W (động {r['power_dynamic_w']} W)  "
+        mw = lambda w: f"{w * 1000:.3f}" if isinstance(w, (int, float)) else "?"
+        print(f"[baseline {DEMO}] fpga ({fpga_cfg['variant']}, {r['clock_mhz']} MHz, gửi phép {fpga_cfg['en_thr']}/128): "
+              f"LUT={r['lut']} FF={r['ff']} BUFG={r['bufg']} WNS={r.get('wns_ns')} WHS={r.get('whs_ns')} ns "
+              f"(Fmax ước lượng {r['fmax_est_mhz']} MHz, timing {'đạt' if r['timing_met'] else 'KHÔNG đạt'})  "
               f"cảnh báo={r['warnings']} (critical {r['critical_warnings']})", flush=True)
+        print(f"[baseline {DEMO}] fpga công suất SAIF: động {mw(r.get('power_dynamic_w'))} mW, u_alu "
+              f"{mw(r.get('power_alu_w'))} mW, tổng {mw(r.get('power_total_w'))} mW (độ tin cậy "
+              f"{r.get('power_confidence')}, net khớp {r.get('saif_nets_matched_pct')} %); vector-less: động "
+              f"{mw(r.get('power_dynamic_vl_w'))} mW", flush=True)
         print(f"[baseline {DEMO}] bitstream: {r['bitstream']}", flush=True)
+        if ok and not r["timing_met"]:
+            print(f"[baseline {DEMO}] CẢNH BÁO: FPGA không đạt timing ở {r['clock_mhz']} MHz (ghi lại làm mốc; "
+                  f"bitstream vẫn có nên bước ASIC vẫn chạy)", flush=True)
     if ok and "asic" in stages:
         # 4. ASIC: ORFS ở khối asic, từng bước make là một task (timeline thấy rõ từng bước).
         for stage in ASIC_STAGES:

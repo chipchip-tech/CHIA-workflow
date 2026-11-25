@@ -287,3 +287,13 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    trong pha clk = 1), line 14/15, toggle 68/69, branch 8/10. Đã thử bằng testbench sửa tạm: mọi bin NoCG đều gặp được.
    **Luật Sim mới:** PASS, không loại coverage nào của DUT giảm, số bin functional tăng (đủ mọi bin rồi thì line/toggle/
    branch phải tăng); `checked` chỉ để báo cáo; testbench tham chiếu `u_fcov` hoặc tắt coverage thì bị loại.
+   **FPGA (25/11/2026, viết xong, chưa chạy Vivado thật):** clock tách ra `fpga/clock.xdc` (baseline ghi theo
+   `--fpga-period`), `build.tcl` đọc thêm `synth_opts.tcl` (biến thể, generic). Biến thể FPGA (`baseline.py FPGA_VARIANTS`):
+   NoCG `rtl`; CG `latch` (như cũ), `bufgce` (`icg_fpga_bufgce.v`), `ce` (`icg_fpga_ce.v` là AND khi tổng hợp +
+   `-gated_clock_conversion auto`, latch khi mô phỏng). Công suất: `power_saif.tcl` (cố định) ghi netlist sau route, xsim
+   chạy `tb_power.v` 20 000 chu kỳ ở đúng chu kỳ clock, ghi SAIF, `read_saif` rồi `report_power` đơn vị mW; số liệu: P động,
+   P `u_alu`, độ tin cậy, tỉ lệ net khớp; vector-less giữ để đối chiếu. `fpga_top` có tham số `EN_THR` (tỉ lệ gửi phép/128,
+   mặc định 38 như cũ, chữ ký cũ giữ nguyên). Gate: có `.bit`, đúng clock, đo được SAIF; baseline không đạt timing thì ghi
+   lại và vẫn chạy tiếp; agent phải đạt WNS ≥ 0 và WHS ≥ 0, được nhận ngay nếu bản tốt nhất chưa đạt, còn lại Pareto với P
+   động SAIF (ngưỡng 0,02 mW). `fpga_sweep.py fmax|power` cho bảng Fmax và bảng công suất theo tỉ lệ gửi phép.
+   Hoãn: MMCM (clock > 100 MHz trên board thật cần MMCM; bảng Fmax và công suất là số của công cụ).

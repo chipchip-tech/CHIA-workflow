@@ -14,7 +14,9 @@ Với từng bước (Sim → FPGA → ASIC), tối đa --rounds vòng:
        sim   chỉ sửa sim/tb_*.v (thêm kiểm tra); nhận nếu vẫn PASS, functional coverage (bin của sim/fcov_*.sv, cố
              định) tăng và line/toggle/branch của DUT không giảm; đã đủ mọi bin thì chỉ nhận khi line/toggle/branch tăng
        fpga  chỉ sửa fpga/ (build.tcl, sources.f, file .v mới riêng cho FPGA); gate: tb_fpga_top PASS trong xsim
-             (thư viện UNISIM), có .bit, WNS >= 0; nhận nếu không kém ở WNS, công suất động, LUT+FF và tốt hơn ở một
+             (thư viện UNISIM), có .bit, đúng clock của baseline (fpga/clock.xdc), WNS >= 0 và WHS >= 0; nhận nếu
+             bản tốt nhất chưa đạt timing (baseline ở clock cao), hoặc không kém ở WNS, công suất động (SAIF),
+             LUT+FF và tốt hơn ở một
        asic  chỉ sửa asic/config.mk (không đổi design, file nguồn, SDC); gate như baseline (GDS, slack >= 0,
              DRC = 0, LVS khớp); nhận nếu không kém ở
              diện tích cell, diện tích die, công suất và tốt hơn ít nhất 1 % ở một
@@ -207,7 +209,9 @@ def _allowed(step: str, rel: str) -> bool:
     if step == "fpga":
         if rel in ("fpga/build.tcl", "fpga/sources.f"):
             return True
-        fixed = {"fpga/fpga_top.v", "fpga/tb_fpga_top.v"}
+        # icg_fpga_*.v: biến thể FPGA viết tay của baseline CG (agent dùng được qua sources.f, không sửa).
+        fixed = {"fpga/fpga_top.v", "fpga/tb_fpga_top.v", "fpga/tb_power.v", "fpga/icg_fpga_bufgce.v",
+                 "fpga/icg_fpga_ce.v"}
         return rel.startswith("fpga/") and rel.count("/") == 1 and rel.endswith(".v") and rel not in fixed
     if step == "asic":
         return rel == "asic/config.mk"
@@ -234,6 +238,10 @@ def _rule_violations(step: str, cand: Path, before: dict[str, bytes]) -> list[st
         tcl = (cand / "fpga/build.tcl").read_text()
         if "xc7a100tcsg324-1" not in tcl:
             bad.append("build.tcl: đổi part")
+        code = re.sub(r"#.*", "", tcl)
+        for need in ("clock.xdc", "synth_opts.tcl"):
+            if need not in code:
+                bad.append(f"build.tcl: không đọc {need} (clock và biến thể cố định theo baseline)")
         if re.search(r"\b(create_clock|create_generated_clock|set_false_path|set_multicycle_path|set_max_delay)\b",
                      re.sub(r"#.*", "", tcl)):
             bad.append("build.tcl: thêm/đổi ràng buộc timing (clock cố định theo .xdc)")
@@ -306,7 +314,12 @@ def measure(step: str, cand: Path, params: dict, on_task=None) -> dict:
         plus = [f"+seed={params['seed']}", f"+cycles={params['cycles']}", f"+en_pct={params['en_pct']}"]
         _ = run("sim_build", B.sim_build.chia_remote(d)) and run("sim_run", B.sim_run.chia_remote(d, plus))
     elif step == "fpga":
-        _ = run("fpga_sim", fpga_sim.chia_remote(d)) and run("fpga", B.fpga_build.chia_remote(d))
+        if run("fpga_sim", fpga_sim.chia_remote(d)) and run(
+                "fpga", B.fpga_build.chia_remote(d, power_cycles=params.get("power_cycles", 20000))):
+            if not sub["fpga"]["timing_met"]:                # gate của agent: phải đạt timing ở clock của baseline
+                sub["fpga"]["ok"] = False
+                sub["fpga"]["log_tail"] = (f"timing không đạt: WNS {sub['fpga'].get('wns_ns')} WHS "
+                                           f"{sub['fpga'].get('whs_ns')} ns\n") + sub["fpga"].get("log_tail", "")
     else:
         for st in B.ASIC_STAGES:
             if not run(f"asic_{st}", B.asic_stage.chia_remote(d, st)):
@@ -325,8 +338,10 @@ def metrics_of(step: str, r: dict) -> dict:
                 **{k: r.get(k) for k in ("fcov_hit", "fcov_total", "fcov_miss", "cov_line", "cov_line_total",
                                          "cov_toggle", "cov_toggle_total", "cov_branch", "cov_branch_total")}}
     if step == "fpga":
-        return {k: r.get(k) for k in ("wns_ns", "whs_ns", "tns_ns", "lut", "ff", "bufg", "power_total_w",
-                                      "power_dynamic_w", "warnings", "critical_warnings", "warning_ids", "bitstream")}
+        return {k: r.get(k) for k in ("wns_ns", "whs_ns", "tns_ns", "timing_met", "clock_mhz", "fmax_est_mhz", "lut",
+                                      "ff", "bufg", "power_total_w", "power_dynamic_w", "power_alu_w",
+                                      "power_dynamic_vl_w", "power_confidence", "saif_nets_matched_pct", "warnings",
+                                      "critical_warnings", "warning_ids", "bitstream")}
     return {k: r.get(k) for k in ("area_um2", "die_area_um2", "core_area_um2", "util_pct", "n_logic_cells", "n_flop",
                                   "n_icg", "n_clkbuf", "setup_ws_ns", "hold_ws_ns", "power_total_w", "drc_errors",
                                   "lvs", "gds", "layout_png")}
@@ -374,7 +389,11 @@ def judge(step: str, best: dict, new: dict) -> tuple[bool, str]:
     if step == "sim":
         return judge_sim(best, new)
     if step == "fpga":
-        crit = [("WNS", "wns_ns", +1, 0.02), ("P động", "power_dynamic_w", -1, 0.0005),
+        if best.get("timing_met") is False:              # bản mới đã qua gate nên đạt timing
+            return True, (f"đạt timing ở {new.get('clock_mhz')} MHz (WNS {best.get('wns_ns')} → {new.get('wns_ns')} "
+                          f"ns), bản tốt nhất chưa đạt")
+        # Công suất động đo theo SAIF (từ 25/11/2026), công cụ tất định: ngưỡng 0,02 mW chỉ bỏ qua làm tròn.
+        crit = [("WNS", "wns_ns", +1, 0.02), ("P động", "power_dynamic_w", -1, 0.00002),
                 ("LUT+FF", None, -1, 0.5)]
     else:
         crit = [("diện tích cell", "area_um2", -1, 0.01), ("diện tích die", "die_area_um2", -1, 0.01),
@@ -438,17 +457,22 @@ fcov_{dut}.sv / u_fcov from the testbench (that round is rejected). Read fcov_{d
 Gate: Verilator build + run with the same plusargs as baseline prints RESULT: PASS. The round is accepted only if
 no coverage kind of the DUT decreases and the number of functional bins hit increases (when every bin is already
 hit: only if line/toggle/branch coverage increases). Adding comparisons alone does not count.""",
-    "fpga": """STEP: FPGA. Vivado 2025.1, part xc7a100tcsg324-1, 100 MHz clock from fpga/arty_a7_100t.xdc. The ALU is
-wrapped in fpga/fpga_top.v (LFSR stimulus, MISR self-check, LEDs). Read the reports of the current best build in
-agent/context/ (timing, utilization, power, clock utilization, methodology, warnings).
-Goal: improve WNS and/or dynamic power and/or LUT+FF without making any of them worse.
+    "fpga": """STEP: FPGA. Vivado 2025.1, part xc7a100tcsg324-1, clock {mhz} MHz ({period} ns) from fpga/clock.xdc (FIXED).
+The ALU is wrapped in fpga/fpga_top.v (LFSR stimulus sending an operation in {en_thr}/128 of the cycles, MISR
+self-check, LEDs). Read the reports of the current best build in agent/context/ (timing, utilization, clock
+utilization, methodology, warnings, power_saif.rpt). Power is measured with real activity: the routed netlist is
+simulated with fpga/tb_power.v and the SAIF is read back (fpga/power_saif.tcl, FIXED); power.rpt is the old vector-less
+estimate, for reference only.
+Goal: if the current best version does not meet timing at this clock, meet it (WNS >= 0, WHS >= 0); otherwise improve
+WNS and/or dynamic power (SAIF) and/or LUT+FF without making any of them worse.
 Allowed files: fpga/build.tcl (synthesis/implementation options and directives; do NOT add or change clocks or timing
 exceptions, do NOT change the part), fpga/sources.f (the Verilog files read by Vivado and by the functional simulation),
 new Verilog files fpga/<name>.v (for example an FPGA-specific implementation of a module from rtl/ with the SAME module
 name and ports; then replace the rtl/ file by yours in sources.f). Not allowed: rtl/, fpga/fpga_top.v,
-fpga/tb_fpga_top.v, fpga/golden_sig.py, the .xdc.
+fpga/tb_fpga_top.v, fpga/tb_power.v, fpga/golden_sig.py, fpga/power_saif.tcl, fpga/synth_opts.tcl, the .xdc files.
+build.tcl must keep reading clock.xdc and sourcing synth_opts.tcl.
 Gate: tb_fpga_top.v in xsim with the UNISIM library (Xilinx primitives simulate) prints RESULT: PASS fpga_top, the
-bitstream is written, WNS >= 0.""",
+bitstream is written, the clock is the one of clock.xdc, WNS >= 0 and WHS >= 0, SAIF power measured.""",
     "asic": """STEP: ASIC. OpenROAD-flow-scripts, sky130hd, RTL -> GDS, 10 ns clock from asic/constraint.sdc (fixed).
 Read the reports and metrics of the current best run in agent/context/ (ORFS final report, synthesis statistics,
 metrics JSON, ORFS variable reference if present).
@@ -509,8 +533,10 @@ def write_context(step: str, cand: Path, best_dir: Path, best_m: dict, base_m: d
         + "".join(f"- {f}\n" for f in files if f not in ("metrics.json", "history.json")))
 
 
-def build_prompt(step: str) -> str:
-    return (COMMON.format(dut=DUT, variant=VARIANT[DEMO == "CG"]) + "\n" + STEP_TEXT[step].format(dut=DUT) + "\n")
+def build_prompt(step: str, params: dict | None = None) -> str:
+    f = (params or {}).get("fpga") or {"period_ns": 10.0, "en_thr": B.FPGA_EN_THR_DEFAULT}
+    fmt = {"dut": DUT, "period": f"{f['period_ns']:g}", "mhz": f"{1000 / f['period_ns']:.4g}", "en_thr": f["en_thr"]}
+    return (COMMON.format(dut=DUT, variant=VARIANT[DEMO == "CG"]) + "\n" + STEP_TEXT[step].format(**fmt) + "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -565,8 +591,10 @@ def base_metrics(rep: dict) -> dict:
 ROWS = {
     "sim": [("Functional coverage (bin)", "fcov_hit"), ("Line (DUT)", "cov_line"), ("Toggle (DUT)", "cov_toggle"),
             ("Branch (DUT)", "cov_branch"), ("Số lần kiểm tra", "checked"), ("Lỗi", "errors")],
-    "fpga": [("WNS (ns)", "wns_ns"), ("WHS (ns)", "whs_ns"), ("LUT", "lut"), ("FF", "ff"), ("BUFG", "bufg"),
-             ("Công suất tổng (W)", "power_total_w"), ("Công suất động (W)", "power_dynamic_w"),
+    "fpga": [("Clock (MHz)", "clock_mhz"), ("Timing đạt", "timing_met"), ("WNS (ns)", "wns_ns"), ("WHS (ns)", "whs_ns"),
+             ("Fmax ước lượng (MHz)", "fmax_est_mhz"), ("LUT", "lut"), ("FF", "ff"), ("BUFG", "bufg"),
+             ("Công suất động SAIF (W)", "power_dynamic_w"), ("Công suất u_alu SAIF (W)", "power_alu_w"),
+             ("Công suất tổng SAIF (W)", "power_total_w"), ("Công suất động vector-less (W)", "power_dynamic_vl_w"),
              ("Cảnh báo", "warnings")],
     "asic": [("Diện tích cell (µm²)", "area_um2"), ("Diện tích die (µm²)", "die_area_um2"), ("Util (%)", "util_pct"),
              ("Số cell", "n_logic_cells"), ("ICG", "n_icg"), ("Buffer clock", "n_clkbuf"),
@@ -667,7 +695,7 @@ def main() -> None:
             before = _snapshot(cand)
             write_context(step, cand, step_best_dir, best_m, base_m[step],
                           [r for r in report["rounds"] if r["step"] == step])
-            prompt = build_prompt(step)
+            prompt = build_prompt(step, params)
             (cand / "agent" / "TASK.md").write_text(prompt)
             print(f"{tag} {name}: agent đang đánh giá ...", flush=True)
             S.set_live(report, step=step, round=name, state="agent")

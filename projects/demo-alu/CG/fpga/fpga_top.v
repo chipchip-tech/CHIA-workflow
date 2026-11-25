@@ -4,7 +4,8 @@
 // ngay trong FPGA; ra ngoài chỉ cần clk, nút reset và 4 LED. Đổi board chỉ phải sửa file .xdc.
 //
 // Mỗi khung N_CYCLES chu kỳ:
-//   - LFSR Galois 32 bit đổi mỗi chu kỳ; gửi một phép (en=1) khi lfsr[6:0] < 38 (khoảng 30 %, rảnh 70 % như tb),
+//   - LFSR Galois 32 bit đổi mỗi chu kỳ; gửi một phép (en=1) khi lfsr[6:0] < EN_THR (mặc định 38/128, khoảng 30 %,
+//     rảnh 70 % như tb; 128 là luôn gửi),
 //     op = lfsr[10:8], a = lfsr[23:16], b = lfsr[31:24]; 4 chu kỳ cuối khung không gửi để xả pipeline.
 //   - Mỗi kết quả (valid=1) dồn vào MISR 32 bit: {carry, zero, y}.
 //   - Cuối khung so chữ ký với EXP_SIG (tính bằng golden_sig.py), rồi nạp lại LFSR, MISR và chạy khung mới.
@@ -17,9 +18,10 @@
 module fpga_top #(
     parameter integer N_CYCLES = 1048576,       // khoảng 10,5 ms mỗi khung ở 100 MHz
     parameter [31:0]  SEED     = 32'hACE12025,
-    parameter [31:0]  EXP_SIG  = 32'hEACBE87B   // python3 golden_sig.py 1048576 ACE12025
+    parameter [31:0]  EXP_SIG  = 32'hEACBE87B,  // python3 golden_sig.py 1048576 ACE12025 38
+    parameter [7:0]   EN_THR   = 8'd38          // tỉ lệ gửi phép = EN_THR/128 (đổi thì tính lại EXP_SIG)
 ) (
-    input  wire       clk,          // 100 MHz
+    input  wire       clk,          // chu kỳ theo clock.xdc (mặc định 10 ns)
     input  wire       rst_n_btn,    // nút reset, mức thấp
     output wire [3:0] led
 );
@@ -38,7 +40,7 @@ module fpga_top #(
     reg         fail, done1;
 
     wire        issue = (cnt < N_CYCLES - 4);
-    wire        en    = issue && (lfsr[6:0] < 7'd38);
+    wire        en    = issue && ({1'b0, lfsr[6:0]} < EN_THR);
     wire [2:0]  op    = lfsr[10:8];
     wire [7:0]  a     = lfsr[23:16];
     wire [7:0]  b     = lfsr[31:24];

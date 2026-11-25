@@ -12,8 +12,13 @@ foreach ln [split [read $fh] "\n"] { set ln [string trim $ln]; if {$ln ne "" && 
 close $fh
 read_verilog $srcs
 read_xdc arty_a7_100t.xdc
+read_xdc clock.xdc
 
-synth_design -top $top -part $part
+# synth_opts.tcl (baseline.py ghi, cố định trong lần chạy): biến thể FPGA (ví dụ -gated_clock_conversion) và generic của
+# fpga_top (EN_THR, EXP_SIG). Không có file thì không thêm gì.
+set synth_args {}
+if {[file exists synth_opts.tcl]} { source synth_opts.tcl }
+synth_design -top $top -part $part {*}$synth_args
 report_utilization -file reports/post_synth_util.rpt
 
 opt_design
@@ -24,7 +29,7 @@ report_utilization     -file reports/util.rpt
 report_utilization     -hierarchical -file reports/util_hier.rpt
 report_timing_summary  -max_paths 10 -file reports/timing.rpt
 report_clock_utilization -file reports/clock_util.rpt
-report_power           -file reports/power.rpt
+report_power           -file reports/power.rpt   ;# ước lượng vector-less (công suất theo SAIF: power_saif.tcl)
 report_methodology     -file reports/methodology.rpt
 report_drc             -file reports/drc.rpt
 

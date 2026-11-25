@@ -1,9 +1,8 @@
 ## arty_a7_100t.xdc - chân của fpga_top trên Digilent Arty A7-100T (xc7a100tcsg324-1).
 ## Đổi board: sửa PACKAGE_PIN (và chu kỳ clock nếu board không phải 100 MHz), giữ nguyên tên cổng.
 
-## Clock 100 MHz
+## Clock (chân E3, dao động 100 MHz trên board). Chu kỳ ràng buộc nằm ở clock.xdc (baseline.py ghi theo --fpga-period).
 set_property -dict {PACKAGE_PIN E3 IOSTANDARD LVCMOS33} [get_ports clk]
-create_clock -name sys_clk -period 10.000 [get_ports clk]
 
 ## Nút RESET (ck_rst, mức thấp)
 set_property -dict {PACKAGE_PIN C2 IOSTANDARD LVCMOS33} [get_ports rst_n_btn]
