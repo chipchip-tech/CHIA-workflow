@@ -3,7 +3,7 @@
 Chạy từ thư mục chứa file này (projects/demo-alu/NoCG), cluster bật đủ khối (`chia-up-blocks.py --fpga --asic`):
   chia job submit --working-dir . -- python agent.py [--baseline <run_dir>] [--steps sim,fpga,asic] [--rounds 2]
       [--model opus] [--effort high] [--agent-timeout 1200]
---baseline mặc định là lần baseline mới nhất có KẾT QUẢ OK trong <WORK_DIR>/demo-alu/NoCG/.
+--baseline mặc định là lần baseline mới nhất có KẾT QUẢ OK và chạy đủ sim,fpga,asic trong <WORK_DIR>/demo-alu/NoCG/.
 
 Với từng bước (Sim → FPGA → ASIC), tối đa --rounds vòng:
   1. chép cây nguồn của bản tốt nhất hiện tại (lúc đầu là baseline) sang thư mục vòng <step>-r<k>/;
@@ -580,7 +580,9 @@ def slim(d: Path, keep_outputs: bool) -> None:
 def latest_baseline(work: Path) -> Path | None:
     for d in sorted((work / "demo-alu" / DEMO).glob("baseline-*"), reverse=True):
         try:
-            if json.loads((d / "results" / "baseline.json").read_text()).get("stopped_at") is None:
+            rep = json.loads((d / "results" / "baseline.json").read_text())
+            # Chỉ baseline OK chạy đủ ba bước (các lần --stages riêng lẻ không làm mốc được).
+            if rep.get("stopped_at") is None and set(rep.get("params", {}).get("stages", [])) >= {"sim", "fpga", "asic"}:
                 return d
         except (OSError, ValueError):
             continue
