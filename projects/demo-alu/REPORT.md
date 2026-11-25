@@ -319,8 +319,15 @@ Baseline mốc: NoCG `baseline-20261125-214405`, CG `baseline-20261125-214709` (
 
 - **Sim:** agent đủ mọi bin ngay vòng 1 bằng khoảng 10–15 phép kiểm tra đặt đúng chỗ (reset giữa chừng, `en` đổi khi
   clock cao). Vòng 2 agent không sửa gì vì không còn bin nào. Luật cũ khiến agent thêm 0,5–1,5 triệu phép so sánh.
-- **FPGA CG r1:** agent chỉ sửa `build.tcl` và `sources.f`, đưa clock gating về dạng Vivado chuyển được sang clock enable.
-  Số đo gần trùng biến thể `ce` viết tay (5,19 mW). Luật cũ đã loại đúng kiểu đánh đổi này hôm 21/11 (+3 ô LUT+FF).
+- **FPGA CG r1:** agent đọc báo cáo thật và chẩn đoán đúng: WNS = 0 là do Vivado mượn thời gian qua latch (đường găng
+  chỉ có nửa chu kỳ, 2,65 ns), có 2 cảnh báo TIMING-14 (LUT trên cây clock), riêng clock tốn 3,28 mW. Agent sửa:
+  - `sources.f`: thay `icg_sim.v` bằng `icg_fpga_ce.v`, biến thể FPGA viết tay có sẵn trong thư mục (agent được dùng, không
+    được sửa);
+  - `build.tcl`: thêm `-gated_clock_conversion auto`, và directive `Explore` cho place/route.
+
+  Vivado đổi clock gating thành clock enable: hết latch và LUT trên đường clock. Số đo gần trùng biến thể `ce` viết tay
+  (5,19 mW). Agent dự đoán công suất "giảm nhẹ hoặc giữ nguyên", đo thật giảm 21,6 %. Luật cũ đã loại đúng kiểu đánh đổi
+  này hôm 21/11 (+3 ô LUT+FF).
   r2 (`CG_alu_fpga.v` + `build.tcl`) giảm 14 ô nhưng P động tăng lên 5,446 mW nên bị loại.
 - **FPGA NoCG:** r1 (`NoCG_alu_fpga.v`) giảm 15 ô LUT+FF nhưng WNS 0,588 → 0,303 ns, bị loại; r2 (`build.tcl`) không tốt
   hơn chỉ số nào. NoCG ở 188,7 MHz gần như đã tối ưu.

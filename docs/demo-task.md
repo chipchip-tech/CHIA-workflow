@@ -368,3 +368,7 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    LOẠI (WNS 0,588 → 0,303, LUT+FF 280 → 265), r2 (`build.tcl`) LOẠI (không tốt hơn). CG `agent-20261125-223205`: r1
    (`build.tcl`, `sources.f`) NHẬN (WNS 0 → 0,462, P động 6,602 → 5,174 mW, LUT+FF 283 → 286, +1,1 % trong ngưỡng 3 %), r2
    (`CG_alu_fpga.v`, `build.tcl`, `sources.f`) LOẠI (P động 5,174 → 5,446). Bảng tổng hợp trong `REPORT.md` mục 9.
+   CG fpga-r1 (diff thật): `sources.f` `../rtl/icg_sim.v` → `icg_fpga_ce.v`; `build.tcl` thêm `-gated_clock_conversion auto`
+   (nếu `synth_opts.tcl` chưa có) và `-directive Explore` cho place/route. Agent chẩn đoán từ báo cáo: WNS 0 do time
+   borrowing, đường găng cnt → en → latch nửa chu kỳ 2,65 ns, 2 TIMING-14, clock 3,28 mW; dự đoán P động "giảm nhẹ hoặc giữ
+   nguyên", đo thật −21,6 %.
