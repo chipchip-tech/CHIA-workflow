@@ -5,6 +5,9 @@
 set period_ns [lindex $argv 0]
 set cycles    [lindex $argv 1]
 set ps [expr {int(round($period_ns * 1000.0 / 2.0)) * 2}]
+# Thời gian chạy (ps): 200 ns GSR + 10 chu kỳ reset (như tb_power.v) + số chu kỳ cần đo.
+set run_ps [expr {200000 + (10 + $cycles) * $ps}]
+set here [pwd]
 
 open_checkpoint out/post_route.dcp
 write_verilog -mode funcsim -force out/funcsim.v
@@ -14,7 +17,7 @@ file mkdir xsim_pw
 set fh [open xsim_pw/saif.tcl w]
 puts $fh "open_saif act.saif"
 puts $fh "log_saif \[get_objects -r /tb_power/dut/*\]"
-puts $fh "run all"
+puts $fh "run $run_ps ps"
 puts $fh "close_saif"
 puts $fh "quit"
 close $fh
@@ -22,8 +25,13 @@ close $fh
 cd xsim_pw
 exec xvlog -nolog ../out/funcsim.v ../tb_power.v $::env(XILINX_VIVADO)/data/verilog/src/glbl.v >& xvlog.log
 exec xelab -nolog -L unisims_ver -generic_top "PERIOD_PS=$ps" -generic_top "CYCLES=$cycles" -s tbp tb_power glbl >& xelab.log
-exec xsim -nolog tbp -tclbatch saif.tcl >& xsim.log
-cd ..
+catch {exec xsim -nolog tbp -tclbatch saif.tcl >& xsim.log}
+cd $here
+if {![file exists xsim_pw/act.saif] || [file size xsim_pw/act.saif] == 0} {
+    set fh [open xsim_pw/xsim.log]; set log [read $fh]; close $fh
+    puts "SAIF_MISSING: xsim không ghi xsim_pw/act.saif. Cuối xsim.log:\n[string range $log end-3000 end]"
+    exit 1
+}
 
 read_saif -strip_path tb_power/dut xsim_pw/act.saif
 set_units -power mW

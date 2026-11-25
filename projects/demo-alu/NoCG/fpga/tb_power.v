@@ -1,6 +1,8 @@
 // tb_power.v - kích thích cho đo công suất theo hoạt động thật (power_saif.tcl, cố định, agent không sửa).
 // Mô phỏng netlist sau route (write_verilog -mode funcsim) của fpga_top: clock đúng chu kỳ ràng buộc, nhả reset rồi
 // chạy CYCLES chu kỳ; LFSR trong fpga_top sinh phép với tỉ lệ EN_THR/128 như trên board. xsim ghi SAIF cho dut.
+// Không gọi $finish: power_saif.tcl chạy đúng một khoảng thời gian rồi close_saif (xsim thoát ở $finish trước khi
+// kịp ghi SAIF).
 `timescale 1ps/1ps
 module tb_power #(
     parameter integer PERIOD_PS = 10000,
@@ -13,7 +15,5 @@ module tb_power #(
     initial begin
         #(200000 + 10 * PERIOD_PS);          // GSR của glbl giữ 100 ns đầu
         rst_n_btn = 1'b1;
-        #(CYCLES * PERIOD_PS);
-        $finish;
     end
 endmodule
