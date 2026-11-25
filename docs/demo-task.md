@@ -322,3 +322,21 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    Ở clock chặt Vivado nhân bản logic (LUT 138 → khoảng 190). Kết quả không đơn điệu theo chu kỳ (CG ce 4,3 ns đạt, NoCG
    4,3 ns trượt), nên Fmax có sai số cỡ 0,1–0,2 ns. Đề xuất clock chung cho bước FPGA: 5,3 ns (188,7 MHz), mức cao nhất mà
    NoCG, bufgce, ce cùng đạt (bufgce đã đạt đúng ở 5,3 ns, WNS 0,331); bản latch không đạt ở mức này.
+   **Công suất SAIF theo tỉ lệ gửi phép, chạy thật 25/11/2026** (`fpga_sweep.py power --period 5.3`, 188,7 MHz, 20 000 chu
+   kỳ, net khớp 74–77 %, độ tin cậy High). P động (mW), trong ngoặc là P `u_alu`:
+
+   | Gửi phép | NoCG | CG latch | CG bufgce | CG ce |
+   |---|---|---|---|---|
+   | 10 % | 4,21 (1,09) | 6,19 (2,10) | 8,50 (3,25) | 4,03 (1,09) |
+   | 30 % | 5,58 (1,99) | 6,60 (2,69) | 9,36 (4,27) | 5,19 (1,96) |
+   | 70 % | 7,74 (3,77) | 9,17 (4,49) | 10,25 (5,19) | 7,79 (3,73) |
+   | 100 % | 8,88 (4,52) | 10,42 (5,24) | 11,67 (6,05) | 8,42 (4,32) |
+
+   Vector-less báo 4 mW (NoCG, ce) hoặc 9–13 mW (latch, bufgce) ở mọi tỉ lệ: không thấy hoạt động. SAIF tăng theo hoạt
+   động. Trên FPGA không cách gating nào tốt hơn NoCG, kể cả rảnh 90 %: bufgce +2,8…+4,3 mW (2 mạng clock toàn cục cho
+   khoảng 30 flop), latch +1…+2 mW, ce ngang NoCG (−7 %…+0,6 %, trong dao động P&R; cấu trúc sau chuyển đổi giống NoCG).
+   Bản latch ở 5,3 ns có WNS 0,000 (time borrowing qua latch): đạt ở 10/30/70 %, trượt ở 100 % (−0,187 ns).
+   Lỗi đã gỡ trước đó: `xelab -generic_top PERIOD_PS=5300` làm xsim đổi tên scope gốc thành `tb_power(PERIOD_PS=5300)`,
+   `log_saif` không thấy `/tb_power/dut`, SAIF rỗng (`DURATION 0`), `read_saif` chỉ khớp 3/411 net (độ tin cậy Medium, số
+   gần bằng vector-less) mà không báo lỗi. Giờ chu kỳ truyền bằng `xvlog -d`, SAIF rỗng thì dừng, khớp < 50 % thì gate FPGA
+   không qua.

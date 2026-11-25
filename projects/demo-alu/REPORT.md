@@ -213,3 +213,63 @@ Cả bốn vòng được nhận, và vẫn PASS trên Verilator thật.
 - **Slide:** ba slide chính Sim, FPGA, ASIC, kèm slide mở đầu về cluster và slide kết.
 - **Video:** quay `run_demo.py` với trang trạng thái và timeline CHIA.
 - **Demo 2 (tuỳ chọn):** mini-SoC PicoRV32, dùng lại loop, task và khối của Demo 1.
+
+## 9. Củng cố ngày 25/11/2026 (baseline, chưa chạy lại agent)
+
+Mục tiêu: kết quả đủ và đúng quy trình. Mọi số dưới đây đo thật trên máy, bằng `baseline.py` và `fpga_sweep.py`. Pha 2
+(agent) chưa chạy lại với các luật mới; mục 5 vẫn là kết quả của luật cũ.
+
+### ASIC: thêm LVS
+
+- Task mới `asic_lvs` chạy `make lvs` của ORFS sau `finish`. KLayout so layout GDS với netlist, khoảng 2,4 s.
+- Gate ASIC thêm điều kiện "LVS khớp".
+- Cả hai demo khớp; mọi số ASIC khác trùng từng số với baseline 21/11.
+- Thử cố ý làm sai (đổi dây CLK và D của một flip-flop trong netlist): LVS báo không khớp, gate chặn đúng.
+
+### Sim: đo coverage thật
+
+- `sim/fcov_<DUT>.sv` liệt kê các tình huống cần thử (bin): kết quả 0/khác 0 của từng phép, carry, mọi độ dịch, biên SLT
+  có dấu, tràn có dấu, mẫu `en`, reset giữa chừng; CG thêm `en` đổi khi clock đang ở mức cao. File cố định, agent không
+  sửa được.
+- Verilator đo thêm line/toggle/branch của riêng ALU.
+
+| | Bin functional | Line | Toggle | Branch |
+|---|---|---|---|---|
+| NoCG | 51/55 (thiếu 4 bin reset) | 15/16 | 62/62 | 8/8 |
+| CG | 51/57 (thiếu 4 bin reset, 2 bin `en` khi clock cao) | 14/15 | 68/69 | 8/10 |
+
+- Luật Sim mới: PASS, không loại coverage nào giảm, số bin tăng. Thêm phép so sánh mà không phủ thêm tình huống thì không
+  được nhận.
+
+### FPGA: so CG và NoCG công bằng
+
+Ba cách làm clock gating trên FPGA cho demo CG, đều chỉ nằm trong `fpga/` (RTL không đổi):
+
+- **latch**: như baseline cũ, latch + LUT trên đường clock;
+- **bufgce**: BUFGCE, bộ đệm clock có chân bật sẵn trong FPGA;
+- **ce**: Vivado đổi gating thành chân enable của flip-flop.
+
+**Fmax** (dò tự động, độ phân giải 0,1 ns):
+
+| | NoCG | CG latch | CG bufgce | CG ce |
+|---|---|---|---|---|
+| Fmax | 227,3 MHz | 128,2 MHz | 196,1 MHz | 232,6 MHz |
+| BUFG | 1 | 1 | 3 | 1 |
+
+Bản latch trượt vì hold (clock qua LUT đến các flop lệch nhau). BUFGCE và CE lấy lại tốc độ.
+
+**Công suất động** ở tần số chung 188,7 MHz (5,3 ns), đo bằng hoạt động thật: mô phỏng netlist sau P&R, ghi SAIF,
+Vivado tính công suất từ đó (khớp 74–77 % net, độ tin cậy High). Đơn vị mW:
+
+| Gửi phép | NoCG | CG latch | CG bufgce | CG ce |
+|---|---|---|---|---|
+| 10 % | 4,21 | 6,19 | 8,50 | 4,03 |
+| 30 % | 5,58 | 6,60 | 9,36 | 5,19 |
+| 70 % | 7,74 | 9,17 | 10,25 | 7,79 |
+| 100 % | 8,88 | 10,42 | 11,67 | 8,42 |
+
+- Công suất tăng theo hoạt động. Ước lượng vector-less cũ báo gần như cùng một số ở mọi mức, nên không dùng để so được.
+- **Trên FPGA, không cách gating nào tiết kiệm hơn NoCG**, kể cả khi ALU rảnh 90 %. BUFGCE tốn thêm 2,8–4,3 mW vì mỗi
+  BUFGCE là một mạng clock toàn cục mà chỉ nuôi khoảng 30 flop. CE ngang NoCG vì sau chuyển đổi cấu trúc gần như giống hệt.
+- Trên ASIC thì ngược lại: CG giảm 12 % công suất (mục 4). Đây là số đo cho thấy vì sao tối ưu của FPGA không được mang
+  sang ASIC.
