@@ -266,3 +266,13 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    làm mới khi job chưa ghi trang), mở trình duyệt (`/usr/bin/xdg-open`, `gio open`, Firefox Flatpak), rồi `chia job submit`.
    `run_demo.py show <run_dir>` xem lại lần chạy cũ. Đã thử trong sandbox (server, trang chờ, lệnh submit với `chia` giả);
    chưa thử trên máy người dùng.
+
+   **Củng cố Demo 1 (từ 24/11/2026).** Kế hoạch đã chốt với người dùng, mục tiêu là kết quả đủ và đúng quy trình:
+   (1) LVS cho ASIC; (2) Sim đo coverage, luật nhận đổi sang coverage; (3) FPGA: hai demo cùng một tần số, bản CG cho
+   FPGA dùng BUFGCE/CE (file riêng trong `fpga/`), bảng Fmax, công suất từ SAIF chỉ tính phần ALU, quét tỉ lệ rảnh;
+   (4) chạy lại baseline + agent. Hoãn: công suất ASIC từ VCD, MMCM trên board.
+   **LVS, chạy thật 25/11/2026:** task `asic_lvs` sau `finish` chạy `make lvs` của ORFS (bản trên máy: KLayout 0.30.12,
+   deck Ruby `sky130hd.lylvs`). Gate ASIC thêm "LVS khớp", ở cả baseline và agent. `baseline.py --stages asic`: NoCG và
+   CG đều `lvs: match` (log `Congratulations! Netlists match.`), khoảng 2,4 s; mọi số khác trùng từng số với lần 21/11.
+   Chưa: thử cố ý làm sai (đổi dây CLK/D của một flop trong `6_final_concat.cdl`; lần đầu không sửa được dòng nào vì CDL
+   viết một instance trên nhiều dòng `+`), chạy agent ASIC với gate LVS.

@@ -70,7 +70,7 @@ Với mỗi bước (Sim → FPGA → ASIC), tối đa 2 vòng. Mỗi vòng:
 |---|---|---|---|
 | Sim | `sim/tb_<DUT>.v` | `RESULT: PASS` | `checked` tăng |
 | FPGA | `fpga/build.tcl`, `fpga/sources.f`, file `.v` mới riêng cho FPGA | `tb_fpga_top` PASS (xsim, UNISIM), có `.bit`, WNS ≥ 0 | Pareto chặt: không kém ở WNS (±0,02 ns), công suất động (±0,5 mW), LUT+FF (±0,5 ô), tốt hơn ở ít nhất một |
-| ASIC | `asic/config.mk` | có GDS, setup/hold slack ≥ 0, DRC = 0 | không kém quá 1 % ở diện tích cell, diện tích die, công suất, tốt hơn quá 1 % ở ít nhất một |
+| ASIC | `asic/config.mk` | có GDS, setup/hold slack ≥ 0, DRC = 0, LVS khớp (từ 25/11/2026) | không kém quá 1 % ở diện tích cell, diện tích die, công suất, tốt hơn quá 1 % ở ít nhất một |
 
 `rtl/` chỉ đọc với agent. Tối ưu nào riêng cho FPGA phải nằm trong file mới ở `fpga/`, nên **không lan sang ASIC**.
 
@@ -94,10 +94,14 @@ vòng.
 | | Setup / hold WS (ns) | 6,815 / 0,493 | 6,957 / 0,406 |
 | | Công suất (mW) | 0,368 | 0,324 |
 | | DRC | 0 | 0 |
+| | LVS (thêm 25/11/2026) | khớp | khớp |
 
 - Số liệu FPGA tính cả vỏ `fpga_top` (LFSR, MISR, bộ đếm).
 - Thời gian: FPGA khoảng 64 s mỗi demo. ASIC khoảng 2,5 phút mỗi demo; riêng bước route của CG mất 113 s, của NoCG 35 s.
 - Công suất ASIC là ước lượng của OpenSTA với hoạt động mặc định, không lấy từ VCD.
+- LVS thêm sau, ngày 25/11/2026: task `asic_lvs` chạy `make lvs` của ORFS (KLayout 0.30.12, deck `sky130hd.lylvs`), so
+  layout GDS với netlist CDL. Cả hai demo khớp, mất khoảng 2,4 s; mọi số khác của bước ASIC trùng từng số với lần chạy
+  21/11. Các vòng agent ASIC ở mục 5 chạy trước khi có LVS, nên chưa qua gate này.
 
 **Nhận xét:** clock gating cho kết quả **ngược nhau** trên hai nền tảng.
 
