@@ -227,6 +227,9 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   21/11. Deck in `Congratulations! Netlists match.`; không có deck thì ORFS ghi `LVS not supported` vào `6_lvs.lvsdb`. CDL
   viết một instance trên nhiều dòng (`+`). Thử cố ý làm sai (đổi CLK/D một flop trong CDL) ra `Netlists don't match`.
   Chưa: chạy agent với gate LVS.
+  **Coverage Sim (25/11/2026, mới thử trong sandbox):** `sim/fcov_<DUT>.sv` (bin functional, `bind`, cố định), `sim_main.cpp`
+  (main của `--binary` không ghi `coverage.dat`), luật Sim đổi sang coverage (chi tiết `docs/demo-task.md`). Verilator 5.020:
+  không có `##` trong `cover property`; `cover property` trong `generate` bị gộp một điểm.
   **Từ 24/11/2026 chia 2 session trên nhánh `demo`:** session làm việc (củng cố demo ALU, sửa mọi thứ trừ `report/`) và
   session slide (chỉ sửa `projects/demo-alu/report/**`, brief ở `report/REPORT.md`, 4 deck tiếng Anh `report/guides/`).
   Báo cáo cũ `ProgressReport_22-11.pptx`, `Draft_22-11-2026.docx` đã xoá khỏi nhánh (còn trong lịch sử git).

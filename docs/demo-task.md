@@ -277,3 +277,13 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    Thử cố ý làm sai (25/11/2026, chạy thật): đổi chỗ dây CLK và D của flop `a_q[0]` trong `6_final_concat.cdl` thì LVS báo `ERROR : Netlists don't match`, nên gate chặn được
    lỗi thật (lần thử đầu không sửa được dòng nào vì CDL viết một instance trên nhiều dòng `+`). Chưa: chạy agent ASIC với
    gate LVS.
+   **Coverage ở bước Sim (25/11/2026, mới chạy trong sandbox bằng Verilator 5.020):** `sim/fcov_<DUT>.sv` (cố định, `bind`
+   vào DUT) định nghĩa bin functional coverage theo đặc tả: kết quả 0/khác 0 từng phép, carry/borrow, mọi độ dịch và
+   `b[7:3]≠0`, SLT có dấu, tràn có dấu, mẫu `en`, reset giữa chừng; CG thêm `en` đổi trong pha clk = 1. In
+   `FCOV: hit= total=` và `FCOV_MISS:`. Verilator build có `--coverage`; `sim/sim_main.cpp` thay main của `--binary` (bản
+   đó không ghi `coverage.dat`); line/toggle/branch chỉ tính file RTL của DUT. Verilator 5.020 không hỗ trợ `##` trong
+   `cover property`, còn `cover property` trong `generate` bị gộp thành một điểm, nên bin viết bằng thanh ghi. Baseline:
+   NoCG 51/55 bin (thiếu 4 bin reset), line 15/16, toggle 62/62, branch 8/8; CG 51/57 (thiếu 4 bin reset + 2 bin `en`
+   trong pha clk = 1), line 14/15, toggle 68/69, branch 8/10. Đã thử bằng testbench sửa tạm: mọi bin NoCG đều gặp được.
+   **Luật Sim mới:** PASS, không loại coverage nào của DUT giảm, số bin functional tăng (đủ mọi bin rồi thì line/toggle/
+   branch phải tăng); `checked` chỉ để báo cáo; testbench tham chiếu `u_fcov` hoặc tắt coverage thì bị loại.

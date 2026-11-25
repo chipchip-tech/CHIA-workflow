@@ -48,7 +48,7 @@ Gate và điều kiện nhận ở pha 2:
 
 | Bước | Agent được sửa | Gate | Nhận khi |
 |---|---|---|---|
-| Sim | `sim/tb_<DUT>.v` | `RESULT: PASS` | số lần kiểm tra (`checked`) tăng |
+| Sim | `sim/tb_<DUT>.v` | `RESULT: PASS` | từ 25/11/2026: số bin functional coverage (`sim/fcov_<DUT>.sv`, cố định) tăng, line/toggle/branch của DUT không giảm (trước đó: `checked` tăng) |
 | FPGA | `fpga/build.tcl`, `fpga/sources.f`, file `.v` mới trong `fpga/` | `tb_fpga_top` PASS trong xsim, có `.bit`, WNS ≥ 0 | không kém ở WNS, công suất động, LUT+FF và tốt hơn ở ít nhất một |
 | ASIC | `asic/config.mk` (không đổi design, file nguồn, SDC) | có GDS, setup/hold slack ≥ 0, DRC = 0, LVS khớp | không kém quá 1 % ở diện tích cell, diện tích die, công suất và tốt hơn quá 1 % ở ít nhất một |
 
@@ -66,7 +66,8 @@ projects/demo-alu/
 ├── report/            slide báo cáo (session slide): REPORT.md (brief), guides/*.pptx, src/build_guides.js, img/
 └── NoCG/, CG/         mỗi demo một bộ riêng (CG là bản sed NoCG→CG của script, cộng phần ICG)
     ├── rtl/           <DUT>.v (CG thêm icg_sim.v); RTL đưa sẵn, không ai sửa
-    ├── sim/           tb_<DUT>.v (testbench tự kiểm, mô hình tham chiếu), run_sim.sh
+    ├── sim/           tb_<DUT>.v (testbench tự kiểm, mô hình tham chiếu), run_sim.sh, fcov_<DUT>.sv (bin functional
+    │                  coverage, bind vào DUT, cố định), sim_main.cpp (vòng mô phỏng Verilator, ghi coverage.dat)
     ├── fpga/          fpga_top.v (LFSR + MISR tự kiểm, 4 LED), arty_a7_100t.xdc, build.tcl, sources.f,
     │                  tb_fpga_top.v, golden_sig.py
     ├── asic/          config.mk, constraint.sdc, render_gds.py (KLayout → PNG); CG thêm icg_sky130.v (dlclkp)
@@ -130,5 +131,6 @@ chia job submit --working-dir . -- python baseline.py
 | `run_demo.py` | Chỉ thử trong sandbox (server, trang chờ, `chia` giả); chưa chạy trên máy người dùng |
 | `clean_runs.py` | Chạy thật (bản cũ). Luật giữ baseline được tham chiếu mới thử trên dữ liệu giả |
 | Bước LVS (`asic_lvs`, thêm 24/11/2026) | **Chạy thật 25/11/2026** (`baseline.py --stages asic`), cả hai demo LVS khớp. Thử cố ý làm sai (đổi dây CLK/D một flop trong CDL): LVS báo không khớp, đúng. Agent ASIC với gate LVS: chưa chạy |
+| Coverage ở bước Sim (thêm 25/11/2026) | Chạy thử trong sandbox bằng Verilator 5.020: NoCG 51/55 bin, CG 51/57 bin; chưa chạy trên cluster (Verilator 5.022 của Chipyard) |
 | Nạp bitstream xuống board | Chưa (chưa có board) |
 | Slide, video | Chưa làm |

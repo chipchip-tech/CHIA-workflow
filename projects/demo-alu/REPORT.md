@@ -68,7 +68,7 @@ Với mỗi bước (Sim → FPGA → ASIC), tối đa 2 vòng. Mỗi vòng:
 
 | Bước | Phạm vi sửa | Gate | Luật nhận |
 |---|---|---|---|
-| Sim | `sim/tb_<DUT>.v` | `RESULT: PASS` | `checked` tăng |
+| Sim | `sim/tb_<DUT>.v` | `RESULT: PASS` | `checked` tăng (lần chạy 21/11). Từ 25/11/2026 đổi sang coverage, xem mục 7 |
 | FPGA | `fpga/build.tcl`, `fpga/sources.f`, file `.v` mới riêng cho FPGA | `tb_fpga_top` PASS (xsim, UNISIM), có `.bit`, WNS ≥ 0 | Pareto chặt: không kém ở WNS (±0,02 ns), công suất động (±0,5 mW), LUT+FF (±0,5 ô), tốt hơn ở ít nhất một |
 | ASIC | `asic/config.mk` | có GDS, setup/hold slack ≥ 0, DRC = 0, LVS khớp (từ 25/11/2026) | không kém quá 1 % ở diện tích cell, diện tích die, công suất, tốt hơn quá 1 % ở ít nhất một |
 

@@ -6,7 +6,8 @@ Bước fpga cần khối vivado, bước asic cần khối asic: `python script
 
 Các bước (mỗi bước là một task CHIA, chạy trên khối có resource tương ứng):
   1. sim_build  khối chipyard   Verilator 5 của Chipyard build testbench (tb + RTL) thành binary Vtb
-  2. sim_run    khối verilator  chạy Vtb; gate: dòng `RESULT: PASS`; ghi waveform VCD
+  2. sim_run    khối verilator  chạy Vtb; gate: dòng `RESULT: PASS`; ghi waveform VCD; số liệu: functional coverage
+                                (dòng FCOV của sim/fcov_<DUT>.sv) và line/toggle/branch của DUT (build/coverage.dat)
   3. fpga       khối vivado     Vivado (thiết lập mặc định) build fpga/fpga_top.v cho xc7a100tcsg324-1 tới bitstream;
                                 gate: có .bit và WNS >= 0; số liệu: LUT, FF, BUFG, WNS/WHS, công suất, cảnh báo
   4. asic_*     khối asic       ORFS sky130hd theo asic/config.mk, mỗi bước make là một task CHIA:
@@ -273,6 +274,25 @@ def _lvs_result(P: dict, make_tail: str) -> dict:
     return r
 
 
+FCOV_RE = re.compile(r"^FCOV: hit=(\d+) total=(\d+)", re.M)
+FCOV_MISS_RE = re.compile(r"^FCOV_MISS: (.*)$", re.M)
+
+
+def _struct_cov(dat: str, dut_files: set[str]) -> dict:
+    """coverage.dat của Verilator: mỗi điểm là `C '<khoá>' <số lần>`, khoá gồm các cặp \\x01<tên>\\x02<giá trị>
+    (f: file, page: v_line/..., h: hierarchy). Chỉ đếm điểm trong file RTL của DUT. Trả {loại: [đã gặp, tổng]}."""
+    out: dict[str, list[int]] = {}
+    for key, n in re.findall(r"^C '(.*)' (\d+)$", dat, re.M):
+        f = dict(re.findall(r"\x01([^\x02]+)\x02([^\x01]*)", key))
+        if os.path.basename(f.get("f", "")) not in dut_files:
+            continue
+        kind = f.get("page", "?").split("/")[0].removeprefix("v_")
+        c = out.setdefault(kind, [0, 0])
+        c[0] += int(n) > 0
+        c[1] += 1
+    return out
+
+
 @ChiaFunction(resources={"verilator_run": 1})
 def sim_run(run_dir: str, plusargs: list[str]) -> dict:
     """Chạy binary đã build. Gate: dòng RESULT là PASS."""
@@ -286,6 +306,16 @@ def sim_run(run_dir: str, plusargs: list[str]) -> dict:
            "vcd": vcd if os.path.isfile(vcd) else None,
            "vcd_bytes": os.path.getsize(vcd) if os.path.isfile(vcd) else 0,
            "host": os.uname().nodename, "log_tail": out[-2000:]}
+    fc, miss = FCOV_RE.search(out), FCOV_MISS_RE.search(out)
+    res["fcov_hit"], res["fcov_total"] = (int(fc.group(1)), int(fc.group(2))) if fc else (None, None)
+    res["fcov_miss"] = [] if not miss or miss.group(1).strip() == "-" else miss.group(1).strip().split(",")
+    dut_files = {p.name for p in Path(run_dir, "rtl").glob("*.v")}
+    cov = _struct_cov(_read(os.path.join(sim, "build", "coverage.dat")), dut_files)
+    for kind in ("line", "toggle", "branch"):
+        res[f"cov_{kind}"] = cov.get(kind, [None, None])[0]
+        res[f"cov_{kind}_total"] = cov.get(kind, [None, None])[1]
+    if "FCOV_ERROR" in out:                      # kiểm tra âm của fcov (thanh ghi vào đổi khi rảnh) cũng là lỗi
+        res["ok"] = False
     get_profiler().add_info({"step": "sim_run", "ok": res["ok"], "seconds": sec})
     return res
 
@@ -353,6 +383,10 @@ def main() -> None:
             ok = done("sim_run", r)
             if ok:
                 print(f"[baseline {DEMO}] {r['result']}", flush=True)
+                print(f"[baseline {DEMO}] coverage: functional {r['fcov_hit']}/{r['fcov_total']} bin, "
+                      f"line {r['cov_line']}/{r['cov_line_total']}, toggle {r['cov_toggle']}/{r['cov_toggle_total']}, "
+                      f"branch {r['cov_branch']}/{r['cov_branch_total']} (DUT); thiếu: {', '.join(r['fcov_miss']) or '-'}",
+                      flush=True)
                 print(f"[baseline {DEMO}] waveform: {r['vcd']} ({r['vcd_bytes']} byte)", flush=True)
     if ok and "fpga" in stages:
         # 3. FPGA: Vivado ở khối vivado.

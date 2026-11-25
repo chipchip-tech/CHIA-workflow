@@ -29,7 +29,9 @@ LABEL = {"sim_build": "build (Verilator)", "sim_run": "chạy testbench", "fpga_
 
 # (nhãn, khoá, hệ số, hướng tốt: +1 lớn hơn tốt, -1 nhỏ hơn tốt, 0 trung tính, đơn vị ns: in hiệu tuyệt đối)
 ROWS = {
-    "sim": [("Số lần kiểm tra", "checked", 1, +1, False), ("Lỗi", "errors", 1, -1, False)],
+    "sim": [("Functional coverage (bin)", "fcov", 1, 0, False), ("Line (DUT)", "cov_line_s", 1, 0, False),
+            ("Toggle (DUT)", "cov_toggle_s", 1, 0, False), ("Branch (DUT)", "cov_branch_s", 1, 0, False),
+            ("Số lần kiểm tra", "checked", 1, +1, False), ("Lỗi", "errors", 1, -1, False)],
     "fpga": [("WNS (ns)", "wns_ns", 1, +1, True), ("WHS (ns)", "whs_ns", 1, +1, True), ("LUT", "lut", 1, -1, False),
              ("FF", "ff", 1, -1, False), ("BUFG", "bufg", 1, 0, False),
              ("Công suất động (W)", "power_dynamic_w", 1, -1, False),
@@ -122,7 +124,22 @@ def delta(a, b, scale, good, ns) -> str:
     return f'<span class="{cls}">{txt}</span>'
 
 
+def _cov_view(m: dict | None) -> dict | None:
+    """Thêm khoá dạng chữ 'đã gặp/tổng' cho các dòng coverage của bảng Sim."""
+    if m is None:
+        return None
+    m = dict(m)
+    if m.get("fcov_hit") is not None:
+        m["fcov"] = f'{m["fcov_hit"]}/{m.get("fcov_total")}'
+    for k in ("line", "toggle", "branch"):
+        if m.get(f"cov_{k}") is not None:
+            m[f"cov_{k}_s"] = f'{m[f"cov_{k}"]}/{m.get(f"cov_{k}_total")}'
+    return m
+
+
 def table(step: str, base: dict, best: dict | None) -> str:
+    if step == "sim":
+        base, best = _cov_view(base), _cov_view(best)
     rows = []
     for name, k, sc, good, ns in ROWS[step]:
         if best is None:
@@ -216,7 +233,7 @@ def render_baseline(report: dict, final: bool) -> str:
             last = {**steps.get("asic_finish", {}), **last}
         head = ""
         if last and last.get("ok"):
-            head = {"sim": lambda r: f'PASS · {fmt(r.get("checked"))} kiểm tra',
+            head = {"sim": lambda r: f'PASS · coverage {r.get("fcov_hit")}/{r.get("fcov_total")} bin',
                     "fpga": lambda r: f'WNS {fmt(r.get("wns_ns"))} ns · {fmt(r.get("lut"))} LUT',
                     "asic": lambda r: f'die {fmt(r.get("die_area_um2"))} µm² · GDS · LVS khớp'}[step](last)
         cards.append(stage_card(step, state, chip(state, txt), f'<ul class="tasks">{"".join(lis)}</ul>'
@@ -264,7 +281,8 @@ def headline(step: str, base: dict, best: dict) -> str:
         except (KeyError, TypeError, ValueError, ZeroDivisionError):
             return "?"
     if step == "sim":
-        return f'kiểm tra {fmt(base.get("checked"))} → {fmt(best.get("checked"))}'
+        return (f'coverage {base.get("fcov_hit")}/{base.get("fcov_total")} → '
+                f'{best.get("fcov_hit")}/{best.get("fcov_total")} bin')
     if step == "fpga":
         return f'WNS {fmt(base.get("wns_ns"))} → {fmt(best.get("wns_ns"))} ns'
     return f'die {pct("die_area_um2")} · công suất {pct("power_total_w")}'

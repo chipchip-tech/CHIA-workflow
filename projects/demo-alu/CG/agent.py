@@ -11,7 +11,8 @@ Với từng bước (Sim → FPGA → ASIC), tối đa --rounds vòng:
      ĐƯỢC PHÉP của bước đó ngay trong thư mục vòng (khối claude không có Verilator/Vivado/ORFS, không tự build);
      sửa ngoài phạm vi bị hoàn lại;
   3. CHIA đo lại bước đó trên các khối như baseline (dùng lại task của baseline.py) và gate:
-       sim   chỉ sửa sim/tb_*.v (thêm kiểm tra); nhận nếu vẫn PASS và số lần kiểm tra tăng
+       sim   chỉ sửa sim/tb_*.v (thêm kiểm tra); nhận nếu vẫn PASS, functional coverage (bin của sim/fcov_*.sv, cố
+             định) tăng và line/toggle/branch của DUT không giảm; đã đủ mọi bin thì chỉ nhận khi line/toggle/branch tăng
        fpga  chỉ sửa fpga/ (build.tcl, sources.f, file .v mới riêng cho FPGA); gate: tb_fpga_top PASS trong xsim
              (thư viện UNISIM), có .bit, WNS >= 0; nhận nếu không kém ở WNS, công suất động, LUT+FF và tốt hơn ở một
        asic  chỉ sửa asic/config.mk (không đổi design, file nguồn, SDC); gate như baseline (GDS, slack >= 0,
@@ -225,6 +226,10 @@ def _mk_vars(text: str) -> dict[str, str]:
 def _rule_violations(step: str, cand: Path, before: dict[str, bytes]) -> list[str]:
     """Kiểm tra nội dung của file được phép sửa (giữ công bằng với baseline: cùng clock, part, design)."""
     bad = []
+    if step == "sim":
+        tb = re.sub(r"//.*|/\*.*?\*/", "", (cand / f"sim/tb_{DUT}.v").read_text(errors="replace"), flags=re.S)
+        if re.search(r"\bu_fcov\b|\bfcov_alu\b|\$coverage|coverage_(?:on|off)", tb):
+            bad.append("tb: tham chiếu hoặc tắt coverage (fcov cố định)")
     if step == "fpga":
         tcl = (cand / "fpga/build.tcl").read_text()
         if "xc7a100tcsg324-1" not in tcl:
@@ -316,7 +321,9 @@ def measure(step: str, cand: Path, params: dict, on_task=None) -> dict:
 
 def metrics_of(step: str, r: dict) -> dict:
     if step == "sim":
-        return {"checked": _int(r.get("checked")), "errors": _int(r.get("errors")), "result": r.get("result")}
+        return {"checked": _int(r.get("checked")), "errors": _int(r.get("errors")), "result": r.get("result"),
+                **{k: r.get(k) for k in ("fcov_hit", "fcov_total", "fcov_miss", "cov_line", "cov_line_total",
+                                         "cov_toggle", "cov_toggle_total", "cov_branch", "cov_branch_total")}}
     if step == "fpga":
         return {k: r.get(k) for k in ("wns_ns", "whs_ns", "tns_ns", "lut", "ff", "bufg", "power_total_w",
                                       "power_dynamic_w", "warnings", "critical_warnings", "warning_ids", "bitstream")}
@@ -332,12 +339,40 @@ def _int(v):
         return None
 
 
+def judge_sim(best: dict, new: dict) -> tuple[bool, str]:
+    """Luật Sim (từ 25/11/2026): coverage thay cho số phép so sánh. Không loại coverage nào của DUT được giảm;
+    nhận khi số bin functional tăng, hoặc (đã đủ mọi bin) khi line/toggle/branch tăng. checked chỉ để báo cáo."""
+    kinds = [("functional", "fcov_hit"), ("line", "cov_line"), ("toggle", "cov_toggle"), ("branch", "cov_branch")]
+    worse, better, notes = [], [], []
+    for name, k in kinds:
+        a, b = best.get(k), new.get(k)
+        if a is None or b is None:
+            notes.append(f"{name} ?")
+            continue
+        notes.append(f"{name} {a} → {b}")
+        if b < a:
+            worse.append(name)
+        elif b > a:
+            better.append(name)
+    notes.append(f"checked {best.get('checked')} → {new.get('checked')}")
+    if new.get("fcov_hit") is None:
+        return False, "không đọc được dòng FCOV (" + "; ".join(notes) + ")"
+    full = best.get("fcov_hit") is not None and best.get("fcov_hit") == best.get("fcov_total")
+    ok = not worse and ("functional" in better or (full and bool(better)))
+    if ok:
+        why = "phủ thêm: " + ", ".join(better)
+    elif worse:
+        why = "coverage giảm: " + ", ".join(worse)
+    else:
+        why = "không phủ thêm" + (" (đã đủ mọi bin functional)" if full else " bin functional nào")
+    return ok, why + " (" + "; ".join(notes) + ")"
+
+
 def judge(step: str, best: dict, new: dict) -> tuple[bool, str]:
     """So bản mới với bản tốt nhất (đã qua gate). Công cụ tất định (baseline chạy 2 lần ra cùng số), nên ngưỡng chỉ
     bỏ qua sai khác làm tròn."""
     if step == "sim":
-        ok = (new["checked"] or 0) > (best["checked"] or 0)
-        return ok, ("" if ok else "không thêm kiểm tra: ") + f"checked {best['checked']} → {new['checked']}"
+        return judge_sim(best, new)
     if step == "fpga":
         crit = [("WNS", "wns_ns", +1, 0.02), ("P động", "power_dynamic_w", -1, 0.0005),
                 ("LUT+FF", None, -1, 0.5)]
@@ -393,11 +428,16 @@ STEP_TEXT = {
     "sim": """STEP: SIMULATION. Evaluate the self-checking testbench sim/tb_{dut}.v against the RTL: which behaviours and
 corner cases are not checked yet (each op with edge operands, zero/carry flags, signed SLT edges, every shift amount,
 `en` patterns such as back-to-back and long idle, outputs holding while idle, reset behaviour, ...).
-Allowed file: sim/tb_{dut}.v only. Add checks; keep the plusargs, the final `RESULT:` line format and the counters
-(`checked` must count every comparison). The RTL is the reference behaviour: a new check that fails means your round
-is rejected, so make sure the expected values follow the RTL exactly.
+Allowed file: sim/tb_{dut}.v only. Add stimulus and checks; keep the plusargs, the final `RESULT:` line format and the
+counters (`checked` must count every comparison). The RTL is the reference behaviour: a new check that fails means
+your round is rejected, so make sure the expected values follow the RTL exactly.
+Coverage is measured, not counted by you: sim/fcov_{dut}.sv (FIXED, bound into the DUT) defines the functional
+coverage bins of the specification and prints `FCOV: hit=<n> total=<m>` and `FCOV_MISS: <bins not hit>` (see sim.log
+in the context); Verilator also measures line/toggle/branch coverage of the DUT. Do not edit or reference
+fcov_{dut}.sv / u_fcov from the testbench (that round is rejected). Read fcov_{dut}.sv to see what each bin needs.
 Gate: Verilator build + run with the same plusargs as baseline prints RESULT: PASS. The round is accepted only if
-`checked` is strictly greater than in the current best version (a round that does not add checks is rejected).""",
+no coverage kind of the DUT decreases and the number of functional bins hit increases (when every bin is already
+hit: only if line/toggle/branch coverage increases). Adding comparisons alone does not count.""",
     "fpga": """STEP: FPGA. Vivado 2025.1, part xc7a100tcsg324-1, 100 MHz clock from fpga/arty_a7_100t.xdc. The ALU is
 wrapped in fpga/fpga_top.v (LFSR stimulus, MISR self-check, LEDs). Read the reports of the current best build in
 agent/context/ (timing, utilization, power, clock utilization, methodology, warnings).
@@ -523,7 +563,8 @@ def base_metrics(rep: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 ROWS = {
-    "sim": [("Số lần kiểm tra", "checked"), ("Lỗi", "errors")],
+    "sim": [("Functional coverage (bin)", "fcov_hit"), ("Line (DUT)", "cov_line"), ("Toggle (DUT)", "cov_toggle"),
+            ("Branch (DUT)", "cov_branch"), ("Số lần kiểm tra", "checked"), ("Lỗi", "errors")],
     "fpga": [("WNS (ns)", "wns_ns"), ("WHS (ns)", "whs_ns"), ("LUT", "lut"), ("FF", "ff"), ("BUFG", "bufg"),
              ("Công suất tổng (W)", "power_total_w"), ("Công suất động (W)", "power_dynamic_w"),
              ("Cảnh báo", "warnings")],
