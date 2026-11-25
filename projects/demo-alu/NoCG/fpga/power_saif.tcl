@@ -17,20 +17,31 @@ file delete -force xsim_pw
 file mkdir xsim_pw
 set fh [open xsim_pw/saif.tcl w]
 puts $fh "open_saif act.saif"
-puts $fh "log_saif \[get_objects -r /tb_power/dut/*\]"
+# Ghi hoạt động của mọi net dưới dut; không thấy dut thì ghi từ gốc (strip_path vẫn lấy đúng phần dưới tb_power/dut).
+puts $fh "set objs \[get_objects -quiet -r /tb_power/dut/*\]"
+puts $fh "if {\[llength \$objs\] == 0} { puts \"SAIF_SCOPE: không thấy /tb_power/dut, scope gốc: \[get_scopes /*\]\"; set objs \[get_objects -quiet -r /*\] }"
+puts $fh "puts \"SAIF_OBJECTS: \[llength \$objs\]\""
+puts $fh "log_saif \$objs"
 puts $fh "run $run_ps ps"
 puts $fh "close_saif"
 puts $fh "quit"
 close $fh
 
 cd xsim_pw
-exec xvlog -nolog ../out/funcsim.v ../tb_power.v $::env(XILINX_VIVADO)/data/verilog/src/glbl.v >& xvlog.log
-exec xelab -nolog -debug typical -L unisims_ver -generic_top "PERIOD_PS=$ps" -generic_top "CYCLES=$cycles" -s tbp tb_power glbl >& xelab.log
+# Chu kỳ truyền bằng macro (-d), không bằng -generic_top: generic khác mặc định làm xsim đổi tên scope gốc thành
+# tb_power(PERIOD_PS=...), không còn /tb_power/dut (xem tb_power.v).
+exec xvlog -nolog -d TB_PERIOD_PS=$ps -d TB_CYCLES=$cycles ../out/funcsim.v ../tb_power.v $::env(XILINX_VIVADO)/data/verilog/src/glbl.v >& xvlog.log
+exec xelab -nolog -debug typical -L unisims_ver -s tbp tb_power glbl >& xelab.log
 catch {exec xsim -nolog tbp -tclbatch saif.tcl >& xsim.log}
 cd $here
-if {![file exists xsim_pw/act.saif] || [file size xsim_pw/act.saif] == 0} {
+set saif_ok 0
+if {[file exists xsim_pw/act.saif]} {
+    set fh [open xsim_pw/act.saif]; set saif [read $fh]; close $fh
+    set saif_ok [expr {[regexp {\(DURATION\s+([0-9]+)\)} $saif -> dur] && $dur > 0}]
+}
+if {!$saif_ok} {
     set fh [open xsim_pw/xsim.log]; set log [read $fh]; close $fh
-    puts "SAIF_MISSING: xsim không ghi xsim_pw/act.saif. Cuối xsim.log:\n[string range $log end-3000 end]"
+    puts "SAIF_MISSING: xsim không ghi được hoạt động vào xsim_pw/act.saif (thiếu file hoặc DURATION 0). Cuối xsim.log:\n[string range $log end-3000 end]"
     exit 1
 }
 
