@@ -199,11 +199,13 @@ Cả bốn vòng được nhận, và vẫn PASS trên Verilator thật.
 ## 7. Hạn chế
 
 - **Thiết kế rất nhỏ.** ALU có khoảng 300 cell, nên còn ít chỗ để tối ưu, nhất là RTL thì cố định.
-- **`checked` đo số phép so sánh, không đo độ phủ.** Muốn đo thật thì cần coverage của Verilator.
-- **Luật FPGA chặt.** Đánh đổi tốt như CG r1 vẫn bị loại. Chọn luật nhận (Pareto hay chỉ số chính có ngưỡng) là quyết
-  định thiết kế, và phải chốt trước khi chạy.
-- **Công suất chỉ là ước lượng.** Công suất ASIC tính với hoạt động mặc định của OpenSTA, không lấy từ VCD. Công suất
-  FPGA là ước lượng vector-less của Vivado.
+- ~~**`checked` đo số phép so sánh, không đo độ phủ.**~~ Đã khắc phục 25/11: đo coverage (mục 9).
+- ~~**Luật FPGA chặt.**~~ Đã đổi 25/11, chốt trước khi chạy lại: LUT+FF được kém ≤ 3 % (mục 9).
+- **Công suất ASIC vẫn là ước lượng** của OpenSTA với hoạt động mặc định, không lấy từ VCD. Công suất FPGA đã đo bằng
+  SAIF từ 25/11 (mục 9).
+- ~~**ASIC chưa chạy LVS.**~~ Đã thêm 25/11 (mục 9).
+- **Fmax FPGA có sai số cỡ 0,1–0,2 ns**: kết quả của Vivado không đơn điệu theo chu kỳ, bản latch còn có time borrowing.
+- **Clock > 100 MHz chưa chạy được trên board** vì chưa có MMCM; số ở 188,7 MHz là số của công cụ.
 - **Mỗi bước chỉ 2 vòng, mỗi cấu hình chạy một lần.** Công cụ tất định, nhưng agent thì không: chạy lại có thể ra đề
   xuất khác.
 - **Chưa nạp board.** Nhánh FPGA dừng ở bitstream vì chưa có board.
@@ -214,10 +216,10 @@ Cả bốn vòng được nhận, và vẫn PASS trên Verilator thật.
 - **Video:** quay `run_demo.py` với trang trạng thái và timeline CHIA.
 - **Demo 2 (tuỳ chọn):** mini-SoC PicoRV32, dùng lại loop, task và khối của Demo 1.
 
-## 9. Củng cố ngày 25/11/2026 (baseline, chưa chạy lại agent)
+## 9. Củng cố ngày 25/11/2026
 
-Mục tiêu: kết quả đủ và đúng quy trình. Mọi số dưới đây đo thật trên máy, bằng `baseline.py` và `fpga_sweep.py`. Pha 2
-(agent) chưa chạy lại với các luật mới; mục 5 vẫn là kết quả của luật cũ.
+Mục tiêu: kết quả đủ và đúng quy trình. Mọi số dưới đây đo thật trên máy, bằng `baseline.py`, `fpga_sweep.py` và
+`agent.py`. Mục 5 là kết quả của luật cũ (21/11); kết quả agent với luật mới ở cuối mục này.
 
 ### ASIC: thêm LVS
 
@@ -295,3 +297,35 @@ Vivado tính công suất từ đó (khớp 74–77 % net, độ tin cậy High)
 - ASIC: như cũ, thêm gate LVS.
 - Luật chốt trước khi chạy lại, không đổi sau khi thấy kết quả. Đây là số đo cho thấy vì sao tối ưu của FPGA không được mang
   sang ASIC.
+
+### Agent với luật mới (chạy lại 25/11/2026)
+
+Baseline mốc: NoCG `baseline-20261125-214405`, CG `baseline-20261125-214709` (FPGA 188,7 MHz). Lần agent đầu
+(`agent-20261125-215351`, `agent-20261125-220808`) cho Sim và ASIC hợp lệ; bước FPGA của lần đó chạy nhầm ở 10 ns nên
+đã bỏ, chạy lại riêng (`agent-20261125-222617`, `agent-20261125-223205`) sau khi sửa lỗi. Mọi vòng ASIC qua gate có LVS.
+
+| | NoCG: baseline → agent | CG: baseline → agent |
+|---|---|---|
+| **Sim**: bin functional | 51/55 → **55/55** (r1) | 51/57 → **57/57**, branch 8 → 10 (r1) |
+| **Sim**: số phép so sánh | 6 272 → 6 281 | 6 272 → 6 287 |
+| **FPGA** 188,7 MHz | 2 vòng LOẠI, giữ baseline | r1 NHẬN |
+| FPGA: WNS (ns) | 0,588 | 0 → 0,462 |
+| FPGA: P động SAIF (mW) | 5,575 | 6,602 → 5,174 (**−21,6 %**) |
+| FPGA: LUT+FF | 280 | 283 → 286 (+1,1 %) |
+| **ASIC**: diện tích cell (µm²) | 3 077,95 → 3 042,92 (−1,1 %) | 2 975,35 → 2 730,12 (**−8,2 %**) |
+| **ASIC**: diện tích die (µm²) | 7 534,24 → 5 459,73 (−27,5 %) | 6 925,57 → 5 017,60 (−27,5 %) |
+| **ASIC**: công suất (mW) | 0,368 → 0,362 (−1,4 %) | 0,324 → 0,254 (**−21,5 %**) |
+| Vòng được nhận | sim-r1, asic-r1 | sim-r1, fpga-r1, asic-r1, asic-r2 |
+
+- **Sim:** agent đủ mọi bin ngay vòng 1 bằng khoảng 10–15 phép kiểm tra đặt đúng chỗ (reset giữa chừng, `en` đổi khi
+  clock cao). Vòng 2 agent không sửa gì vì không còn bin nào. Luật cũ khiến agent thêm 0,5–1,5 triệu phép so sánh.
+- **FPGA CG r1:** agent chỉ sửa `build.tcl` và `sources.f`, đưa clock gating về dạng Vivado chuyển được sang clock enable.
+  Số đo gần trùng biến thể `ce` viết tay (5,19 mW). Luật cũ đã loại đúng kiểu đánh đổi này hôm 21/11 (+3 ô LUT+FF).
+  r2 (`CG_alu_fpga.v` + `build.tcl`) giảm 14 ô nhưng P động tăng lên 5,446 mW nên bị loại.
+- **FPGA NoCG:** r1 (`NoCG_alu_fpga.v`) giảm 15 ô LUT+FF nhưng WNS 0,588 → 0,303 ns, bị loại; r2 (`build.tcl`) không tốt
+  hơn chỉ số nào. NoCG ở 188,7 MHz gần như đã tối ưu.
+- **ASIC:** NoCG r2 bị loại vì công suất +5,8 % dù diện tích cell −3 %. CG r2 được nhận: diện tích cell và công suất
+  cùng giảm.
+- **Lỗi lộ ra khi chạy và đã sửa:** vòng đầu của agent chép cây project (`clock.xdc` mặc định 10 ns) thay cho bản đã chuẩn
+  bị như baseline (5,3 ns), và gate chỉ so clock với chính vòng đó. Giờ agent dựng nguồn theo tham số của baseline và gate
+  so chu kỳ với baseline.

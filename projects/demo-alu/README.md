@@ -135,7 +135,7 @@ chia job submit --working-dir . -- python baseline.py
 | `run_demo.py` | **Chạy thật 25/11/2026** (baseline NoCG, CG: submit job, mở trình duyệt, trang trạng thái) |
 | `clean_runs.py` | Chạy thật (bản cũ). Luật giữ baseline được tham chiếu mới thử trên dữ liệu giả |
 | Bước LVS (`asic_lvs`, thêm 24/11/2026) | **Chạy thật 25/11/2026** (`baseline.py --stages asic`), cả hai demo LVS khớp. Thử cố ý làm sai (đổi dây CLK/D một flop trong CDL): LVS báo không khớp, đúng. Agent ASIC với gate LVS: chưa chạy |
-| Coverage ở bước Sim (thêm 25/11/2026) | **Chạy thật 25/11/2026** (`baseline.py --stages sim`, Verilator 5.022 của Chipyard): NoCG 51/55 bin, CG 51/57 bin, trùng số trong sandbox. Agent với luật mới: chưa chạy |
+| Coverage ở bước Sim (thêm 25/11/2026) | **Chạy thật 25/11/2026** (`baseline.py --stages sim`, Verilator 5.022 của Chipyard): NoCG 51/55 bin, CG 51/57 bin, trùng số trong sandbox. Agent với luật mới: chạy thật 25/11 (`REPORT.md` mục 9) |
 | FPGA: clock chung, biến thể BUFGCE/CE, công suất SAIF, `fpga_sweep.py` (thêm 25/11/2026) | **Chạy thật 25/11/2026** `baseline.py --stages fpga` ở 100 MHz (NoCG, CG `bufgce`, CG `ce`) có SAIF; `fpga_sweep.py fmax` và `power --period 5.3` chạy thật cả hai demo |
 | Nạp bitstream xuống board | Chưa (chưa có board) |
 | Slide, video | Chưa làm |

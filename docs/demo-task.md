@@ -364,3 +364,7 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
      bị như baseline (5,3 ns), nên vòng chạy ở 100 MHz mà so với baseline 188,7 MHz (CG fpga-r1 WNS 4,579, P 2,743 mW trùng
      đúng NoCG ở 10 ns). Gate clock chỉ so với `clock.xdc` của chính vòng nên không bắt được. Đã sửa (`agent.py` dựng
      `<run>/source` bằng `prepare_fpga` theo `params["fpga"]`, gate so chu kỳ với baseline); chạy lại riêng `--steps fpga`.
+   **Chạy lại bước FPGA của agent (25/11/2026, hợp lệ):** NoCG `agent-20261125-222617`: r1 (`NoCG_alu_fpga.v`, `sources.f`)
+   LOẠI (WNS 0,588 → 0,303, LUT+FF 280 → 265), r2 (`build.tcl`) LOẠI (không tốt hơn). CG `agent-20261125-223205`: r1
+   (`build.tcl`, `sources.f`) NHẬN (WNS 0 → 0,462, P động 6,602 → 5,174 mW, LUT+FF 283 → 286, +1,1 % trong ngưỡng 3 %), r2
+   (`CG_alu_fpga.v`, `build.tcl`, `sources.f`) LOẠI (P động 5,174 → 5,446). Bảng tổng hợp trong `REPORT.md` mục 9.
