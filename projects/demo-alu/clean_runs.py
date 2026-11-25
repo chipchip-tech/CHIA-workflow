@@ -9,8 +9,10 @@ Kế hoạch, cho từng demo (NoCG, CG):
   - giữ --keep-baseline lần baseline OK mới nhất (mặc định 1: agent.py dùng bản này làm mốc) và baseline mà các lần
     agent được giữ đã dùng làm mốc; xoá các baseline khác (kể cả bản lỗi);
   - giữ --keep-agent lần agent mới nhất (mặc định 2), xoá các lần cũ hơn;
+  - giữ --keep-sweep lần fpga_sweep.py mới nhất cho mỗi chế độ fmax/power (mặc định 1), xoá các lần cũ hơn;
   - ở các lần được giữ: xoá file trung gian lớn (binary Verilator obj/, checkpoint Vivado .dcp, .Xil, xsim.dir,
-    ORFS objects/ và các .odb trừ 6_final.odb). Giữ log, báo cáo, VCD, bitstream, GDS, ảnh layout, results/, profile/.
+    ORFS objects/ và các .odb trừ 6_final.odb, thư mục mô phỏng xsim_pw/xsim_gls của FPGA, obj/ của GLS ASIC).
+    SAIF (xsim_pw/act.saif) và netlist funcsim.v vẫn giữ. Giữ log, báo cáo, VCD, bitstream, GDS, ảnh layout, results/, profile/.
 """
 import argparse
 import json
@@ -55,7 +57,8 @@ def intermediates(run: Path) -> list[Path]:
     trees = [run] + [d for d in run.iterdir() if d.is_dir() and (d / "rtl").is_dir()]
     for t in trees:
         out += [t / "sim/build/obj", t / "fpga/out/post_route.dcp", t / "fpga/.Xil", t / "fpga/xsim.dir",
-                t / "asic/orfs/objects"]
+                t / "fpga/xsim_pw/xsim.dir", t / "fpga/xsim_pw/.Xil", t / "fpga/xsim_gls",
+                t / "asic/orfs/objects", t / "asic/gls/build/obj"]
         for res in (t / "asic/orfs/results").glob("*/*/*"):
             out += [f for f in res.glob("*.odb") if f.name != "6_final.odb"]
     return [p for p in out if p.exists()]
@@ -74,6 +77,7 @@ def main() -> None:
     ap.add_argument("--work-dir", default=os.environ.get("WORK_DIR", os.path.expanduser("~/chia_demo")))
     ap.add_argument("--keep-baseline", type=int, default=1)
     ap.add_argument("--keep-agent", type=int, default=2)
+    ap.add_argument("--keep-sweep", type=int, default=1, help="số lần fpga_sweep.py giữ lại cho mỗi chế độ")
     ap.add_argument("--yes", action="store_true", help="xoá thật (mặc định chỉ liệt kê)")
     args = ap.parse_args()
 
@@ -96,9 +100,14 @@ def main() -> None:
             except (OSError, ValueError, KeyError):
                 continue
             keep_b += [b for b in bases if b.name == ref and b not in keep_b]
+        sweeps, keep_s = [], []
+        for mode in ("fmax", "power"):
+            s = sorted(d.glob(f"sweep-{mode}-*"), reverse=True)
+            sweeps += s
+            keep_s += s[:args.keep_sweep]
         print(f"== {demo}")
-        for run in bases + agents:
-            keep = run in keep_b or run in keep_a
+        for run in bases + agents + sweeps:
+            keep = run in keep_b or run in keep_a or run in keep_s
             print(f"   {'GIỮ' if keep else 'XOÁ'}  {run.name:28s} {human(size(run)):>8s}")
             (slim if keep else delete).append(run)
     slim_files = [p for run in slim for p in intermediates(run)]
