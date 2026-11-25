@@ -1,6 +1,7 @@
 # power_saif.tcl - công suất theo hoạt động thật của bản đã route (cố định, agent không sửa). baseline.py gọi sau build.tcl:
 #   cd <run_dir>/fpga && vivado -mode batch -nojournal -log out/power.log -source power_saif.tcl -tclargs <chu kỳ ns> <số chu kỳ>
-# 1. netlist chức năng sau route (out/funcsim.v); 2. xsim chạy tb_power.v trên netlist đó, ghi SAIF (xsim_pw/act.saif);
+# 1. netlist chức năng sau route (out/funcsim.v); 2. xsim chạy tb_power.v trên netlist đó, ghi SAIF (xsim_pw/act.saif;
+#    xelab cần -debug typical, thiếu thì open_saif báo "compiled without trace information");
 # 3. read_saif vào bản đã route, report_power (đơn vị mW) -> reports/power_saif.rpt.
 set period_ns [lindex $argv 0]
 set cycles    [lindex $argv 1]
@@ -24,7 +25,7 @@ close $fh
 
 cd xsim_pw
 exec xvlog -nolog ../out/funcsim.v ../tb_power.v $::env(XILINX_VIVADO)/data/verilog/src/glbl.v >& xvlog.log
-exec xelab -nolog -L unisims_ver -generic_top "PERIOD_PS=$ps" -generic_top "CYCLES=$cycles" -s tbp tb_power glbl >& xelab.log
+exec xelab -nolog -debug typical -L unisims_ver -generic_top "PERIOD_PS=$ps" -generic_top "CYCLES=$cycles" -s tbp tb_power glbl >& xelab.log
 catch {exec xsim -nolog tbp -tclbatch saif.tcl >& xsim.log}
 cd $here
 if {![file exists xsim_pw/act.saif] || [file size xsim_pw/act.saif] == 0} {
