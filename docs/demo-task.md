@@ -310,3 +310,15 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    Độ tin cậy `High`, net khớp SAIF 75–77 %. BUFGCE thêm 2 mạng clock toàn cục cho khoảng 30 flop nên tốn hơn; CE đưa mọi
    flop về clock liên tục nên gần như trùng NoCG (trên FPGA chỉ BUFGCE thật sự dừng clock). Chưa: biến thể latch có SAIF,
    quét Fmax, quét tỉ lệ gửi phép.
+   **Quét Fmax, chạy thật 25/11/2026** (`fpga_sweep.py fmax`, độ phân giải 0,1 ns, mỗi lần build khoảng 63–70 s):
+
+   | Cấu hình | Fmax | Chu kỳ đạt / trượt (ns) | LUT tại Fmax | BUFG | Ghi chú |
+   |---|---|---|---|---|---|
+   | NoCG | 227,3 MHz | 4,4 / 4,3 | 188 | 1 | |
+   | CG latch | 128,2 MHz | 7,8 / 7,7 | 140 | 1 | trượt vì hold (WHS −0,059 … −0,333), setup còn dư |
+   | CG bufgce | 196,1 MHz | 5,1 / 5,0 | 142 | 3 | |
+   | CG ce | 232,6 MHz | 4,3 / 4,2 | 193 | 1 | ngang NoCG (chênh 5 MHz là nhiễu của heuristic Vivado) |
+
+   Ở clock chặt Vivado nhân bản logic (LUT 138 → khoảng 190). Kết quả không đơn điệu theo chu kỳ (CG ce 4,3 ns đạt, NoCG
+   4,3 ns trượt), nên Fmax có sai số cỡ 0,1–0,2 ns. Đề xuất clock chung cho bước FPGA: 5,3 ns (188,7 MHz), mức cao nhất mà
+   NoCG, bufgce, ce cùng đạt (bufgce đã đạt đúng ở 5,3 ns, WNS 0,331); bản latch không đạt ở mức này.
