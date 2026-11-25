@@ -49,7 +49,7 @@ Gate và điều kiện nhận ở pha 2:
 | Bước | Agent được sửa | Gate | Nhận khi |
 |---|---|---|---|
 | Sim | `sim/tb_<DUT>.v` | `RESULT: PASS` | từ 25/11/2026: số bin functional coverage (`sim/fcov_<DUT>.sv`, cố định) tăng, line/toggle/branch của DUT không giảm (trước đó: `checked` tăng) |
-| FPGA | `fpga/build.tcl`, `fpga/sources.f`, file `.v` mới trong `fpga/` | `tb_fpga_top` PASS trong xsim, có `.bit`, WNS ≥ 0 | không kém ở WNS, công suất động, LUT+FF và tốt hơn ở ít nhất một |
+| FPGA | `fpga/build.tcl`, `fpga/sources.f`, file `.v` mới trong `fpga/` | `tb_fpga_top` PASS trong xsim, có `.bit`, đúng clock của baseline, WNS ≥ 0 và WHS ≥ 0, SAIF khớp ≥ 50 % net | từ 25/11/2026: bản tốt nhất chưa đạt timing thì nhận ngay; còn lại không kém ở WNS và công suất động SAIF, LUT+FF kém ≤ 3 %, tốt hơn ở ít nhất một (trước đó: Pareto chặt, công suất vector-less) |
 | ASIC | `asic/config.mk` (không đổi design, file nguồn, SDC) | có GDS, setup/hold slack ≥ 0, DRC = 0, LVS khớp | không kém quá 1 % ở diện tích cell, diện tích die, công suất và tốt hơn quá 1 % ở ít nhất một |
 
 - `rtl/`, `.xdc` và `.sdc` cố định: tối ưu riêng cho FPGA không lan sang ASIC.

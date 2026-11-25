@@ -271,5 +271,13 @@ Vivado tính công suất từ đó (khớp 74–77 % net, độ tin cậy High)
 - Công suất tăng theo hoạt động. Ước lượng vector-less cũ báo gần như cùng một số ở mọi mức, nên không dùng để so được.
 - **Trên FPGA, không cách gating nào tiết kiệm hơn NoCG**, kể cả khi ALU rảnh 90 %. BUFGCE tốn thêm 2,8–4,3 mW vì mỗi
   BUFGCE là một mạng clock toàn cục mà chỉ nuôi khoảng 30 flop. CE ngang NoCG vì sau chuyển đổi cấu trúc gần như giống hệt.
-- Trên ASIC thì ngược lại: CG giảm 12 % công suất (mục 4). Đây là số đo cho thấy vì sao tối ưu của FPGA không được mang
+- Trên ASIC thì ngược lại: CG giảm 12 % công suất (mục 4).
+
+### Luật nhận đổi cho lần chạy lại agent
+
+- Sim: theo coverage (ở trên).
+- FPGA: clock chung 188,7 MHz; WNS và công suất động SAIF không được kém, **LUT+FF được kém tối đa 3 %** (trước là ±0,5
+  ô); nếu bản tốt nhất chưa đạt timing thì vòng nào đạt sẽ được nhận. Đổi vì luật cũ loại cả đánh đổi tốt như CG r1.
+- ASIC: như cũ, thêm gate LVS.
+- Luật chốt trước khi chạy lại, không đổi sau khi thấy kết quả. Đây là số đo cho thấy vì sao tối ưu của FPGA không được mang
   sang ASIC.

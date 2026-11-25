@@ -16,7 +16,7 @@ Với từng bước (Sim → FPGA → ASIC), tối đa --rounds vòng:
        fpga  chỉ sửa fpga/ (build.tcl, sources.f, file .v mới riêng cho FPGA); gate: tb_fpga_top PASS trong xsim
              (thư viện UNISIM), có .bit, đúng clock của baseline (fpga/clock.xdc), WNS >= 0 và WHS >= 0; nhận nếu
              bản tốt nhất chưa đạt timing (baseline ở clock cao), hoặc không kém ở WNS, công suất động (SAIF),
-             LUT+FF và tốt hơn ở một
+             LUT+FF kém không quá 3 %, và tốt hơn ở ít nhất một
        asic  chỉ sửa asic/config.mk (không đổi design, file nguồn, SDC); gate như baseline (GDS, slack >= 0,
              DRC = 0, LVS khớp); nhận nếu không kém ở
              diện tích cell, diện tích die, công suất và tốt hơn ít nhất 1 % ở một
@@ -393,8 +393,10 @@ def judge(step: str, best: dict, new: dict) -> tuple[bool, str]:
             return True, (f"đạt timing ở {new.get('clock_mhz')} MHz (WNS {best.get('wns_ns')} → {new.get('wns_ns')} "
                           f"ns), bản tốt nhất chưa đạt")
         # Công suất động đo theo SAIF (từ 25/11/2026), công cụ tất định: ngưỡng 0,02 mW chỉ bỏ qua làm tròn.
+        # LUT+FF được kém tối đa 3 % (người dùng chốt 25/11/2026; trước đó ±0,5 ô): ở FPGA, sửa timing/công suất
+        # thường tốn vài LUT, Pareto chặt loại cả đánh đổi tốt như CG r1 ngày 21/11.
         crit = [("WNS", "wns_ns", +1, 0.02), ("P động", "power_dynamic_w", -1, 0.00002),
-                ("LUT+FF", None, -1, 0.5)]
+                ("LUT+FF", None, -1, ("pct", 0.03))]
     else:
         crit = [("diện tích cell", "area_um2", -1, 0.01), ("diện tích die", "die_area_um2", -1, 0.01),
                 ("công suất", "power_total_w", -1, 0.01)]
@@ -408,6 +410,13 @@ def judge(step: str, best: dict, new: dict) -> tuple[bool, str]:
             notes.append(f"{name} ?")
             continue
         delta = (b - a) * sign                                   # > 0: tốt hơn
+        if isinstance(tol, tuple):                               # ("pct", x): được kém x, tốt hơn khi vượt 0,5
+            if delta < -max(0.5, tol[1] * abs(a)):
+                worse.append(name)
+            elif delta > 0.5:
+                better.append(name)
+            notes.append(f"{name} {a:g} → {b:g}")
+            continue
         thr = tol * abs(a) if step == "asic" else tol            # asic: theo tỉ lệ (1 %)
         if delta < -thr:
             worse.append(name)
@@ -464,7 +473,7 @@ utilization, methodology, warnings, power_saif.rpt). Power is measured with real
 simulated with fpga/tb_power.v and the SAIF is read back (fpga/power_saif.tcl, FIXED); power.rpt is the old vector-less
 estimate, for reference only.
 Goal: if the current best version does not meet timing at this clock, meet it (WNS >= 0, WHS >= 0); otherwise improve
-WNS and/or dynamic power (SAIF) and/or LUT+FF without making any of them worse.
+WNS and/or dynamic power (SAIF) and/or LUT+FF. WNS and dynamic power must not get worse; LUT+FF may grow by at most 3 %.
 Allowed files: fpga/build.tcl (synthesis/implementation options and directives; do NOT add or change clocks or timing
 exceptions, do NOT change the part), fpga/sources.f (the Verilog files read by Vivado and by the functional simulation),
 new Verilog files fpga/<name>.v (for example an FPGA-specific implementation of a module from rtl/ with the SAME module

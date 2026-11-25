@@ -340,3 +340,7 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    `log_saif` không thấy `/tb_power/dut`, SAIF rỗng (`DURATION 0`), `read_saif` chỉ khớp 3/411 net (độ tin cậy Medium, số
    gần bằng vector-less) mà không báo lỗi. Giờ chu kỳ truyền bằng `xvlog -d`, SAIF rỗng thì dừng, khớp < 50 % thì gate FPGA
    không qua.
+   **Luật FPGA đổi (người dùng chốt 25/11/2026, trước khi chạy lại agent):** WNS và P động SAIF không được kém; LUT+FF
+   được kém tối đa 3 % (trước đó ±0,5 ô); vẫn phải tốt hơn ở ít nhất một. Lý do: ở 188,7 MHz, chuyển CG từ latch sang CE
+   giảm P động 6,60 → 5,19 mW và tăng WNS 0 → 0,52 ns nhưng LUT+FF 283 → 287; Pareto chặt sẽ loại như CG r1 ngày 21/11.
+   Clock FPGA của lần chạy lại: 5,3 ns cho cả hai demo (`--fpga-period 5.3`).
