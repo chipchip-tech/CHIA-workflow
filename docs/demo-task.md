@@ -349,3 +349,6 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    Sim như `--stages sim`; FPGA 188,7 MHz: NoCG WNS 0,588 ns, P động SAIF 5,575 mW; CG latch WNS 0,000 (time borrowing,
    tính là đạt), WHS 0,148, P động 6,602 mW, 4 cảnh báo; ASIC trùng 21/11, LVS khớp. `run_demo.py` chạy thật lần đầu: submit
    job, mở trình duyệt bằng `/usr/bin/xdg-open`, trang trạng thái phục vụ ở 127.0.0.1:8765.
+   **Thành phần công suất SAIF** (`power_saif.rpt` mục 1.1, 5,3 ns, gửi phép 30 %): NoCG / CG bufgce: Clocks 2,627 / 6,268,
+   Slice Logic 1,358 / 1,344 (Register 0,115 / 0,115), Signals 1,470 / 1,627 mW. 96 % phần tốn thêm của bufgce nằm ở mạng
+   clock; cả 139 flop chỉ 0,115 mW, nên phần gating tiết kiệm được nhỏ hơn nhiều chi phí 2 mạng clock toàn cục.

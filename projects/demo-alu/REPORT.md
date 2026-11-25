@@ -271,7 +271,21 @@ Vivado tính công suất từ đó (khớp 74–77 % net, độ tin cậy High)
 - Công suất tăng theo hoạt động. Ước lượng vector-less cũ báo gần như cùng một số ở mọi mức, nên không dùng để so được.
 - **Trên FPGA, không cách gating nào tiết kiệm hơn NoCG**, kể cả khi ALU rảnh 90 %. BUFGCE tốn thêm 2,8–4,3 mW vì mỗi
   BUFGCE là một mạng clock toàn cục mà chỉ nuôi khoảng 30 flop. CE ngang NoCG vì sau chuyển đổi cấu trúc gần như giống hệt.
-- Trên ASIC thì ngược lại: CG giảm 12 % công suất (mục 4).
+- Bảng thành phần công suất (188,7 MHz, gửi phép 30 %) cho thấy lý do:
+
+| Thành phần (mW) | NoCG | CG bufgce | Chênh |
+|---|---|---|---|
+| Clocks | 2,627 | 6,268 | +3,641 |
+| Slice Logic | 1,358 | 1,344 | −0,014 |
+| trong đó Register (139 flop) | 0,115 | 0,115 | 0 |
+| Signals | 1,470 | 1,627 | +0,157 |
+| Tổng động | 5,575 | 9,359 | +3,784 |
+
+  96 % phần tốn thêm của BUFGCE nằm ở mạng clock. Cả 139 flop chỉ tốn 0,115 mW, nên phần clock gating có thể tiết kiệm
+  ở 28 flop của ALU nhỏ hơn rất nhiều so với chi phí hai mạng clock toàn cục mới. Trên FPGA, gating chỉ đáng khi tắt được
+  cả một khối lớn.
+- Trên ASIC thì ngược lại: CG giảm 12 % công suất (mục 4). Cây clock do CTS dựng vừa đủ cho thiết kế, cell ICG cắt cả
+  nhánh cây phía sau, và CG bỏ được mux hồi tiếp. Lưu ý: số ASIC vẫn là ước lượng của OpenSTA với hoạt động mặc định.
 
 ### Luật nhận đổi cho lần chạy lại agent
 
