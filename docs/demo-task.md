@@ -297,3 +297,16 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    lại và vẫn chạy tiếp; agent phải đạt WNS ≥ 0 và WHS ≥ 0, được nhận ngay nếu bản tốt nhất chưa đạt, còn lại Pareto với P
    động SAIF (ngưỡng 0,02 mW). `fpga_sweep.py fmax|power` cho bảng Fmax và bảng công suất theo tỉ lệ gửi phép.
    Hoãn: MMCM (clock > 100 MHz trên board thật cần MMCM; bảng Fmax và công suất là số của công cụ).
+   **FPGA chạy thật 25/11/2026** (`baseline.py --stages fpga`, 100 MHz, gửi phép 38/128). Build trùng từng số với 21/11
+   (NoCG LUT 138, FF 139, WNS 4,579). Hai lỗi SAIF đã gỡ: xelab thiếu `-debug typical` (`open_saif`: Simulator 45-10
+   "compiled without trace information"); trước đó đoán nhầm là do `$finish`.
+
+   | | LUT | FF | BUFG | WNS (ns) | Fmax ước lượng | P động SAIF | P u_alu SAIF | P động vector-less |
+   |---|---|---|---|---|---|---|---|---|
+   | NoCG | 138 | 139 | 1 | 4,579 | 184,5 MHz | 2,743 mW | 1,003 mW | 2,000 mW |
+   | CG bufgce | 138 | 139 | 3 | 4,085 | 169,1 MHz | 4,063 mW | 1,876 mW | 6,000 mW |
+   | CG ce | 145 | 139 | 1 | 4,499 | 181,8 MHz | 2,729 mW | 1,008 mW | 2,000 mW |
+
+   Độ tin cậy `High`, net khớp SAIF 75–77 %. BUFGCE thêm 2 mạng clock toàn cục cho khoảng 30 flop nên tốn hơn; CE đưa mọi
+   flop về clock liên tục nên gần như trùng NoCG (trên FPGA chỉ BUFGCE thật sự dừng clock). Chưa: biến thể latch có SAIF,
+   quét Fmax, quét tỉ lệ gửi phép.

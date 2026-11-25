@@ -230,8 +230,9 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   **Coverage Sim (25/11/2026, chạy thật `baseline.py --stages sim`: NoCG 51/55 bin, CG 51/57):** `sim/fcov_<DUT>.sv` (bin functional, `bind`, cố định), `sim_main.cpp`
   (main của `--binary` không ghi `coverage.dat`), luật Sim đổi sang coverage (chi tiết `docs/demo-task.md`). Verilator 5.020:
   không có `##` trong `cover property`; `cover property` trong `generate` bị gộp một điểm.
-  **FPGA (25/11/2026, chưa chạy Vivado thật):** `fpga/clock.xdc`, biến thể CG `latch`/`bufgce`/`ce`, công suất SAIF
-  (`power_saif.tcl`, `tb_power.v`), `fpga_sweep.py fmax|power`; chi tiết và luật gate mới trong `docs/demo-task.md`.
+  **FPGA (25/11/2026):** `fpga/clock.xdc`, biến thể CG `latch`/`bufgce`/`ce`, công suất SAIF (`power_saif.tcl`, `tb_power.v`;
+  xelab cần `-debug typical`), `fpga_sweep.py fmax|power`. Chạy thật `baseline.py --stages fpga` ở 100 MHz: NoCG, CG bufgce, CG ce
+  OK (số trong `docs/demo-task.md`). Chưa: `fpga_sweep.py`, agent với luật mới.
   **Từ 24/11/2026 chia 2 session trên nhánh `demo`:** session làm việc (củng cố demo ALU, sửa mọi thứ trừ `report/`) và
   session slide (chỉ sửa `projects/demo-alu/report/**`, brief ở `report/REPORT.md`, 4 deck tiếng Anh `report/guides/`).
   Báo cáo cũ `ProgressReport_22-11.pptx`, `Draft_22-11-2026.docx` đã xoá khỏi nhánh (còn trong lịch sử git).
