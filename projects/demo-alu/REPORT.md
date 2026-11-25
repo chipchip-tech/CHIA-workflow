@@ -101,7 +101,7 @@ vòng.
 - Công suất ASIC là ước lượng của OpenSTA với hoạt động mặc định, không lấy từ VCD.
 - LVS thêm sau, ngày 25/11/2026: task `asic_lvs` chạy `make lvs` của ORFS (KLayout 0.30.12, deck `sky130hd.lylvs`), so
   layout GDS với netlist CDL. Cả hai demo khớp, mất khoảng 2,4 s; mọi số khác của bước ASIC trùng từng số với lần chạy
-  21/11. Các vòng agent ASIC ở mục 5 chạy trước khi có LVS, nên chưa qua gate này.
+  21/11. Thử cố ý làm sai: đổi chỗ dây CLK và D của flop `a_q[0]` trong `6_final_concat.cdl` thì LVS báo `ERROR : Netlists don't match`. Các vòng agent ASIC ở mục 5 chạy trước khi có LVS, nên chưa qua gate này.
 
 **Nhận xét:** clock gating cho kết quả **ngược nhau** trên hai nền tảng.
 

@@ -225,7 +225,8 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   **LVS (25/11/2026, chạy thật):** task `asic_lvs` (`make lvs` của ORFS, KLayout 0.30.12, deck Ruby `sky130hd.lylvs`) sau
   `finish`, gate ASIC thêm "LVS khớp"; `baseline.py --stages asic` cả hai demo `lvs: match`, khoảng 2,4 s, số ASIC khác trùng
   21/11. Deck in `Congratulations! Netlists match.`; không có deck thì ORFS ghi `LVS not supported` vào `6_lvs.lvsdb`. CDL
-  viết một instance trên nhiều dòng (`+`). Chưa: thử cố ý làm sai, chạy agent với gate LVS.
+  viết một instance trên nhiều dòng (`+`). Thử cố ý làm sai (đổi CLK/D một flop trong CDL) ra `Netlists don't match`.
+  Chưa: chạy agent với gate LVS.
   **Từ 24/11/2026 chia 2 session trên nhánh `demo`:** session làm việc (củng cố demo ALU, sửa mọi thứ trừ `report/`) và
   session slide (chỉ sửa `projects/demo-alu/report/**`, brief ở `report/REPORT.md`, 4 deck tiếng Anh `report/guides/`).
   Báo cáo cũ `ProgressReport_22-11.pptx`, `Draft_22-11-2026.docx` đã xoá khỏi nhánh (còn trong lịch sử git).

@@ -274,5 +274,6 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    **LVS, chạy thật 25/11/2026:** task `asic_lvs` sau `finish` chạy `make lvs` của ORFS (bản trên máy: KLayout 0.30.12,
    deck Ruby `sky130hd.lylvs`). Gate ASIC thêm "LVS khớp", ở cả baseline và agent. `baseline.py --stages asic`: NoCG và
    CG đều `lvs: match` (log `Congratulations! Netlists match.`), khoảng 2,4 s; mọi số khác trùng từng số với lần 21/11.
-   Chưa: thử cố ý làm sai (đổi dây CLK/D của một flop trong `6_final_concat.cdl`; lần đầu không sửa được dòng nào vì CDL
-   viết một instance trên nhiều dòng `+`), chạy agent ASIC với gate LVS.
+   Thử cố ý làm sai (25/11/2026, chạy thật): đổi chỗ dây CLK và D của flop `a_q[0]` trong `6_final_concat.cdl` thì LVS báo `ERROR : Netlists don't match`, nên gate chặn được
+   lỗi thật (lần thử đầu không sửa được dòng nào vì CDL viết một instance trên nhiều dòng `+`). Chưa: chạy agent ASIC với
+   gate LVS.
