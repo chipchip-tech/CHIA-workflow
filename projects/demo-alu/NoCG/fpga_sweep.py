@@ -54,7 +54,7 @@ def _slim(d: Path) -> None:
 def _row(r: dict) -> dict:
     keys = ("ok", "timing_met", "clock_period_ns", "clock_mhz", "wns_ns", "whs_ns", "fmax_est_mhz", "lut", "ff",
             "bufg", "power_dynamic_w", "power_alu_w", "power_total_w", "power_dynamic_vl_w", "power_confidence",
-            "saif_nets_matched_pct", "warnings", "warning_ids", "seconds", "power_seconds")
+            "saif_nets_matched_pct", "saif_ok", "warnings", "warning_ids", "seconds", "power_seconds")
     return {k: r.get(k) for k in keys}
 
 

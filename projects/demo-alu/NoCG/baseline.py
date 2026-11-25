@@ -106,6 +106,7 @@ def _timing(text: str) -> dict:
 FPGA_VARIANTS = {
     "rtl": {"replace": {}, "synth": [], "note": "RTL gốc (thanh ghi có clock enable)"},
 }
+SAIF_MIN_MATCH_PCT = 50                              # dưới mức này coi như không đo được công suất SAIF
 FPGA_EN_THR_DEFAULT = 38                              # fpga_top: tỉ lệ gửi phép = EN_THR/128 (38 ~ 30 %)
 
 
@@ -211,9 +212,13 @@ def fpga_build(run_dir: str, timeout_s: int = 3600, power_cycles: int = 20000) -
         res.update({"power_seconds": psec, "power_cycles": power_cycles, "power_total_w": p["total_w"],
                     "power_dynamic_w": p["dynamic_w"], "power_static_w": p["static_w"], "power_alu_w": p["alu_w"],
                     "power_confidence": p["confidence"], "saif_nets_matched_pct": p["nets_matched_pct"]})
-        power_ok = prc == 0 and p["dynamic_w"] is not None
+        # SAIF chỉ có nghĩa khi phần lớn net khớp tên (lần chạy 100 MHz: 75 %); khớp ít thì Vivado tự ước lượng như
+        # vector-less, số công suất không dùng được.
+        res["saif_ok"] = (p["nets_matched_pct"] or 0) >= SAIF_MIN_MATCH_PCT
+        power_ok = prc == 0 and p["dynamic_w"] is not None and res["saif_ok"]
         if not power_ok:
-            tail += "\n--- power_saif.tcl ---\n" + pout[-3000:]
+            tail += (f"\nSAIF khớp {p['nets_matched_pct']} % net (cần >= {SAIF_MIN_MATCH_PCT} %)" if not res["saif_ok"]
+                     else "") + "\n--- power_saif.tcl ---\n" + pout[-3000:]
     res["ok"] = rc == 0 and res["bitstream"] is not None and wns is not None and clock_ok and power_ok
     if not clock_ok:
         tail += f"\nclock trong timing.rpt ({res['clock_in_report_ns']}) khác clock.xdc ({period})"
