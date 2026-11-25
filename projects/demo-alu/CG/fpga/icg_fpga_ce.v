@@ -14,7 +14,9 @@ module icg (
     assign gclk = clk & (en | test_en);
 `else
     reg en_lat;
-    always @* if (!clk) en_lat = en | test_en;
+    /* verilator lint_off LATCH */
+    always @* if (!clk) en_lat = en | test_en;   // latch có chủ đích (như icg_sim.v)
+    /* verilator lint_on LATCH */
     assign gclk = clk & en_lat;
 `endif
 endmodule

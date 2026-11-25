@@ -22,7 +22,7 @@ TITLE = {"sim": "Sim", "fpga": "FPGA", "asic": "ASIC"}
 TOOL = {"sim": "Verilator", "fpga": "Vivado 2025.1 · Arty A7-100T", "asic": "Yosys + OpenROAD (ORFS) · sky130hd"}
 # Task CHIA -> khối (resource) chạy nó.
 BLOCK = {"sim_build": "chipyard", "sim_run": "verilator", "fpga_sim": "vivado", "fpga": "vivado", "agent": "claude"}
-ASIC_STAGES = ["synth", "floorplan", "place", "cts", "route", "finish", "lvs"]
+ASIC_STAGES = ["synth", "floorplan", "place", "cts", "route", "finish", "drc", "lvs"]
 SUBTASKS = {"sim": ["sim_build", "sim_run"], "fpga": ["fpga"], "asic": [f"asic_{s}" for s in ASIC_STAGES]}
 LABEL = {"sim_build": "build (Verilator)", "sim_run": "chạy testbench", "fpga_sim": "xsim tb_fpga_top",
          "fpga": "synth → bitstream", **{f"asic_{s}": s for s in ASIC_STAGES}}
@@ -45,7 +45,7 @@ ROWS = {
              ("Util (%)", "util_pct", 1, 0, False), ("Số cell", "n_logic_cells", 1, 0, False),
              ("ICG", "n_icg", 1, 0, False), ("Buffer clock", "n_clkbuf", 1, 0, False),
              ("Setup WS (ns)", "setup_ws_ns", 1, +1, True), ("Hold WS (ns)", "hold_ws_ns", 1, +1, True),
-             ("Công suất (mW)", "power_total_w", 1000, -1, False), ("DRC", "drc_errors", 1, -1, False),
+             ("Công suất (mW)", "power_total_w", 1000, -1, False), ("DRC router", "drc_errors", 1, -1, False), ("DRC KLayout", "drc_klayout", 1, -1, False),
              ("LVS", "lvs", 1, 0, False)],
 }
 
@@ -145,7 +145,8 @@ def _cov_view(m: dict | None) -> dict | None:
 def _fpga_view(m: dict | None) -> dict | None:
     if m is None or "timing_met" not in m:
         return m
-    return {**m, "timing_s": "đạt" if m["timing_met"] else "KHÔNG đạt"}
+    so = m.get("signoff_met", m["timing_met"])
+    return {**m, "timing_s": ("đạt" if m["timing_met"] else "KHÔNG đạt") + ("" if so else " (sign-off KHÔNG đạt)")}
 
 
 def table(step: str, base: dict, best: dict | None) -> str:
@@ -242,14 +243,14 @@ def render_baseline(report: dict, final: bool) -> str:
             s == "ok" for s in states) else "wait"
         txt = {"bad": "dừng", "run": "đang chạy", "ok": "qua gate", "wait": "chờ"}[state]
         last = steps.get(subs[-1])
-        if step == "asic" and last is not None:          # số liệu ở finish, kết quả LVS ở lvs
-            last = {**steps.get("asic_finish", {}), **last}
+        if step == "asic" and last is not None:          # số liệu ở finish, DRC KLayout ở drc, LVS ở lvs
+            last = {**steps.get("asic_finish", {}), **steps.get("asic_drc", {}), **last}
         head = ""
         if last and last.get("ok"):
             head = {"sim": lambda r: f'PASS · coverage {r.get("fcov_hit")}/{r.get("fcov_total")} bin',
                     "fpga": lambda r: (f'{fmt(r.get("clock_mhz"))} MHz · WNS {fmt(r.get("wns_ns"))} ns'
-                                       + ("" if r.get("timing_met", True) else " (timing KHÔNG đạt)")),
-                    "asic": lambda r: f'die {fmt(r.get("die_area_um2"))} µm² · GDS · LVS khớp'}[step](last)
+                                       + ("" if r.get("signoff_met", r.get("timing_met", True)) else " (sign-off KHÔNG đạt)")),
+                    "asic": lambda r: f'die {fmt(r.get("die_area_um2"))} µm² · GDS · DRC sạch · LVS khớp'}[step](last)
         cards.append(stage_card(step, state, chip(state, txt), f'<ul class="tasks">{"".join(lis)}</ul>'
                                 + (f'<div class="headline">{e(head)}</div>' if head else "")))
         if last and last.get("ok"):

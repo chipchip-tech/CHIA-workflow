@@ -67,12 +67,18 @@ def sim_build(run_dir: str) -> dict:
     """Build testbench bằng Verilator của Chipyard (worker chipyard đã nạp env.sh)."""
     sim = os.path.join(run_dir, "sim")
     _, ver, _ = _sh("verilator --version", sim)
+    # Gate lint: RTL của DUT (rtl/*.v, cố định) phải sạch với -Wall (cảnh báo nào cũng là lỗi).
+    rtl = " ".join(sorted(str(p) for p in Path(run_dir, "rtl").glob("*.v")))
+    lrc, lout, _ = _sh(f"verilator --lint-only -Wall --top-module {DUT} {rtl}", sim)
+    lint_msgs = re.findall(r"^%(?:Warning|Error)-?(\w*)", lout, re.M)
+    lint_ok = lrc == 0 and not lint_msgs
     rc, out, sec = _sh("./run_sim.sh", sim, {"BUILD_ONLY": "1"})
     binary = os.path.join(sim, "build", "obj", "Vtb")
-    ok = rc == 0 and os.path.isfile(binary)
+    ok = lint_ok and rc == 0 and os.path.isfile(binary)
     get_profiler().add_info({"step": "sim_build", "ok": ok, "seconds": sec})
+    tail = out[-2000:] if lint_ok else "LINT (verilator --lint-only -Wall) không sạch:\n" + lout[-2000:]
     return {"ok": ok, "rc": rc, "seconds": sec, "verilator": ver.strip(), "host": os.uname().nodename,
-            "log_tail": out[-2000:]}
+            "lint_ok": lint_ok, "lint_warnings": len(lint_msgs), "lint_ids": sorted(set(lint_msgs)), "log_tail": tail}
 
 
 def _num(pattern: str, text: str, cast=float):
@@ -219,7 +225,33 @@ def fpga_build(run_dir: str, timeout_s: int = 3600, power_cycles: int = 20000) -
         if not power_ok:
             tail += (f"\nSAIF khớp {p['nets_matched_pct']} % net (cần >= {SAIF_MIN_MATCH_PCT} %)" if not res["saif_ok"]
                      else "") + "\n--- power_saif.tcl ---\n" + pout[-3000:]
-    res["ok"] = rc == 0 and res["bitstream"] is not None and wns is not None and clock_ok and power_ok
+    # Methodology: luật mức Critical Warning/Error (ví dụ TIMING-14: LUT trên cây clock) phải bằng 0 ở bản agent nhận.
+    meth = {}
+    for rule, sev, n in re.findall(r"^\|\s*([A-Z]+-\d+)\s*\|\s*(Critical Warning|Error|Warning|Advisory)\s*\|[^|]*\|\s*(\d+)",
+                                   rep("methodology.rpt"), re.M):
+        meth[rule] = {"severity": sev, "count": int(n)}
+    res["methodology"] = meth
+    res["methodology_critical"] = sum(v["count"] for v in meth.values() if v["severity"] in ("Critical Warning", "Error"))
+    res["signoff_met"] = res["timing_met"] and res["methodology_critical"] == 0
+    # Mô phỏng gate-level: netlist sau route (out/funcsim.v, power_saif.tcl ghi) với tb_gls.v, chạy hết một khung và
+    # kiểm LED PASS (MISR khớp chữ ký). Chỉ chạy khi có đo công suất (fpga_sweep fmax bỏ qua cả hai).
+    gls_ok = power_cycles <= 0
+    if power_ok and power_cycles > 0 and os.path.isfile(os.path.join(fpga, "out", "funcsim.v")):
+        ps = int(round(period * 1000 / 2)) * 2
+        grc, gout, gsec = _sh("rm -rf xsim_gls && mkdir xsim_gls && cd xsim_gls && "
+                              f"xvlog -nolog -d TB_PERIOD_PS={ps} ../out/funcsim.v ../tb_gls.v "
+                              "$XILINX_VIVADO/data/verilog/src/glbl.v && "
+                              "xelab -nolog -L unisims_ver -s tbg tb_gls glbl && xsim -nolog tbg -R",
+                              fpga, timeout=timeout_s)
+        Path(fpga, "xsim_gls.log").write_text(gout)
+        m = re.search(r"^RESULT: (PASS|FAIL) gls", gout, re.M)
+        gls_ok = grc == 0 and bool(m) and m.group(1) == "PASS"
+        res.update({"gls_ok": gls_ok, "gls_seconds": gsec, "gls_result": m.group(0) if m else None})
+        if not gls_ok:
+            tail += "\n--- mô phỏng gate-level (tb_gls.v) ---\n" + gout[-2000:]
+    elif power_cycles > 0:
+        res["gls_ok"] = False
+    res["ok"] = rc == 0 and res["bitstream"] is not None and wns is not None and clock_ok and power_ok and gls_ok
     if not clock_ok:
         tail += f"\nclock trong timing.rpt ({res['clock_in_report_ns']}) khác clock.xdc ({period})"
     res["log_tail"] = tail
@@ -230,7 +262,7 @@ def fpga_build(run_dir: str, timeout_s: int = 3600, power_cycles: int = 20000) -
 
 # ---------------- ASIC (ORFS) ----------------
 ORFS_FLOW = "/OpenROAD-flow-scripts/flow"            # trong khối asic (ORFS của host mount vào đây)
-ASIC_STAGES = ["synth", "floorplan", "place", "cts", "route", "finish", "lvs"]
+ASIC_STAGES = ["synth", "floorplan", "place", "cts", "route", "finish", "drc", "lvs"]
 
 
 def _orfs_paths(run_dir: str) -> dict:
@@ -274,6 +306,9 @@ def asic_stage(run_dir: str, stage: str, timeout_s: int = 3600) -> dict:
     if stage == "finish" and rc == 0:
         res.update(_asic_metrics(P))
         res["ok"] = res["gate_ok"]
+    if stage == "drc":
+        res.update(_drc_result(P))
+        res["ok"] = rc == 0 and res["drc_klayout"] == 0
     if stage == "lvs":
         res.update(_lvs_result(P, tail))
         res["ok"] = rc == 0 and res["lvs"] == "match"
@@ -346,6 +381,30 @@ def _asic_metrics(P: dict) -> dict:
     r["gate_ok"] = (r["gds"] is not None and r["setup_ws_ns"] is not None and r["setup_ws_ns"] >= 0
                     and (r["hold_ws_ns"] is None or r["hold_ws_ns"] >= 0) and not r["drc_errors"])
     return r
+
+
+def _drc_result(P: dict) -> dict:
+    """`make drc` của ORFS: KLayout chạy bộ luật DRC đầy đủ của sky130hd trên GDS cuối (khác số DRC của router sau đi
+    dây). Kết quả reports/6_drc.lyrdb (XML, mỗi vi phạm một <item>), 6_drc_count.rpt (số vi phạm). Platform không có bộ
+    luật thì ORFS ghi "DRC not supported" vào lyrdb."""
+    lyrdb = os.path.join(P["reports"], "6_drc.lyrdb")
+    db = _read(lyrdb)
+    if "not supported" in db[:200]:
+        return {"drc_klayout": None, "drc_status": "unsupported", "drc_lyrdb": lyrdb,
+                "log_tail": f"ORFS này không có bộ luật DRC KLayout cho sky130hd (KLAYOUT_DRC_FILE rỗng): xem "
+                            f"{ORFS_FLOW}/platforms/sky130hd/config.mk"}
+    if not db:
+        return {"drc_klayout": None, "drc_status": "missing", "drc_lyrdb": None}
+    items = db.split("<items>", 1)[1] if "<items>" in db else ""
+    rules = {}
+    for r in re.findall(r"<category>'?([^<']+)'?</category>", items):
+        rules[r] = rules.get(r, 0) + 1
+    n = sum(rules.values())
+    cnt = _read(os.path.join(P["reports"], "6_drc_count.rpt")).strip()
+    if cnt.isdigit():
+        n = int(cnt)
+    return {"drc_klayout": n, "drc_status": "clean" if n == 0 else "violations",
+            "drc_rules": dict(sorted(rules.items(), key=lambda kv: -kv[1])[:20]), "drc_lyrdb": lyrdb}
 
 
 def _lvs_result(P: dict, make_tail: str) -> dict:
@@ -482,7 +541,10 @@ def main() -> None:
     if "sim" in stages:
         # 1-2. Sim: build ở khối chipyard, chạy ở khối verilator.
         S.set_live(report, task="sim_build")
-        ok = done("sim_build", get(sim_build.chia_remote(str(run_dir))))
+        rb = get(sim_build.chia_remote(str(run_dir)))
+        ok = done("sim_build", rb)
+        print(f"[baseline {DEMO}] lint (verilator -Wall): {'sạch' if rb.get('lint_ok') else 'KHÔNG sạch'} "
+              f"({rb.get('lint_warnings')} cảnh báo {rb.get('lint_ids') or ''})", flush=True)
         if ok:
             plus = [f"+seed={args.seed}", f"+cycles={args.cycles}", f"+en_pct={args.en_pct}"]
             S.set_live(report, task="sim_run")
@@ -510,8 +572,11 @@ def main() -> None:
               f"{r.get('power_confidence')}, net khớp {r.get('saif_nets_matched_pct')} %); vector-less: động "
               f"{mw(r.get('power_dynamic_vl_w'))} mW", flush=True)
         print(f"[baseline {DEMO}] bitstream: {r['bitstream']}", flush=True)
-        if ok and not r["timing_met"]:
-            print(f"[baseline {DEMO}] CẢNH BÁO: FPGA không đạt timing ở {r['clock_mhz']} MHz (ghi lại làm mốc; "
+        print(f"[baseline {DEMO}] fpga sign-off: methodology critical={r.get('methodology_critical')} "
+              f"({', '.join(k for k, v in (r.get('methodology') or {}).items() if v['severity'] != 'Advisory') or '-'}), "
+              f"mô phỏng gate-level: {r.get('gls_result')}", flush=True)
+        if ok and not r["signoff_met"]:
+            print(f"[baseline {DEMO}] CẢNH BÁO: FPGA chưa đạt sign-off (timing hoặc methodology) ở {r['clock_mhz']} MHz (ghi lại làm mốc; "
                   f"bitstream vẫn có nên bước ASIC vẫn chạy)", flush=True)
     if ok and "asic" in stages:
         # 4. ASIC: ORFS ở khối asic, từng bước make là một task (timeline thấy rõ từng bước).
@@ -521,6 +586,10 @@ def main() -> None:
             ok = done(f"asic_{stage}", r)
             if not ok:
                 break
+        if "asic_drc" in report["steps"]:
+            d = report["steps"]["asic_drc"]
+            print(f"[baseline {DEMO}] drc (KLayout): {d.get('drc_status')} {d.get('drc_klayout')} vi phạm "
+                  f"{d.get('drc_rules') or ''}", flush=True)
         if "asic_lvs" in report["steps"]:
             print(f"[baseline {DEMO}] lvs: {report['steps']['asic_lvs']['lvs']}", flush=True)
         r = report["steps"].get("asic_finish", {})

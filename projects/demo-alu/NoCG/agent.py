@@ -210,7 +210,7 @@ def _allowed(step: str, rel: str) -> bool:
         if rel in ("fpga/build.tcl", "fpga/sources.f"):
             return True
         # icg_fpga_*.v: biến thể FPGA viết tay của baseline CG (agent dùng được qua sources.f, không sửa).
-        fixed = {"fpga/fpga_top.v", "fpga/tb_fpga_top.v", "fpga/tb_power.v", "fpga/icg_fpga_bufgce.v",
+        fixed = {"fpga/fpga_top.v", "fpga/tb_fpga_top.v", "fpga/tb_power.v", "fpga/tb_gls.v", "fpga/icg_fpga_bufgce.v",
                  "fpga/icg_fpga_ce.v"}
         return rel.startswith("fpga/") and rel.count("/") == 1 and rel.endswith(".v") and rel not in fixed
     if step == "asic":
@@ -322,17 +322,19 @@ def measure(step: str, cand: Path, params: dict, on_task=None) -> dict:
                 sub["fpga"]["ok"] = False
                 sub["fpga"]["log_tail"] = (f"clock của vòng ({got} ns) khác baseline ({want} ns)\n"
                                            + sub["fpga"].get("log_tail", ""))
-            elif not sub["fpga"]["timing_met"]:              # gate của agent: phải đạt timing ở clock của baseline
+            elif not sub["fpga"]["signoff_met"]:             # gate của agent: timing + methodology ở clock baseline
                 sub["fpga"]["ok"] = False
-                sub["fpga"]["log_tail"] = (f"timing không đạt: WNS {sub['fpga'].get('wns_ns')} WHS "
-                                           f"{sub['fpga'].get('whs_ns')} ns\n") + sub["fpga"].get("log_tail", "")
+                sub["fpga"]["log_tail"] = (f"chưa đạt sign-off: WNS {sub['fpga'].get('wns_ns')} WHS "
+                                           f"{sub['fpga'].get('whs_ns')} ns, methodology critical "
+                                           f"{sub['fpga'].get('methodology_critical')} "
+                                           f"{sub['fpga'].get('methodology')}\n") + sub["fpga"].get("log_tail", "")
     else:
         for st in B.ASIC_STAGES:
             if not run(f"asic_{st}", B.asic_stage.chia_remote(d, st)):
                 break
     failed = next((k for k, v in sub.items() if not v["ok"]), None)
     # ASIC: số liệu ở finish, kết quả LVS ở lvs; gộp lại. Các bước khác: task cuối.
-    last = {**sub.get("asic_finish", {}), **sub.get("asic_lvs", {})} if step == "asic" else \
+    last = {**sub.get("asic_finish", {}), **sub.get("asic_drc", {}), **sub.get("asic_lvs", {})} if step == "asic" else \
         (list(sub.values())[-1] if sub else {})
     return {"ok": failed is None and bool(sub), "failed_at": failed, "metrics": metrics_of(step, last),
             "sub": {k: {kk: vv for kk, vv in v.items() if kk not in ("metrics_json", "cells")} for k, v in sub.items()}}
@@ -344,13 +346,14 @@ def metrics_of(step: str, r: dict) -> dict:
                 **{k: r.get(k) for k in ("fcov_hit", "fcov_total", "fcov_miss", "cov_line", "cov_line_total",
                                          "cov_toggle", "cov_toggle_total", "cov_branch", "cov_branch_total")}}
     if step == "fpga":
-        return {k: r.get(k) for k in ("wns_ns", "whs_ns", "tns_ns", "timing_met", "clock_mhz", "fmax_est_mhz", "lut",
+        return {k: r.get(k) for k in ("wns_ns", "whs_ns", "tns_ns", "timing_met", "signoff_met", "methodology_critical",
+                                      "methodology", "gls_ok", "clock_mhz", "fmax_est_mhz", "lut",
                                       "ff", "bufg", "power_total_w", "power_dynamic_w", "power_alu_w",
                                       "power_dynamic_vl_w", "power_confidence", "saif_nets_matched_pct", "warnings",
                                       "critical_warnings", "warning_ids", "bitstream")}
     return {k: r.get(k) for k in ("area_um2", "die_area_um2", "core_area_um2", "util_pct", "n_logic_cells", "n_flop",
                                   "n_icg", "n_clkbuf", "setup_ws_ns", "hold_ws_ns", "power_total_w", "drc_errors",
-                                  "lvs", "gds", "layout_png")}
+                                  "drc_klayout", "lvs", "gds", "layout_png")}
 
 
 def _int(v):
@@ -395,9 +398,10 @@ def judge(step: str, best: dict, new: dict) -> tuple[bool, str]:
     if step == "sim":
         return judge_sim(best, new)
     if step == "fpga":
-        if best.get("timing_met") is False:              # bản mới đã qua gate nên đạt timing
-            return True, (f"đạt timing ở {new.get('clock_mhz')} MHz (WNS {best.get('wns_ns')} → {new.get('wns_ns')} "
-                          f"ns), bản tốt nhất chưa đạt")
+        if best.get("signoff_met", best.get("timing_met")) is False:   # bản mới đã qua gate nên đạt sign-off
+            return True, (f"đạt sign-off ở {new.get('clock_mhz')} MHz (WNS {best.get('wns_ns')} → {new.get('wns_ns')} "
+                          f"ns, methodology critical {best.get('methodology_critical')} → "
+                          f"{new.get('methodology_critical')}), bản tốt nhất chưa đạt")
         # Công suất động đo theo SAIF (từ 25/11/2026), công cụ tất định: ngưỡng 0,02 mW chỉ bỏ qua làm tròn.
         # LUT+FF được kém tối đa 3 % (người dùng chốt 25/11/2026; trước đó ±0,5 ô): ở FPGA, sửa timing/công suất
         # thường tốn vài LUT, Pareto chặt loại cả đánh đổi tốt như CG r1 ngày 21/11.
@@ -478,16 +482,19 @@ self-check, LEDs). Read the reports of the current best build in agent/context/ 
 utilization, methodology, warnings, power_saif.rpt). Power is measured with real activity: the routed netlist is
 simulated with fpga/tb_power.v and the SAIF is read back (fpga/power_saif.tcl, FIXED); power.rpt is the old vector-less
 estimate, for reference only.
-Goal: if the current best version does not meet timing at this clock, meet it (WNS >= 0, WHS >= 0); otherwise improve
+Goal: if the current best version does not pass sign-off at this clock (WNS >= 0, WHS >= 0 and no Critical Warning or
+Error in report_methodology, e.g. TIMING-14 LUT on the clock tree), make it pass; otherwise improve
 WNS and/or dynamic power (SAIF) and/or LUT+FF. WNS and dynamic power must not get worse; LUT+FF may grow by at most 3 %.
 Allowed files: fpga/build.tcl (synthesis/implementation options and directives; do NOT add or change clocks or timing
 exceptions, do NOT change the part), fpga/sources.f (the Verilog files read by Vivado and by the functional simulation),
 new Verilog files fpga/<name>.v (for example an FPGA-specific implementation of a module from rtl/ with the SAME module
 name and ports; then replace the rtl/ file by yours in sources.f). Not allowed: rtl/, fpga/fpga_top.v,
-fpga/tb_fpga_top.v, fpga/tb_power.v, fpga/golden_sig.py, fpga/power_saif.tcl, fpga/synth_opts.tcl, the .xdc files.
+fpga/tb_fpga_top.v, fpga/tb_power.v, fpga/tb_gls.v, fpga/golden_sig.py, fpga/power_saif.tcl, fpga/synth_opts.tcl, the .xdc files.
 build.tcl must keep reading clock.xdc and sourcing synth_opts.tcl.
 Gate: tb_fpga_top.v in xsim with the UNISIM library (Xilinx primitives simulate) prints RESULT: PASS fpga_top, the
-bitstream is written, the clock is the one of clock.xdc, WNS >= 0 and WHS >= 0, SAIF power measured.""",
+bitstream is written, the clock is the one of clock.xdc, WNS >= 0 and WHS >= 0, no Critical Warning/Error in
+report_methodology, SAIF power measured, and the gate-level simulation of the routed netlist (fpga/tb_gls.v, FIXED: one
+full frame, the LEDs must show PASS) passes.""",
     "asic": """STEP: ASIC. OpenROAD-flow-scripts, sky130hd, RTL -> GDS, 10 ns clock from asic/constraint.sdc (fixed).
 Read the reports and metrics of the current best run in agent/context/ (ORFS final report, synthesis statistics,
 metrics JSON, ORFS variable reference if present).
@@ -495,7 +502,8 @@ Goal: reduce standard-cell area, die area and/or power (power is OpenSTA's defau
 in one of them without making the others worse, with timing still closed (setup and hold slack >= 0) and no DRC.
 Allowed file: asic/config.mk (ORFS variables such as CORE_UTILIZATION, PLACE_DENSITY, ABC_AREA, synthesis, repair and
 CTS options). Do NOT change PLATFORM, DESIGN_NAME, DESIGN_NICKNAME, VERILOG_FILES or SDC_FILE.
-Gate: GDS written, setup/hold slack >= 0, DRC errors = 0, LVS clean (KLayout: the layout GDS matches the CDL netlist).
+Gate: GDS written, setup/hold slack >= 0, router DRC errors = 0, KLayout DRC sign-off clean (full sky130hd rule deck on
+the final GDS), LVS clean (KLayout: the layout GDS matches the CDL netlist).
 Too high a utilization fails placement or routing and the
 round is rejected.""",
 }
@@ -598,7 +606,7 @@ def latest_baseline(work: Path) -> Path | None:
 def base_metrics(rep: dict) -> dict:
     s = rep["steps"]
     return {"sim": metrics_of("sim", s.get("sim_run", {})), "fpga": metrics_of("fpga", s.get("fpga", {})),
-            "asic": metrics_of("asic", {**s.get("asic_finish", {}), **s.get("asic_lvs", {})})}
+            "asic": metrics_of("asic", {**s.get("asic_finish", {}), **s.get("asic_drc", {}), **s.get("asic_lvs", {})})}
 
 
 # ---------------------------------------------------------------------------
@@ -608,7 +616,8 @@ def base_metrics(rep: dict) -> dict:
 ROWS = {
     "sim": [("Functional coverage (bin)", "fcov_hit"), ("Line (DUT)", "cov_line"), ("Toggle (DUT)", "cov_toggle"),
             ("Branch (DUT)", "cov_branch"), ("Số lần kiểm tra", "checked"), ("Lỗi", "errors")],
-    "fpga": [("Clock (MHz)", "clock_mhz"), ("Timing đạt", "timing_met"), ("WNS (ns)", "wns_ns"), ("WHS (ns)", "whs_ns"),
+    "fpga": [("Clock (MHz)", "clock_mhz"), ("Timing đạt", "timing_met"), ("Sign-off đạt", "signoff_met"),
+             ("Methodology critical", "methodology_critical"), ("GLS", "gls_ok"), ("WNS (ns)", "wns_ns"), ("WHS (ns)", "whs_ns"),
              ("Fmax ước lượng (MHz)", "fmax_est_mhz"), ("LUT", "lut"), ("FF", "ff"), ("BUFG", "bufg"),
              ("Công suất động SAIF (W)", "power_dynamic_w"), ("Công suất u_alu SAIF (W)", "power_alu_w"),
              ("Công suất tổng SAIF (W)", "power_total_w"), ("Công suất động vector-less (W)", "power_dynamic_vl_w"),
@@ -616,7 +625,7 @@ ROWS = {
     "asic": [("Diện tích cell (µm²)", "area_um2"), ("Diện tích die (µm²)", "die_area_um2"), ("Util (%)", "util_pct"),
              ("Số cell", "n_logic_cells"), ("ICG", "n_icg"), ("Buffer clock", "n_clkbuf"),
              ("Setup WS (ns)", "setup_ws_ns"), ("Hold WS (ns)", "hold_ws_ns"), ("Công suất (W)", "power_total_w"),
-             ("DRC", "drc_errors"), ("LVS", "lvs")],
+             ("DRC router", "drc_errors"), ("DRC KLayout", "drc_klayout"), ("LVS", "lvs")],
 }
 
 
