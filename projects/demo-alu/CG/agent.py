@@ -316,7 +316,13 @@ def measure(step: str, cand: Path, params: dict, on_task=None) -> dict:
     elif step == "fpga":
         if run("fpga_sim", fpga_sim.chia_remote(d)) and run(
                 "fpga", B.fpga_build.chia_remote(d, power_cycles=params.get("power_cycles", 20000))):
-            if not sub["fpga"]["timing_met"]:                # gate của agent: phải đạt timing ở clock của baseline
+            want = (params.get("fpga") or {}).get("period_ns")
+            got = sub["fpga"].get("clock_period_ns")
+            if want is not None and (got is None or abs(got - want) > 1e-6):   # cùng clock với baseline
+                sub["fpga"]["ok"] = False
+                sub["fpga"]["log_tail"] = (f"clock của vòng ({got} ns) khác baseline ({want} ns)\n"
+                                           + sub["fpga"].get("log_tail", ""))
+            elif not sub["fpga"]["timing_met"]:              # gate của agent: phải đạt timing ở clock của baseline
                 sub["fpga"]["ok"] = False
                 sub["fpga"]["log_tail"] = (f"timing không đạt: WNS {sub['fpga'].get('wns_ns')} WHS "
                                            f"{sub['fpga'].get('whs_ns')} ns\n") + sub["fpga"].get("log_tail", "")
@@ -694,7 +700,16 @@ def main() -> None:
         raise SystemExit(f"LỖI: rtl/ của project khác rtl/ của baseline {base_dir}: chạy lại baseline.py")
     # Nguồn: bản tốt nhất của bước trước (sửa dồn qua các bước). Báo cáo cho context: thư mục nơi BƯỚC NÀY được đo lần
     # tốt nhất (baseline, vì bước sau chưa đo lại bước trước: vòng sim được nhận không có báo cáo FPGA/ASIC).
-    best_src = src
+    # Bản nguồn đã chuẩn bị như baseline (clock.xdc, sources.f, synth_opts.tcl theo params["fpga"]): cây project để
+    # clock.xdc mặc định 10 ns, nên không được dùng thẳng (lỗi gặp khi chạy thật 25/11/2026: vòng FPGA chạy ở 10 ns trong
+    # khi baseline ở 5,3 ns).
+    best_src = run_dir / "source"
+    copy_tree(src, best_src)
+    fcfg = params.get("fpga")
+    if fcfg:
+        thr = fcfg.get("en_thr", B.FPGA_EN_THR_DEFAULT)
+        B.prepare_fpga(str(best_src), fcfg["period_ns"], fcfg["variant"],
+                       30 if thr == B.FPGA_EN_THR_DEFAULT else thr * 100 / 128)
     for step in steps:
         best_m = dict(base_m[step])
         step_best_src, step_best_dir = best_src, base_dir
