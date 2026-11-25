@@ -352,3 +352,15 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    **Thành phần công suất SAIF** (`power_saif.rpt` mục 1.1, 5,3 ns, gửi phép 30 %): NoCG / CG bufgce: Clocks 2,627 / 6,268,
    Slice Logic 1,358 / 1,344 (Register 0,115 / 0,115), Signals 1,470 / 1,627 mW. 96 % phần tốn thêm của bufgce nằm ở mạng
    clock; cả 139 flop chỉ 0,115 mW, nên phần gating tiết kiệm được nhỏ hơn nhiều chi phí 2 mạng clock toàn cục.
+   **Agent `--rounds 2` với luật mới, chạy thật 25/11/2026:** NoCG `agent-20261125-215351` (mốc `baseline-20261125-214405`),
+   CG `agent-20261125-220808` (mốc `baseline-20261125-214709`), cả hai `KẾT QUẢ: OK`.
+   - Sim (hợp lệ): NoCG r1 NHẬN, bin 51 → 55/55, `checked` 6272 → 6281; r2 agent không đổi gì (đã đủ bin). CG r1 NHẬN, bin
+     51 → 57/57, branch 8 → 10, `checked` 6272 → 6287; r2 không đổi. Luật cũ (21/11) dẫn agent thêm 500 nghìn–1,5 triệu
+     phép so sánh; luật coverage chỉ cần thêm khoảng 10–15 phép đúng chỗ (reset giữa chừng, `en` trong pha clk = 1).
+   - ASIC (hợp lệ, mọi vòng qua gate có LVS): NoCG r1 NHẬN (cell 3077,95 → 3042,92 µm², die 7534,24 → 5459,73 µm² −27,5 %,
+     P 0,3677 → 0,3624 mW), r2 LOẠI (cell −3 % nhưng P +5,8 %). CG r1 NHẬN (cell 2975,35 → 2930,31, die 6925,57 → 5017,60
+     −27,5 %, P 0,3235 → 0,3029 mW), r2 NHẬN (cell → 2730,12, P → 0,2540 mW; tổng so baseline: cell −8,2 %, P −21,5 %).
+   - FPGA: KHÔNG HỢP LỆ. Vòng đầu chép cây project (`fpga/clock.xdc` 10 ns, không có `synth_opts.tcl`) thay cho bản chuẩn
+     bị như baseline (5,3 ns), nên vòng chạy ở 100 MHz mà so với baseline 188,7 MHz (CG fpga-r1 WNS 4,579, P 2,743 mW trùng
+     đúng NoCG ở 10 ns). Gate clock chỉ so với `clock.xdc` của chính vòng nên không bắt được. Đã sửa (`agent.py` dựng
+     `<run>/source` bằng `prepare_fpga` theo `params["fpga"]`, gate so chu kỳ với baseline); chạy lại riêng `--steps fpga`.

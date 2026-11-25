@@ -234,7 +234,8 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   xelab cần `-debug typical`), `fpga_sweep.py fmax|power`. Chạy thật `baseline.py --stages fpga` ở 100 MHz: NoCG, CG bufgce, CG ce
   OK. `fpga_sweep.py` chạy thật: Fmax NoCG 227, CG latch 128 (trượt vì hold), bufgce 196, ce 233 MHz; công suất SAIF ở
   5,3 ns: không cách gating nào trên FPGA tốt hơn NoCG (bảng trong `docs/demo-task.md`). Bẫy: `xelab -generic_top` khác
-  mặc định đổi tên scope (`tb_power(PERIOD_PS=…)`), SAIF rỗng mà không báo lỗi; dùng `xvlog -d`. Luật FPGA đổi 25/11: LUT+FF được kém ≤ 3 %. Chưa: chạy lại baseline + agent (5,3 ns).
+  mặc định đổi tên scope (`tb_power(PERIOD_PS=…)`), SAIF rỗng mà không báo lỗi; dùng `xvlog -d`. Luật FPGA đổi 25/11: LUT+FF được kém ≤ 3 %. Baseline + agent `--rounds 2` chạy lại 25/11: Sim, ASIC hợp lệ; FPGA không hợp lệ
+  (vòng chép cây project, clock 10 ns thay vì 5,3 ns; đã sửa, chờ chạy lại `--steps fpga`).
   **Từ 24/11/2026 chia 2 session trên nhánh `demo`:** session làm việc (củng cố demo ALU, sửa mọi thứ trừ `report/`) và
   session slide (chỉ sửa `projects/demo-alu/report/**`, brief ở `report/REPORT.md`, 4 deck tiếng Anh `report/guides/`).
   Báo cáo cũ `ProgressReport_22-11.pptx`, `Draft_22-11-2026.docx` đã xoá khỏi nhánh (còn trong lịch sử git).
