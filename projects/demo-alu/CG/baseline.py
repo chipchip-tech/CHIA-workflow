@@ -413,20 +413,22 @@ def _sta_corners(P: dict, timeout_s: int) -> dict:
         os.environ["SIGNOFF_CORNER"], os.environ["SIGNOFF_DERATE"] = name, str(derate)
         rc, _, tail = _run_logged(cmd, ORFS_FLOW, timeout_s, os.path.join(P["asic"], "make", f"sta_{name}.log"))
         text = _read(os.path.join(P["asic"], "make", f"sta_{name}.log"))
-        m = re.search(r"^SIGNOFF corner=\S+ parasitics=(\S+) derate=\S+ libs=\d+ setup_ws=(\S+) setup_tns=(\S+) "
-                      r"hold_ws=(\S+) hold_tns=(\S+)", text, re.M)
+        m = re.search(r"^SIGNOFF corner=\S+ parasitics=(\S+) derate=\S+ libs=\d+ (?:clocks=(?P<clk>\d+) )?"
+                      r"setup_ws=(\S+) setup_tns=(\S+) hold_ws=(\S+) hold_tns=(\S+)", text, re.M)
         f = lambda x: None if x in (None, "NA") else float(x)
         c = {"lib": lib or "LIB_FILES của flow", "derate": derate, "rc": rc}
         if m:
-            c.update({"parasitics": m.group(1), "setup_ws_ns": f(m.group(2)), "setup_tns_ns": f(m.group(3)),
-                      "hold_ws_ns": f(m.group(4)), "hold_tns_ns": f(m.group(5))})
+            c.update({"parasitics": m.group(1), "setup_ws_ns": f(m.group(3)), "setup_tns_ns": f(m.group(4)),
+                      "hold_ws_ns": f(m.group(5)), "hold_tns_ns": f(m.group(6))})
+            if m.group("clk") is not None:
+                c["clocks"] = int(m.group("clk"))
         if c.get("setup_ws_ns") is None:              # dự phòng: dòng in của report_worst_slack
             ws = re.findall(r"^worst slack (?:max )?(-?[\d.]+)", text, re.M)
             wh = re.findall(r"^worst slack min (-?[\d.]+)", text, re.M)
             c["setup_ws_ns"] = float(ws[0]) if ws else None
             c["hold_ws_ns"] = c.get("hold_ws_ns") or (float(wh[0]) if wh else None)
         c["ok"] = rc == 0 and c.get("setup_ws_ns") is not None and c["setup_ws_ns"] >= 0 and \
-            c.get("hold_ws_ns") is not None and c["hold_ws_ns"] >= 0
+            c.get("hold_ws_ns") is not None and c["hold_ws_ns"] >= 0 and c.get("clocks", 1) > 0
         ok &= c["ok"]
         out[name] = c
         if not c["ok"]:
