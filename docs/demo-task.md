@@ -372,3 +372,14 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    (nếu `synth_opts.tcl` chưa có) và `-directive Explore` cho place/route. Agent chẩn đoán từ báo cáo: WNS 0 do time
    borrowing, đường găng cnt → en → latch nửa chu kỳ 2,65 ns, 2 TIMING-14, clock 3,28 mW; dự đoán P động "giảm nhẹ hoặc giữ
    nguyên", đo thật −21,6 %.
+   **Gate sign-off bổ sung (25/11/2026, viết xong, chưa chạy thật):** người dùng duyệt mục 1–4: (1) DRC KLayout `make drc`
+   (`asic_drc`, bộ luật `drc/sky130hd.lydrc` có trên máy); (2) mô phỏng gate-level: FPGA `fpga/tb_gls.v` trên netlist sau
+   route (một khung 1 048 576 chu kỳ, kiểm LED PASS), ASIC `asic/gls/tb_gls_<DUT>.v` (testbench baseline bỏ kiểm tra hộp
+   trắng) trên `6_final.v` + model cell Yosys từ `.lib` tt (`asic_gls_prep` ở khối asic) + `asic/gls/cells_extra.v` (dlclkp viết
+   tay vì `.lib` mô tả bằng statetable), chạy Verilator ở khối chipyard (`asic_gls`); (3) STA sau route `asic/signoff.tcl` qua
+   `make run RUN_SCRIPT=` của ORFS: corner tt (đọc `6_final.spef`) và tt + OCV ±10 % (`set_timing_derate`); trên máy chỉ có
+   `.lib` tt nên chưa có corner ss/ff thật (script tự nhận nếu thêm `.lib` vào `platforms/sky130hd/lib`); antenna từ metrics
+   `detailedroute__antenna__violating__nets` = 0; (4) lint `verilator --lint-only -Wall` RTL sạch (gate ở `sim_build`),
+   methodology FPGA: Critical Warning/Error = 0 (`signoff_met`; baseline ghi lại, agent phải đạt).
+   Thử trong sandbox: GLS ASIC với netlist Yosys + `.lib` tt PASS cả hai demo; cố ý bỏ latch trong model dlclkp thì
+   testbench báo lỗi (xung clock giả); `tb_gls.v` FPGA chạy trên RTL bằng iverilog PASS.

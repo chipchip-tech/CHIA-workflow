@@ -21,11 +21,13 @@ STEPS = ("sim", "fpga", "asic")
 TITLE = {"sim": "Sim", "fpga": "FPGA", "asic": "ASIC"}
 TOOL = {"sim": "Verilator", "fpga": "Vivado 2025.1 · Arty A7-100T", "asic": "Yosys + OpenROAD (ORFS) · sky130hd"}
 # Task CHIA -> khối (resource) chạy nó.
-BLOCK = {"sim_build": "chipyard", "sim_run": "verilator", "fpga_sim": "vivado", "fpga": "vivado", "agent": "claude"}
-ASIC_STAGES = ["synth", "floorplan", "place", "cts", "route", "finish", "drc", "lvs"]
-SUBTASKS = {"sim": ["sim_build", "sim_run"], "fpga": ["fpga"], "asic": [f"asic_{s}" for s in ASIC_STAGES]}
+BLOCK = {"sim_build": "chipyard", "sim_run": "verilator", "fpga_sim": "vivado", "fpga": "vivado", "agent": "claude",
+         "asic_gls": "chipyard"}
+ASIC_STAGES = ["synth", "floorplan", "place", "cts", "route", "finish", "drc", "lvs", "sta", "gls_prep"]
+SUBTASKS = {"sim": ["sim_build", "sim_run"], "fpga": ["fpga"], "asic": [f"asic_{s}" for s in ASIC_STAGES] + ["asic_gls"]}
 LABEL = {"sim_build": "build (Verilator)", "sim_run": "chạy testbench", "fpga_sim": "xsim tb_fpga_top",
-         "fpga": "synth → bitstream", **{f"asic_{s}": s for s in ASIC_STAGES}}
+         "fpga": "synth → bitstream", **{f"asic_{s}": s for s in ASIC_STAGES},
+         "asic_sta": "STA nhiều corner", "asic_gls_prep": "model cell (Yosys)", "asic_gls": "mô phỏng gate-level"}
 
 # (nhãn, khoá, hệ số, hướng tốt: +1 lớn hơn tốt, -1 nhỏ hơn tốt, 0 trung tính, đơn vị ns: in hiệu tuyệt đối)
 ROWS = {
@@ -46,6 +48,8 @@ ROWS = {
              ("ICG", "n_icg", 1, 0, False), ("Buffer clock", "n_clkbuf", 1, 0, False),
              ("Setup WS (ns)", "setup_ws_ns", 1, +1, True), ("Hold WS (ns)", "hold_ws_ns", 1, +1, True),
              ("Công suất (mW)", "power_total_w", 1000, -1, False), ("DRC router", "drc_errors", 1, -1, False), ("DRC KLayout", "drc_klayout", 1, -1, False),
+             ("Antenna (net)", "antenna_nets", 1, -1, False), ("STA setup WS min (ns)", "sta_setup_ws_min_ns", 1, +1, True),
+             ("STA hold WS min (ns)", "sta_hold_ws_min_ns", 1, +1, True),
              ("LVS", "lvs", 1, 0, False)],
 }
 
@@ -244,7 +248,9 @@ def render_baseline(report: dict, final: bool) -> str:
         txt = {"bad": "dừng", "run": "đang chạy", "ok": "qua gate", "wait": "chờ"}[state]
         last = steps.get(subs[-1])
         if step == "asic" and last is not None:          # số liệu ở finish, DRC KLayout ở drc, LVS ở lvs
-            last = {**steps.get("asic_finish", {}), **steps.get("asic_drc", {}), **last}
+            last = {k: v for t in ("asic_finish", "asic_drc", "asic_lvs", "asic_sta", "asic_gls")
+                    for k, v in steps.get(t, {}).items() if k not in ("ok", "seconds", "stage", "rc", "log_tail")}
+            last["ok"] = all(steps.get(t, {}).get("ok") for t in subs)
         head = ""
         if last and last.get("ok"):
             head = {"sim": lambda r: f'PASS · coverage {r.get("fcov_hit")}/{r.get("fcov_total")} bin',

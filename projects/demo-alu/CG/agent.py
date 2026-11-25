@@ -329,12 +329,13 @@ def measure(step: str, cand: Path, params: dict, on_task=None) -> dict:
                                            f"{sub['fpga'].get('methodology_critical')} "
                                            f"{sub['fpga'].get('methodology')}\n") + sub["fpga"].get("log_tail", "")
     else:
-        for st in B.ASIC_STAGES:
-            if not run(f"asic_{st}", B.asic_stage.chia_remote(d, st)):
-                break
+        if all(run(f"asic_{st}", B.asic_stage.chia_remote(d, st)) for st in B.ASIC_STAGES):
+            plus = [f"+seed={params['seed']}", f"+cycles={params['cycles']}", f"+en_pct={params['en_pct']}"]
+            run("asic_gls", B.asic_gls.chia_remote(d, plus))
     failed = next((k for k, v in sub.items() if not v["ok"]), None)
     # ASIC: số liệu ở finish, kết quả LVS ở lvs; gộp lại. Các bước khác: task cuối.
-    last = {**sub.get("asic_finish", {}), **sub.get("asic_drc", {}), **sub.get("asic_lvs", {})} if step == "asic" else \
+    last = {k: v for t in ("asic_finish", "asic_drc", "asic_lvs", "asic_sta", "asic_gls")
+            for k, v in sub.get(t, {}).items()} if step == "asic" else \
         (list(sub.values())[-1] if sub else {})
     return {"ok": failed is None and bool(sub), "failed_at": failed, "metrics": metrics_of(step, last),
             "sub": {k: {kk: vv for kk, vv in v.items() if kk not in ("metrics_json", "cells")} for k, v in sub.items()}}
@@ -353,7 +354,8 @@ def metrics_of(step: str, r: dict) -> dict:
                                       "critical_warnings", "warning_ids", "bitstream")}
     return {k: r.get(k) for k in ("area_um2", "die_area_um2", "core_area_um2", "util_pct", "n_logic_cells", "n_flop",
                                   "n_icg", "n_clkbuf", "setup_ws_ns", "hold_ws_ns", "power_total_w", "drc_errors",
-                                  "drc_klayout", "lvs", "gds", "layout_png")}
+                                  "drc_klayout", "lvs", "antenna_nets", "sta_setup_ws_min_ns", "sta_hold_ws_min_ns",
+                                  "gls_result", "gds", "layout_png")}
 
 
 def _int(v):
@@ -502,8 +504,10 @@ Goal: reduce standard-cell area, die area and/or power (power is OpenSTA's defau
 in one of them without making the others worse, with timing still closed (setup and hold slack >= 0) and no DRC.
 Allowed file: asic/config.mk (ORFS variables such as CORE_UTILIZATION, PLACE_DENSITY, ABC_AREA, synthesis, repair and
 CTS options). Do NOT change PLATFORM, DESIGN_NAME, DESIGN_NICKNAME, VERILOG_FILES or SDC_FILE.
-Gate: GDS written, setup/hold slack >= 0, router DRC errors = 0, KLayout DRC sign-off clean (full sky130hd rule deck on
-the final GDS), LVS clean (KLayout: the layout GDS matches the CDL netlist).
+Gate: GDS written, setup/hold slack >= 0, router DRC errors = 0, no antenna violation, KLayout DRC sign-off clean (full
+sky130hd rule deck on the final GDS), LVS clean (KLayout: the layout GDS matches the CDL netlist), post-route STA with
+setup/hold slack >= 0 at every corner (tt and tt with +/-10 % OCV derate), and the gate-level simulation of the routed
+netlist (6_final.v with the sky130 cell models) passes the testbench.
 Too high a utilization fails placement or routing and the
 round is rejected.""",
 }
@@ -606,7 +610,8 @@ def latest_baseline(work: Path) -> Path | None:
 def base_metrics(rep: dict) -> dict:
     s = rep["steps"]
     return {"sim": metrics_of("sim", s.get("sim_run", {})), "fpga": metrics_of("fpga", s.get("fpga", {})),
-            "asic": metrics_of("asic", {**s.get("asic_finish", {}), **s.get("asic_drc", {}), **s.get("asic_lvs", {})})}
+            "asic": metrics_of("asic", {k: v for t in ("asic_finish", "asic_drc", "asic_lvs", "asic_sta", "asic_gls")
+                                        for k, v in s.get(t, {}).items()})}
 
 
 # ---------------------------------------------------------------------------
@@ -625,7 +630,9 @@ ROWS = {
     "asic": [("Diện tích cell (µm²)", "area_um2"), ("Diện tích die (µm²)", "die_area_um2"), ("Util (%)", "util_pct"),
              ("Số cell", "n_logic_cells"), ("ICG", "n_icg"), ("Buffer clock", "n_clkbuf"),
              ("Setup WS (ns)", "setup_ws_ns"), ("Hold WS (ns)", "hold_ws_ns"), ("Công suất (W)", "power_total_w"),
-             ("DRC router", "drc_errors"), ("DRC KLayout", "drc_klayout"), ("LVS", "lvs")],
+             ("DRC router", "drc_errors"), ("DRC KLayout", "drc_klayout"), ("LVS", "lvs"),
+             ("Antenna (net)", "antenna_nets"), ("STA setup WS min (ns)", "sta_setup_ws_min_ns"),
+             ("STA hold WS min (ns)", "sta_hold_ws_min_ns"), ("GLS", "gls_result")],
 }
 
 

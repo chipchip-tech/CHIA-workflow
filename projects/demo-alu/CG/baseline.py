@@ -266,7 +266,9 @@ def fpga_build(run_dir: str, timeout_s: int = 3600, power_cycles: int = 20000) -
 
 # ---------------- ASIC (ORFS) ----------------
 ORFS_FLOW = "/OpenROAD-flow-scripts/flow"            # trong khối asic (ORFS của host mount vào đây)
-ASIC_STAGES = ["synth", "floorplan", "place", "cts", "route", "finish", "drc", "lvs"]
+ASIC_STAGES = ["synth", "floorplan", "place", "cts", "route", "finish", "drc", "lvs", "sta", "gls_prep"]
+TT_LIB = f"{ORFS_FLOW}/platforms/sky130hd/lib/sky130_fd_sc_hd__tt_025C_1v80.lib"
+STA_DERATE = 0.10                                    # corner OCV: delay ±10 % (thiếu .lib ss/ff thật)
 
 
 def _orfs_paths(run_dir: str) -> dict:
@@ -297,6 +299,12 @@ def asic_stage(run_dir: str, stage: str, timeout_s: int = 3600) -> dict:
     """Một bước `make <stage>` của ORFS (worker asic đã nạp env.sh của ORFS). WORK_HOME trỏ vào thư mục run, nên
     ORFS trên host không bị ghi. Bước finish còn đọc số liệu và vẽ ảnh layout."""
     P = _orfs_paths(run_dir)
+    if stage in ("sta", "gls_prep"):                  # bước sign-off riêng của demo, không phải target make của ORFS
+        t0 = time.time()
+        res = (_sta_corners if stage == "sta" else _gls_prep)(P, timeout_s)
+        res.update({"stage": stage, "seconds": round(time.time() - t0, 2), "host": os.uname().nodename})
+        get_profiler().add_info({"step": f"asic_{stage}", "ok": res["ok"], "seconds": res["seconds"]})
+        return res
     cmd = ["make", "-C", ORFS_FLOW, f"DESIGN_CONFIG={P['config']}", f"WORK_HOME={P['work']}", stage]
     rc, sec, tail = _run_logged(cmd, ORFS_FLOW, timeout_s, os.path.join(P["asic"], "make", f"{stage}.log"))
     res = {"stage": stage, "rc": rc, "seconds": sec, "host": os.uname().nodename, "ok": rc == 0, "log_tail": tail}
@@ -349,6 +357,7 @@ def _asic_metrics(P: dict) -> dict:
         "stdcells": m(["finish__design__instance__count__stdcell"]),
         "power_total_w": m(["finish__power__total"], r"^Total\s+\S+\s+\S+\s+\S+\s+([\d.eE+-]+)"),
         "drc_errors": m(["detailedroute__route__drc_errors", "route__drc_errors"]),
+        "antenna_nets": m(["detailedroute__antenna__violating__nets", "finish__antenna__violating__nets"]),
         "clock_period_ns": m(["finish__timing__clock__period"]),
     }
     if isinstance(r["util_pct"], float) and r["util_pct"] <= 1.0 and "finish__design__instance__utilization" in metrics:
@@ -383,8 +392,79 @@ def _asic_metrics(P: dict) -> dict:
     r["reports"] = P["reports"]
     r["metrics_json"] = {k: v for k, v in metrics.items() if isinstance(v, (int, float, str))}
     r["gate_ok"] = (r["gds"] is not None and r["setup_ws_ns"] is not None and r["setup_ws_ns"] >= 0
-                    and (r["hold_ws_ns"] is None or r["hold_ws_ns"] >= 0) and not r["drc_errors"])
+                    and (r["hold_ws_ns"] is None or r["hold_ws_ns"] >= 0) and not r["drc_errors"]
+                    and r["antenna_nets"] == 0)       # antenna: metrics của ORFS phải có và bằng 0
     return r
+
+
+def _sta_corners(P: dict, timeout_s: int) -> dict:
+    """STA sau route ở nhiều corner bằng asic/signoff.tcl qua `make run` của ORFS: tt (thư viện của flow, phải khớp số
+    của bước finish), tt + OCV ±STA_DERATE, và mọi .lib ss/ff có trong platforms/sky130hd/lib (corner thật, nếu có).
+    Gate: setup và hold slack >= 0 ở mọi corner."""
+    corners = [("tt", None, 0.0), (f"tt_ocv{int(STA_DERATE * 100)}", None, STA_DERATE)]
+    for lib in sorted(Path(ORFS_FLOW, "platforms", "sky130hd", "lib").glob("sky130_fd_sc_hd__[sf][sf]_*.lib")):
+        corners.append((lib.stem.replace("sky130_fd_sc_hd__", ""), str(lib), 0.0))
+    out, logs, ok = {}, "", True
+    for name, lib, derate in corners:
+        cmd = ["make", "-C", ORFS_FLOW, f"DESIGN_CONFIG={P['config']}", f"WORK_HOME={P['work']}", "run",
+               f"RUN_SCRIPT={os.path.join(P['asic'], 'signoff.tcl')}", f"RUN_LOG_NAME_STEM=sta_{name}"]
+        if lib:
+            cmd.append(f"LIB_FILES={lib}")
+        os.environ["SIGNOFF_CORNER"], os.environ["SIGNOFF_DERATE"] = name, str(derate)
+        rc, _, tail = _run_logged(cmd, ORFS_FLOW, timeout_s, os.path.join(P["asic"], "make", f"sta_{name}.log"))
+        text = _read(os.path.join(P["asic"], "make", f"sta_{name}.log"))
+        m = re.search(r"^SIGNOFF corner=\S+ parasitics=(\S+) derate=\S+ libs=\d+ setup_ws=(\S+) setup_tns=(\S+) "
+                      r"hold_ws=(\S+) hold_tns=(\S+)", text, re.M)
+        f = lambda x: None if x in (None, "NA") else float(x)
+        c = {"lib": lib or "LIB_FILES của flow", "derate": derate, "rc": rc}
+        if m:
+            c.update({"parasitics": m.group(1), "setup_ws_ns": f(m.group(2)), "setup_tns_ns": f(m.group(3)),
+                      "hold_ws_ns": f(m.group(4)), "hold_tns_ns": f(m.group(5))})
+        if c.get("setup_ws_ns") is None:              # dự phòng: dòng in của report_worst_slack
+            ws = re.findall(r"^worst slack (?:max )?(-?[\d.]+)", text, re.M)
+            wh = re.findall(r"^worst slack min (-?[\d.]+)", text, re.M)
+            c["setup_ws_ns"] = float(ws[0]) if ws else None
+            c["hold_ws_ns"] = c.get("hold_ws_ns") or (float(wh[0]) if wh else None)
+        c["ok"] = rc == 0 and c.get("setup_ws_ns") is not None and c["setup_ws_ns"] >= 0 and \
+            c.get("hold_ws_ns") is not None and c["hold_ws_ns"] >= 0
+        ok &= c["ok"]
+        out[name] = c
+        if not c["ok"]:
+            logs += f"--- corner {name} ---\n" + tail[-1500:]
+    worst = lambda k: min((c[k] for c in out.values() if c.get(k) is not None), default=None)
+    return {"ok": ok, "sta_corners": out, "sta_setup_ws_min_ns": worst("setup_ws_ns"),
+            "sta_hold_ws_min_ns": worst("hold_ws_ns"), "sta_real_corners": [n for n, l, _ in corners if l],
+            "log_tail": logs}
+
+
+def _gls_prep(P: dict, timeout_s: int) -> dict:
+    """Chuẩn bị mô phỏng gate-level ASIC ở khối asic (có Yosys): model Verilog của cell sky130 từ .lib tt
+    (asic/gls/build/cells.v; cell ICG dlclkp dùng asic/gls/cells_extra.v viết tay) và bản chép netlist 6_final.v."""
+    b = os.path.join(P["asic"], "gls", "build")
+    os.makedirs(b, exist_ok=True)
+    net = os.path.join(P["results"], "6_final.v")
+    rc, out, _ = _sh(f"yosys -q -p 'read_liberty -ignore_miss_func {TT_LIB}; write_verilog -noattr cells.v' && "
+                     f"cp {net} 6_final.v", b, timeout=timeout_s)
+    ok = rc == 0 and os.path.isfile(os.path.join(b, "cells.v")) and os.path.isfile(os.path.join(b, "6_final.v"))
+    return {"ok": ok, "rc": rc, "log_tail": out[-2000:]}
+
+
+@ChiaFunction(resources={"chipyard": 1})
+def asic_gls(run_dir: str, plusargs: list[str], timeout_s: int = 1800) -> dict:
+    """Mô phỏng gate-level của netlist ASIC sau route (6_final.v) bằng Verilator của khối chipyard, với testbench
+    asic/gls/tb_gls_<DUT>.v (testbench baseline bỏ kiểm tra hộp trắng) và model cell từ _gls_prep. Gate: RESULT: PASS."""
+    g = os.path.join(run_dir, "asic", "gls")
+    b = os.path.join(g, "build")
+    rc, out, sec = _sh(f"verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style --top-module tb_{DUT} -Mdir obj "
+                       f"-o Vgls ../tb_gls_{DUT}.v 6_final.v cells.v ../cells_extra.v > build.log 2>&1 && "
+                       f"./obj/Vgls {' '.join(plusargs)} | tee sim.log", b, timeout=timeout_s)
+    m = RESULT_RE.search(out)
+    fields = dict(kv.split("=", 1) for kv in m.group(2).split()) if m else {}
+    res = {"ok": rc == 0 and bool(m) and m.group(1) == "PASS", "rc": rc, "seconds": sec, "host": os.uname().nodename,
+           "gls_result": m.group(0) if m else None, "gls_checked": fields.get("checked"),
+           "log_tail": out[-2000:] if m else _read(os.path.join(b, "build.log"))[-2000:]}
+    get_profiler().add_info({"step": "asic_gls", "ok": res["ok"], "seconds": sec})
+    return res
 
 
 def _drc_result(P: dict) -> dict:
@@ -590,6 +670,16 @@ def main() -> None:
             ok = done(f"asic_{stage}", r)
             if not ok:
                 break
+        if ok:                                        # mô phỏng gate-level netlist ASIC ở khối chipyard
+            S.set_live(report, task="asic_gls")
+            plus = [f"+seed={args.seed}", f"+cycles={args.cycles}", f"+en_pct={args.en_pct}"]
+            ok = done("asic_gls", get(asic_gls.chia_remote(str(run_dir), plus)))
+        if "asic_sta" in report["steps"]:
+            for n, c in report["steps"]["asic_sta"].get("sta_corners", {}).items():
+                print(f"[baseline {DEMO}] sta {n:10s} setup WS={c.get('setup_ws_ns')} hold WS={c.get('hold_ws_ns')} ns "
+                      f"({c.get('parasitics')}, {'đạt' if c.get('ok') else 'KHÔNG đạt'})", flush=True)
+        if "asic_gls" in report["steps"]:
+            print(f"[baseline {DEMO}] mô phỏng gate-level ASIC: {report['steps']['asic_gls'].get('gls_result')}", flush=True)
         if "asic_drc" in report["steps"]:
             d = report["steps"]["asic_drc"]
             print(f"[baseline {DEMO}] drc (KLayout): {d.get('drc_status')} {d.get('drc_klayout')} vi phạm "
@@ -601,7 +691,7 @@ def main() -> None:
             print(f"[baseline {DEMO}] asic: diện tích {r['area_um2']} um2 (util {r['util_pct']} %), "
                   f"{r['n_logic_cells']} cell (flop {r['n_flop']}, ICG {r['n_icg']}, buffer clock {r['n_clkbuf']}), "
                   f"setup WS={r['setup_ws_ns']} hold WS={r['hold_ws_ns']} ns, P={r['power_total_w']} W, "
-                  f"DRC={r['drc_errors']}", flush=True)
+                  f"DRC={r['drc_errors']}, antenna={r.get('antenna_nets')}", flush=True)
             print(f"[baseline {DEMO}] gds: {r['gds']}", flush=True)
             print(f"[baseline {DEMO}] layout: {r.get('layout_png')}", flush=True)
 
