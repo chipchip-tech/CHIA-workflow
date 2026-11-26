@@ -66,6 +66,11 @@ def mw(w) -> str:
     return f"{w * 1000:.3f}" if isinstance(w, (int, float)) else "?"
 
 
+def r3(v):
+    """Số ns in 3 chữ số thập phân (log gọn); giữ nguyên nếu không phải số."""
+    return f"{v:.3f}" if isinstance(v, (int, float)) and not isinstance(v, bool) else v
+
+
 def print_sim(tag: str, sub: dict) -> None:
     b = sub.get("sim_build", {})
     mode = b.get("lint_mode", "strict")
@@ -105,7 +110,7 @@ def print_fpga(tag: str, r: dict, fcfg: dict, inst: str | None) -> None:
 def print_asic(tag: str, sub: dict) -> None:
     for k, c in sub.items():
         if k.startswith("asic_sta_"):
-            print(f"{tag} sta {c.get('corner', k):10s} setup WS={c.get('setup_ws_ns')} hold WS={c.get('hold_ws_ns')} "
+            print(f"{tag} sta {c.get('corner', k):10s} setup WS={r3(c.get('setup_ws_ns'))} hold WS={r3(c.get('hold_ws_ns'))} "
                   f"ns ({c.get('parasitics')}, {'đạt' if c.get('ok') else 'KHÔNG đạt'})", flush=True)
     if "asic_gls" in sub:
         print(f"{tag} mô phỏng gate-level ASIC: {sub['asic_gls'].get('gls_result')}", flush=True)

@@ -20,8 +20,7 @@ def judge_log(out: str, cfg: dict) -> tuple[bool, str | None, dict]:
     if s.get("pass_patterns"):
         miss = [p for p in s["pass_patterns"] if not re.search(p, out, re.M)]
         bad = [m.group(0) for p in s.get("fail_patterns") or [] for m in [re.search(p, out, re.M)] if m]
-        n_pass = sum(len(re.findall(p, out, re.M)) for p in s["pass_patterns"])
-        txt = f"PASS ({n_pass} pass lines)" if not miss and not bad else \
+        txt = f"PASS ({len(s['pass_patterns'])}/{len(s['pass_patterns'])} pass patterns)" if not miss and not bad else \
             "FAIL: " + "; ".join(([f"missing /{p}/" for p in miss]) + [f"found {b!r}" for b in bad])
         return not miss and not bad, txt, {}
     m = RESULT_RE.search(out)
