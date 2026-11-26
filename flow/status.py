@@ -410,8 +410,11 @@ def timeline_html(report: dict, final: bool) -> str:
             if t.get("host"):
                 tip += f" @ {t['host']}"
             w = max((en - s) / span * 100, 0.25)
+            # thanh quá hẹp (task ngắn cạnh một task rất dài, ví dụ route 10 phút) thì không in chữ cụt như "li", "sy":
+            # tên và thời gian vẫn có khi rê chuột (title)
+            txt = e(lab) if w >= 2.5 or len(lab) * 0.55 <= w else ""
             bars[li].append(f'<div class="bar b-{t["state"]}" style="left:{pct(s)};width:{w:.3f}%" title="{e(tip)}">'
-                            f'{e(lab)}</div>')
+                            f'{txt}</div>')
         lane_html = "".join(f'<div class="lane">{"".join(x)}</div>' for x in bars)
         rows_.append(f'<div class="grow"><div class="gname">{e(b)}<span>{e(BLOCK_NOTE.get(b, ""))}</span></div>'
                      f'<div class="lanes">{lane_html}</div></div>')
