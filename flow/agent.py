@@ -55,6 +55,11 @@ NO_CHANGE = "no change by the agent"
 FPGA_FIXED = {"fpga_top.v", "tb_fpga_top.v", "tb_power.v", "tb_gls.v"}
 
 
+def fpga_fixed(cfg: dict) -> set[str]:
+    """File .v trong fpga/ agent không được sửa: vỏ board và testbench của nó (mode board), cộng fpga.fixed."""
+    return (FPGA_FIXED if cfg["fpga"].get("mode", "board") == "board" else set()) | set(cfg["fpga"]["fixed"])
+
+
 # ---------------------------------------------------------------------------
 # Khối claude: Claude Code chạy trong thư mục vòng
 # ---------------------------------------------------------------------------
@@ -182,11 +187,11 @@ class Scope:
 
     def allowed(self, step: str, rel: str) -> bool:
         if step == "sim":
-            return rel == f"sim/tb_{self.dut}.v"
+            return rel == self.cfg["sim"]["tb"]
         if step == "fpga":
             if rel in ("fpga/build.tcl", "fpga/sources.f"):
                 return True
-            fixed = {f"fpga/{x}" for x in FPGA_FIXED | set(self.cfg["fpga"]["fixed"])}
+            fixed = {f"fpga/{x}" for x in fpga_fixed(self.cfg)}
             return rel.startswith("fpga/") and rel.count("/") == 1 and rel.endswith(".v") and rel not in fixed
         if step == "asic":
             return rel == "asic/config.mk"
@@ -196,7 +201,8 @@ class Scope:
         """Kiểm tra nội dung của file được phép sửa (công bằng với baseline: cùng clock, part, design)."""
         bad = []
         if step == "sim":
-            tb = re.sub(r"//.*|/\*.*?\*/", "", (cand / f"sim/tb_{self.dut}.v").read_text(errors="replace"), flags=re.S)
+            tb = re.sub(r"//[^\n]*", "", re.sub(r"/\*.*?\*/", "", (cand / self.cfg["sim"]["tb"]).read_text(errors="replace"),
+                                                flags=re.S))
             names = [n for n in ("u_fcov", self.cfg["sim"].get("fcov_module")) if n]
             if re.search(r"\b(" + "|".join(map(re.escape, names)) + r")\b|\$coverage|coverage_(?:on|off)", tb):
                 bad.append("tb references or disables coverage (fcov is fixed)")
@@ -215,7 +221,7 @@ class Scope:
                 srcs = sources(str(cand / "fpga"))
             except OSError:
                 srcs = []
-            if f"{self.cfg['fpga']['top']}.v" not in srcs:
+            if self.cfg["fpga"].get("mode", "board") == "board" and f"{self.cfg['fpga']['top']}.v" not in srcs:
                 bad.append(f"sources.f lacks {self.cfg['fpga']['top']}.v")
             for s in srcs:
                 if not (cand / "fpga" / s).is_file():
@@ -344,6 +350,11 @@ def judge_sim(best: dict, new: dict) -> tuple[bool, str]:
         elif b > a:
             better.append(name)
     notes.append(f"checked {best.get('checked')} → {new.get('checked')}")
+    if best.get("fcov_hit") is None:                     # project không có functional coverage: chỉ line/toggle/branch
+        ok = not worse and bool(better)
+        why = ("more coverage: " + ", ".join(better)) if ok else (("coverage dropped: " + ", ".join(worse)) if worse
+                                                                    else "no new line/toggle/branch coverage")
+        return ok, why + " (" + "; ".join(notes) + ")"
     if new.get("fcov_hit") is None:
         return False, "FCOV line not found (" + "; ".join(notes) + ")"
     full = best.get("fcov_hit") is not None and best.get("fcov_hit") == best.get("fcov_total")
@@ -418,34 +429,28 @@ changed and why, what you expect to improve.
 """
 
 STEP_TEXT = {
-    "sim": """STEP: SIMULATION. Evaluate the self-checking testbench sim/tb_{dut}.v against the RTL: which behaviours and
+    "sim": """STEP: SIMULATION. Evaluate the self-checking testbench {tb} against the RTL: which behaviours and
 corner cases are not checked yet ({sim_hints}).
-Allowed file: sim/tb_{dut}.v only. Add stimulus and checks; keep the plusargs, the final `RESULT:` line format and the
-counters (`checked` must count every comparison). The RTL is the reference behaviour: a new check that fails means
-your round is rejected, so make sure the expected values follow the RTL exactly.
-Coverage is measured, not counted by you: sim/fcov_{dut}.sv (FIXED, bound into the DUT) defines the functional
-coverage bins of the specification and prints `FCOV: hit=<n> total=<m>` and `FCOV_MISS: <bins not hit>` (see sim.log
-in the context); Verilator also measures line/toggle/branch coverage of the DUT. Do not edit or reference
-fcov_{dut}.sv / u_fcov from the testbench (that round is rejected). Read fcov_{dut}.sv to see what each bin needs.
-Gate: lint of rtl/ clean, Verilator build + run with the same plusargs as baseline prints RESULT: PASS. The round is
-accepted only if no coverage kind of the DUT decreases and the number of functional bins hit increases (when every bin
-is already hit: only if line/toggle/branch coverage increases). Adding comparisons alone does not count.""",
+Allowed file: {tb} only. Add stimulus and checks; keep the plusargs and the way the testbench reports its result
+({result_rule}). The RTL is the reference behaviour: a new check that fails means your round is rejected, so make sure
+the expected values follow the RTL (or the reference algorithm) exactly.{gls_note}
+{cov_text}
+Gate: lint of the RTL (no new error), Verilator build + run with the same plusargs as baseline passes.""",
     "fpga": """STEP: FPGA. {fpga_tool}, part {part}, clock {mhz} MHz ({period} ns) from fpga/clock.xdc (FIXED).
 {fpga_wrapper}
 Read the reports of the current best build in agent/context/ (timing, utilization, clock utilization, methodology,
-warnings, power_saif.rpt). Power is measured with real activity: the routed netlist is simulated with fpga/tb_power.v and
+warnings, power_saif.rpt). Power is measured with real activity: the routed netlist is simulated with {power_tb} and
 the SAIF is read back (fpga/power_saif.tcl, FIXED); power.rpt is the old vector-less estimate, for reference only.
 Goal: if the current best version does not pass sign-off at this clock (WNS >= 0, WHS >= 0 and no Critical Warning or
 Error in report_methodology, e.g. TIMING-14 LUT on the clock tree), make it pass; otherwise improve
 WNS and/or dynamic power (SAIF) and/or LUT+FF. WNS and dynamic power must not get worse; LUT+FF may grow by at most 3 %.
 Allowed files: fpga/build.tcl (synthesis/implementation options and directives; do NOT add or change clocks or timing
-exceptions, do NOT change the part), fpga/sources.f (the Verilog files read by Vivado and by the functional simulation),
-new Verilog files fpga/<name>.v (for example an FPGA-specific implementation of a module from rtl/ with the SAME module
-name and ports; then replace the rtl/ file by yours in sources.f). Not allowed: rtl/, {fpga_fixed}, fpga/power_saif.tcl,
-fpga/synth_opts.tcl, the .xdc files. build.tcl must keep reading clock.xdc and sourcing synth_opts.tcl.
-Gate: fpga/tb_{top}.v in xsim with the UNISIM library prints RESULT: PASS {top}, the bitstream is written, the clock is
-the one of clock.xdc, WNS >= 0 and WHS >= 0, no Critical Warning/Error in report_methodology, SAIF power measured, and
-the gate-level simulation of the routed netlist (fpga/tb_gls.v, FIXED) passes.""",
+exceptions, do NOT change the part), fpga/sources.f (the Verilog files read by Vivado), new Verilog files
+fpga/<name>.v (for example an FPGA-specific implementation of a module from rtl/ with the SAME module name and ports;
+then replace the rtl/ file by yours in sources.f). Not allowed: rtl/, {fpga_fixed}fpga/power_saif.tcl,
+fpga/synth_opts.tcl, fpga/sim_cfg.tcl, the .xdc files. build.tcl must keep reading clock.xdc and sourcing synth_opts.tcl.
+Gate: {fpga_gate}WNS >= 0 and WHS >= 0 at the clock of clock.xdc, no Critical Warning/Error in report_methodology,
+SAIF power measured, and the gate-level simulation of the routed netlist ({gls_tb}) passes.""",
     "asic": """STEP: ASIC. OpenROAD-flow-scripts, {platform}, RTL -> GDS, clock from asic/constraint.sdc (fixed).
 Read the reports and metrics of the current best run in agent/context/ (ORFS final report, synthesis statistics,
 metrics JSON, ORFS variable reference if present).
@@ -462,15 +467,45 @@ the cell models) passes the testbench. Too high a utilization fails placement or
 
 def build_prompt(step: str, prj: Project, params: dict) -> str:
     c = prj.cfg
-    f = params.get("fpga") or {"period_ns": c["fpga"]["period_ns"]}
-    fmt = {**{k: v for k, v in f.items() if isinstance(v, (int, float, str))}, "dut": prj.dut,
-           "period": f"{f['period_ns']:g}", "mhz": f"{1000 / f['period_ns']:.4g}", "part": c["fpga"]["part"],
-           "fpga_tool": c["fpga"]["tool"], "top": c["fpga"]["top"], "platform": c["asic"]["platform"],
-           "fpga_fixed": ", ".join(f"fpga/{x}" for x in sorted(FPGA_FIXED | set(c["fpga"]["fixed"]))),
+    sim, fp = c["sim"], c["fpga"]
+    ooc = fp.get("mode", "board") == "ooc"
+    f = params.get("fpga") or {"period_ns": fp["period_ns"]}
+    if sim.get("fcov_module"):
+        cov = (f"Coverage is measured, not counted by you: sim/fcov_{prj.dut}.sv (FIXED, bound into the DUT) defines the "
+               "functional coverage bins of the specification and prints `FCOV: hit=<n> total=<m>` and `FCOV_MISS: <bins "
+               "not hit>` (see sim.log in the context); Verilator also measures line/toggle/branch coverage of the DUT. "
+               f"Do not edit or reference fcov_{prj.dut}.sv / u_fcov from the testbench (that round is rejected). The "
+               "round is accepted only if no coverage kind of the DUT decreases and the number of functional bins hit "
+               "increases (when every bin is already hit: only if line/toggle/branch coverage increases). Adding "
+               "comparisons alone does not count.")
+    else:
+        cov = ("Coverage is measured by Verilator: line, toggle and branch coverage of the RTL files (metrics.json in the "
+               "context). The round is accepted only if none of them decreases and at least one increases. Adding "
+               "comparisons that exercise nothing new does not count.")
+    rule = ("the final `RESULT: PASS|FAIL k=v ...` line and its counters; `checked` must count every comparison"
+            if not sim.get("pass_patterns") else
+            "every line matching " + ", ".join(f"/{p}/" for p in sim["pass_patterns"]) + " must appear and no line "
+            "matching " + (", ".join(f"/{p}/" for p in sim.get("fail_patterns") or []) or "a failure pattern"))
+    fixed = sorted(fpga_fixed(c))
+    fmt = {**{k: v for k, v in f.items() if isinstance(v, (int, float, str))}, "dut": prj.dut, "tb": sim["tb"],
+           "period": f"{f['period_ns']:g}", "mhz": f"{1000 / f['period_ns']:.4g}", "part": fp["part"],
+           "fpga_tool": fp["tool"], "top": fp["top"], "platform": c["asic"]["platform"],
+           "fpga_fixed": "".join(f"fpga/{x}, " for x in fixed),
            "fixed_vars": ", ".join(c["asic"]["fixed_vars"]), "sim_hints": c["agent"]["sim_hints"] or "...",
+           "cov_text": cov, "result_rule": rule,
+           "gls_note": (" The same testbench also runs on the synthesized netlists (gate-level simulation, with the macro "
+                        "GLS defined): do not read signals inside the DUT, only its ports, or the gate-level step fails."
+                        if c["generated"].get("gls_from_sim") else ""),
+           "power_tb": f"the simulation testbench {sim['tb']}" if ooc else "fpga/tb_power.v",
+           "gls_tb": f"the simulation testbench {sim['tb']}" if ooc else "fpga/tb_gls.v, FIXED",
+           "fpga_gate": ("the out-of-context implementation (synthesis, place, route; no board, no bitstream) completes, "
+                         if ooc else f"fpga/tb_{fp['top']}.v in xsim with the UNISIM library prints RESULT: PASS "
+                         f"{fp['top']}, the bitstream is written, "),
            "corners": "tt" + (f" and tt with +/-{c['asic']['ocv_derate'] * 100:g} % OCV derate"
                               if c["asic"].get("ocv_derate") else "") + ", plus real corner libraries if installed"}
-    fmt["fpga_wrapper"] = c["agent"]["fpga_wrapper"].format(**fmt)
+    wrapper = c["agent"]["fpga_wrapper"] or ("The block is implemented out of context (no board wrapper, I/O "
+                                             "unconstrained)." if ooc else "")
+    fmt["fpga_wrapper"] = wrapper.format(**fmt)
     return (COMMON.format(dut=prj.dut, description=c["agent"]["description"], variant=c["agent"]["variant"])
             + "\n" + STEP_TEXT[step].format(**fmt) + "\n")
 

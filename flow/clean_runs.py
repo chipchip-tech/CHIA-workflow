@@ -85,7 +85,8 @@ def main() -> None:
     root = Path(os.path.realpath(args.work_dir))
     if not root.is_dir():
         raise SystemExit(f"không có {root}")
-    projects = sorted({p.parent for pat in ("*/*/baseline-*", "*/*/agent-*", "*/*/sweep-*") for p in root.glob(pat)})
+    projects = sorted({p.parent for pat in ("*/*/baseline-*", "*/*/agent-*", "*/*/sweep-*",
+                                                                 "*/baseline-*", "*/agent-*", "*/sweep-*") for p in root.glob(pat)})
     if args.only:
         projects = [d for d in projects if d.relative_to(root).as_posix() == args.only.strip("/")]
     delete, slim = [], []

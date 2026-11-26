@@ -22,18 +22,29 @@ DEFAULTS = {
     "title": "",                        # một dòng mô tả, hiện trên trang status
     "steps": list(STEPS),               # bước bật: sim bắt buộc; fpga, asic tuỳ chọn
     "src_dirs": ["rtl", "sim", "fpga", "asic"],
+    "rtl": None,                        # file RTL theo thứ tự đọc (tính từ project); mặc định rtl/*.v, rtl/*.sv
+    "include_dirs": ["rtl"],            # thư mục `include (file .svh/.vh để ở đây)
+    "clocks": [{"port": "clk", "period_ns": 10.0}],   # clock đầu tiên là clock chính (FPGA, ASIC)
     "sim": {
-        "kind": "verilator",            # "verilator": testbench Verilog tự kiểm (sim/run_sim.sh); "chipyard": chưa làm
+        "kind": "verilator",            # "verilator": testbench Verilog/SV tự kiểm; "chipyard": chưa làm
+        "tb": None,                     # testbench (mặc định sim/tb_<dut>.v hoặc .sv); flow tự sinh sim/run_sim.sh nếu thiếu
+        "tb_top": None,                 # module top của testbench (mặc định tb_<dut>)
+        "dut_instance": None,           # tên instance của DUT trong testbench (mặc định tự dò)
         "plusargs": {},                 # tên -> giá trị mặc định, truyền vào testbench dạng +tên=giá trị
-        "fcov_module": None,            # module functional coverage (sim/fcov_<dut>.sv), testbench không được tham chiếu
-        "lint": True,                   # gate lint: verilator --lint-only -Wall trên rtl/ phải sạch
+        "pass_patterns": None,          # regex phải có trong log (mọi mẫu); None: dòng `RESULT: PASS`
+        "fail_patterns": [],            # regex không được có trong log
+        "fcov_module": None,            # module functional coverage (sim/fcov_<dut>.sv), tuỳ chọn
+        "lint": "errors",               # "strict": -Wall phải sạch; "errors": chỉ chặn lỗi, ghi số cảnh báo; False: tắt
+        "gls": True,                    # GLS ASIC/FPGA dùng testbench Sim (define GLS) nếu project không có tb GLS riêng
     },
     "fpga": {
         "tool": "Vivado",
+        "mode": None,                   # "board": project có fpga/build.tcl + vỏ board (bitstream); "ooc": out-of-context
+                                        # (flow tự sinh build.tcl, không bitstream). Mặc định theo việc có fpga/build.tcl
         "part": None,                   # BẮT BUỘC khi bật fpga, ví dụ xc7a100tcsg324-1
         "board": "",                    # chỉ để hiển thị
         "top": "fpga_top",
-        "period_ns": 10.0,              # mặc định của --fpga-period
+        "period_ns": None,              # mặc định của --fpga-period (None: chu kỳ của clock chính)
         "variants": {"rtl": {"replace": {}, "synth": [], "note": "RTL as is"}},
         "power_instance": None,         # instance dưới top để đọc công suất riêng (report_power -hierarchical)
         "opts": {},                     # tham số riêng của project, chuyển cho hàm móc fpga_synth_args
@@ -48,8 +59,12 @@ DEFAULTS = {
         "corner_glob": "sky130_fd_sc_hd__[sf][sf]_*.lib",   # .lib corner thật (nếu có trong platforms/<p>/lib)
         "ocv_derate": 0.10,             # corner tt + OCV ±x khi không có .lib corner thật
         "icg_cell": "dlclkp",           # đếm ICG trong netlist
-        "fixed_vars": ["PLATFORM", "DESIGN_NAME", "DESIGN_NICKNAME", "VERILOG_FILES", "SDC_FILE"],
+        "fixed_vars": ["PLATFORM", "DESIGN_NAME", "DESIGN_NICKNAME", "VERILOG_FILES", "VERILOG_INCLUDE_DIRS", "SDC_FILE"],
         "check_slots": 0.25,            # resource asic mỗi task kiểm tra sau finish (DRC, LVS, STA chạy song song)
+        "utilization": 40,              # config.mk tự sinh: CORE_UTILIZATION, PLACE_DENSITY, độ trễ I/O (tỉ lệ chu kỳ)
+        "place_density": 0.65,
+        "io_pct": 0.2,
+        "config_extra": [],             # dòng thêm vào config.mk tự sinh, ví dụ "export SYNTH_HDL_FRONTEND = slang"
     },
     "agent": {
         "description": "",              # mô tả thiết kế cho prompt
@@ -62,7 +77,7 @@ DEFAULTS = {
 # File của kit: chép vào thư mục chạy nếu project không có bản riêng (cùng đường dẫn tương đối).
 KIT_FILES = {
     "sim/sim_main.cpp": "sim/sim_main.cpp",
-    "fpga/power_saif.tcl": "fpga/power_saif.tcl",
+    "fpga/power_saif.tcl": "fpga/power_saif{ooc}.tcl",
     "asic/signoff.tcl": "asic/signoff.tcl",
     "asic/render_gds.py": "asic/render_gds.py",
     "asic/gls/cells_extra.v": "platforms/{platform}/cells_extra.v",
@@ -92,9 +107,38 @@ class Project:
         self.mod = mod
         c = _merge(DEFAULTS, mod.PROJECT)
         c["name"] = c["name"] or self.dir.name
-        c["group"] = c["group"] or self.dir.parent.name
+        # projects/<tên>/: nhóm là chính tên project; projects/<nhóm>/<tên>/ (như demo-alu): nhóm là thư mục cha.
+        c["group"] = c["group"] or (c["name"] if self.dir.parent.name == "projects" else self.dir.parent.name)
         self.cfg = c
+        self._resolve()
         self._check()
+
+    def _resolve(self) -> None:
+        """Điền các giá trị suy ra từ cây project (để task trên worker chỉ cần đọc cfg)."""
+        c, d = self.cfg, self.dir
+        s, f = c["sim"], c["fpga"]
+        if c["rtl"] is None:
+            c["rtl"] = sorted(p.relative_to(d).as_posix() for ext in ("v", "sv") for p in (d / "rtl").glob(f"*.{ext}"))
+        if s["lint"] is True:
+            s["lint"] = "strict"
+        s["tb_top"] = s["tb_top"] or f"tb_{c['dut']}"
+        if s["tb"] is None:
+            s["tb"] = next((f"sim/tb_{c['dut']}.{x}" for x in ("v", "sv") if (d / f"sim/tb_{c['dut']}.{x}").is_file()),
+                           f"sim/tb_{c['dut']}.v")
+        if s["dut_instance"] is None and (d / s["tb"]).is_file():
+            text = re.sub(r"//[^\n]*", "", re.sub(r"/\*.*?\*/", "", (d / s["tb"]).read_text(errors="replace"), flags=re.S))
+            m = re.search(rf"\b{re.escape(c['dut'])}\s+(?:#\s*\(.*?\)\s*)?(\w+)\s*\(", text, re.S)
+            s["dut_instance"] = m.group(1) if m else "dut"
+        if f["mode"] is None:
+            f["mode"] = "board" if (d / "fpga" / "build.tcl").is_file() else "ooc"
+        if f["mode"] == "ooc":
+            f["top"] = c["dut"]
+            f["power_instance"] = None
+        if f["period_ns"] is None:
+            f["period_ns"] = float(c["clocks"][0]["period_ns"])
+        c["generated"] = {"run_sim": not (d / "sim" / "run_sim.sh").is_file(),
+                          "asic_config": not (d / "asic" / "config.mk").is_file(),
+                          "gls_from_sim": not (d / "asic" / "gls" / f"tb_gls_{c['dut']}.v").is_file()}
 
     def _check(self) -> None:
         c, err = self.cfg, []
@@ -107,9 +151,15 @@ class Project:
             err.append(f"sim.kind={c['sim']['kind']!r} chưa hỗ trợ (mới có 'verilator'; 'chipyard' là việc sau)")
         if "fpga" in c["steps"] and not c["fpga"]["part"]:
             err.append("bật fpga nhưng thiếu fpga.part")
-        for d in c["src_dirs"]:
-            if not (self.dir / d).is_dir() and (d == "rtl" or d in c["steps"]):
-                err.append(f"thiếu thư mục {d}/")
+        if not c["rtl"]:
+            err.append("không có file RTL (rtl/*.v, rtl/*.sv hoặc trường rtl)")
+        for r in c["rtl"]:
+            if not (self.dir / r).is_file():
+                err.append(f"không có {r}")
+        if not (self.dir / c["sim"]["tb"]).is_file():
+            err.append(f"không có testbench {c['sim']['tb']} (đặt sim.tb)")
+        if c["fpga"]["mode"] not in ("board", "ooc"):
+            err.append("fpga.mode phải là board hoặc ooc")
         if err:
             raise SystemExit(f"LỖI khai báo project {self.dir}: " + "; ".join(err))
 
@@ -119,8 +169,15 @@ class Project:
     dut = property(lambda s: s.cfg["dut"])
     steps = property(lambda s: list(s.cfg["steps"]))
 
+    def rel_root(self) -> str:
+        """Thư mục các lần chạy, tính từ WORK_DIR: <group>/<name>, hoặc <name> khi nhóm trùng tên."""
+        return self.name if self.group == self.name else f"{self.group}/{self.name}"
+
     def run_root(self, work_dir: str | Path) -> Path:
-        return Path(work_dir) / self.group / self.name
+        return Path(work_dir) / self.rel_root()
+
+    def clock(self) -> dict:
+        return self.cfg["clocks"][0]
 
     def plusargs(self, overrides: dict | None = None) -> list[str]:
         vals = {**self.cfg["sim"]["plusargs"], **(overrides or {})}
@@ -134,15 +191,18 @@ class Project:
         for sub in self.cfg["src_dirs"]:
             if (src / sub).is_dir():
                 shutil.copytree(src / sub, dst / sub, ignore=shutil.ignore_patterns(*ignore))
+        ooc = "_ooc" if self.cfg["fpga"]["mode"] == "ooc" else ""
         for rel, kit_rel in KIT_FILES.items():
             top = rel.split("/")[0]
             if top not in self.cfg["src_dirs"] or (top != "sim" and top not in self.cfg["steps"]):
                 continue
             target = dst / rel
-            k = KIT / kit_rel.format(platform=self.cfg["asic"]["platform"])
+            k = KIT / kit_rel.format(platform=self.cfg["asic"]["platform"], ooc=ooc)
             if not target.exists() and k.is_file():
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(k, target)
+        from flow import generate
+        generate.fill(self, dst)
 
     def prepare_fpga(self, run_dir: str | Path, period_ns: float, variant: str, opts: dict | None = None) -> dict:
         """Ghi các file cố định của lần chạy vào <run_dir>/fpga: clock.xdc (chu kỳ), sources.f (biến thể),
@@ -154,7 +214,7 @@ class Project:
         fpga = Path(run_dir, "fpga")
         (fpga / "clock.xdc").write_text(
             "## clock.xdc - chu kỳ clock của bước FPGA (flow ghi theo --fpga-period; agent không sửa được).\n"
-            f"create_clock -name sys_clk -period {period_ns:.3f} [get_ports clk]\n")
+            f"create_clock -name sys_clk -period {period_ns:.3f} [get_ports {self.clock()['port']}]\n")
         srcs = (fpga / "sources.f").read_text().splitlines()
         (fpga / "sources.f").write_text("\n".join(v.get("replace", {}).get(ln.strip(), ln) for ln in srcs) + "\n")
         o = {**f["opts"], **(opts or {})}

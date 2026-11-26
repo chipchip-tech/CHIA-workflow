@@ -410,3 +410,15 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    (Verilator 5.020: NoCG 51/55 bin, 6 272 phép, trùng máy thật), FPGA/ASIC bằng task giả: 5 task kiểm tra song song
    5,9 s thay vì 13,5 s; LVS giả trượt thì dừng đúng `asic_lvs`; agent giả 2 vòng × 3 bước, `rtl/` bị hoàn lại. 
    Chạy thật trên cluster 26/11/2026: baseline NoCG `baseline-20261126-195910`, CG `baseline-20261126-200321`, `KẾT QUẢ: OK`, mọi số (coverage, LUT/FF, WNS, SAIF, diện tích, STA, GLS) trùng từng số với baseline 25/11; 5 task kiểm tra sau finish chạy song song 5,2 s (cộng lần lượt 12,3–12,5 s), `make drc`/`lvs`/`run` cùng `WORK_HOME` không xung đột. Agent `--rounds 1`: NoCG `agent-20261126-200829` nhận sim-r1 (51 → 55 bin), asic-r1 (die 7 534 → 5 460 µm², trùng lần trước), loại fpga-r1; CG `agent-20261126-201926` nhận sim-r1 (51 → 57, branch 8 → 10), fpga-r1 (sign-off, WNS 0 → 0,524, methodology 2 → 0), asic-r1 (cell 2 975 → 2 930, die 6 926 → 5 018 µm², công suất −6,4 %).
+   **Khối RTL "cắm là chạy" (26/11/2026, viết xong, mới thử trong sandbox):** người dùng muốn project mới (khối RTL, sau
+   này SoC) đưa vào flow là chạy, ít sửa; chốt: làm A (khối RTL) rồi B (SoC Chipyard), thử A bằng lõi ASCON của người
+   dùng, FPGA không vỏ board chạy out-of-context, lint chỉ chặn lỗi, GLS dùng testbench Sim (sửa nhỏ RTL/tb), clock 10 ns.
+   Thêm `flow/generate.py` (sinh `run_sim.sh`, `config.mk`, SDC, `build.tcl`/`sources.f`/`sim_cfg.tcl` out-of-context),
+   `flow/kit/fpga/power_saif_ooc.tcl` (xsim testbench Sim trên `funcsim.v`, `-onfinish stop`, SAIF + log làm GLS),
+   `flow/new.py`; `project.py` có `rtl`, `include_dirs`, `clocks`, `sim.tb/tb_top/dut_instance/pass_patterns/
+   fail_patterns`, `sim.lint`, `fpga.mode`, `asic.utilization/...`; luật Sim của agent khi không có fcov dùng
+   line/toggle/branch; prompt theo chế độ. Sửa lỗi cũ: lọc comment testbench bằng `re.S` nuốt cả phần sau `//` đầu
+   tiên. `projects/ascon-core/`: lõi + tb người dùng gửi, tách `ascon_pkg.svh`, tb chờ `auth_valid` thay vì đọc `fsm_q`,
+   `bdo_type` là `logic [3:0]`. Sandbox: Sim ASCON PASS (line 25/35, toggle 3007/3438, branch 44/60, lint 12 cảnh báo),
+   tb chạy được kiểu GLS; ALU vẫn 51/55 và 51/57 bin, lint sạch. Yosys 0.33 sandbox lỗi cú pháp ở `logic [UROL-1:0][63:0]
+   x0_aff1, ...`; chạy `sv2v` tải về bị sandbox chặn.

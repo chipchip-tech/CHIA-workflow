@@ -20,7 +20,7 @@ from flow import tasks_sim as S
 BLOCK = {"sim_build": "chipyard", "sim_run": "verilator", "fpga_sim": "vivado", "fpga": "vivado",
          "asic_gls": "chipyard", "agent": "claude"}
 LABEL = {"sim_build": "lint + build", "sim_run": "run testbench", "fpga_sim": "xsim (early check)",
-         "fpga": "synth → bitstream · power · GLS", "asic_synth": "synth", "asic_floorplan": "floorplan",
+         "fpga": "Vivado impl · power · GLS", "asic_synth": "synth", "asic_floorplan": "floorplan",
          "asic_place": "place", "asic_cts": "CTS", "asic_route": "route", "asic_finish": "finish (GDS)",
          "asic_drc": "DRC (KLayout)", "asic_lvs": "LVS (KLayout)", "asic_gls": "gate-level sim", "agent": "Claude"}
 
@@ -90,7 +90,7 @@ def run_sim(R: Runner, d: str, cfg: dict, plus: list[str], round_: str | None = 
 def run_fpga(R: Runner, d: str, cfg: dict, power_cycles: int, early_sim: bool = False,
              round_: str | None = None) -> dict:
     sub = {}
-    if early_sim:
+    if early_sim and cfg["fpga"].get("mode", "board") == "board":     # ooc: không có tb_<top> của vỏ board
         sub["fpga_sim"] = R.run("fpga_sim", F.fpga_sim.chia_remote(d, cfg), round_)
         if not sub["fpga_sim"]["ok"]:
             return sub

@@ -32,7 +32,7 @@ def base(dut: str) -> dict:
         "group": "demo-alu",
         "dut": dut,
         "steps": ["sim", "fpga", "asic"],
-        "sim": {"plusargs": {"seed": 1, "cycles": 20000, "en_pct": 30}, "fcov_module": "fcov_alu"},
+        "sim": {"plusargs": {"seed": 1, "cycles": 20000, "en_pct": 30}, "fcov_module": "fcov_alu", "lint": "strict"},
         "fpga": {"part": "xc7a100tcsg324-1", "board": "Arty A7-100T", "top": "fpga_top", "period_ns": 10.0,
                  "power_instance": "u_alu", "opts": {"en_pct": 30}, "sweep_opt": "en_pct",
                  "fixed": ["golden_sig.py"]},

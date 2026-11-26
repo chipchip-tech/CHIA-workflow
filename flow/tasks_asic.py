@@ -18,7 +18,7 @@ from pathlib import Path
 
 from chia.base.ChiaFunction import ChiaFunction
 
-from flow.common import RESULT_RE, num, profile_info, read, run_logged, sh, timed
+from flow.common import judge_log, num, profile_info, read, run_logged, sh, timed
 
 ORFS_FLOW = "/OpenROAD-flow-scripts/flow"            # trong khối asic (ORFS của host mount vào đây)
 MAKE_STAGES = ["synth", "floorplan", "place", "cts", "route", "finish"]
@@ -253,16 +253,21 @@ def asic_sta(run_dir: str, cfg: dict, corner: list, timeout_s: int = 3600) -> di
 @timed
 def asic_gls(run_dir: str, cfg: dict, plusargs: list[str], timeout_s: int = 1800) -> dict:
     """Mô phỏng gate-level của netlist ASIC sau route bằng Verilator của khối chipyard. Gate: RESULT: PASS."""
-    dut = cfg["dut"]
+    dut, s = cfg["dut"], cfg["sim"]
     b = os.path.join(run_dir, "asic", "gls", "build")
-    rc, out, sec = sh(f"verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style --top-module tb_{dut} -Mdir obj "
-                      f"-o Vgls ../tb_gls_{dut}.v 6_final.v cells.v ../cells_extra.v > build.log 2>&1 && "
+    own = os.path.join(run_dir, "asic", "gls", f"tb_gls_{dut}.v")
+    # Testbench GLS riêng của project nếu có (demo ALU), không thì chính testbench của Sim với define GLS.
+    tb = own if os.path.isfile(own) else os.path.join(run_dir, s["tb"])
+    top = f"tb_{dut}" if os.path.isfile(own) else s["tb_top"]
+    inc = "" if os.path.isfile(own) else "--timescale 1ns/1ps -DGLS " + " ".join(
+        f"-I{os.path.join(run_dir, d)}" for d in cfg.get("include_dirs", []))
+    rc, out, sec = sh(f"verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style {inc} "
+                      f"--top-module {top} -Mdir obj -o Vgls {tb} 6_final.v cells.v ../cells_extra.v > build.log 2>&1 && "
                       f"./obj/Vgls {' '.join(plusargs)} | tee sim.log", b, timeout=timeout_s)
-    m = RESULT_RE.search(out)
-    fields = dict(kv.split("=", 1) for kv in m.group(2).split() if "=" in kv) if m else {}
-    res = {"ok": rc == 0 and bool(m) and m.group(1) == "PASS", "rc": rc, "seconds": sec,
-           "gls_result": m.group(0) if m else None, "gls_checked": fields.get("checked"),
-           "log_tail": out[-2000:] if m else read(os.path.join(b, "build.log"))[-2000:]}
+    passed, result, fields = judge_log(out, cfg)
+    res = {"ok": rc == 0 and passed, "rc": rc, "seconds": sec, "gls_result": result,
+           "gls_checked": fields.get("checked"),
+           "log_tail": out[-2000:] if result else read(os.path.join(b, "build.log"))[-2000:]}
     profile_info(step="asic_gls", ok=res["ok"], seconds=sec)
     return res
 

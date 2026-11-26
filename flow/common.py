@@ -13,6 +13,22 @@ from pathlib import Path
 RESULT_RE = re.compile(r"^RESULT: (PASS|FAIL) (.*)$", re.M)
 
 
+def judge_log(out: str, cfg: dict) -> tuple[bool, str | None, dict]:
+    """PASS/FAIL của testbench theo khai báo project: sim.pass_patterns (mọi mẫu phải có) và sim.fail_patterns (không
+    mẫu nào được có); không khai báo thì theo dòng `RESULT: PASS|FAIL k=v ...`. Trả (đạt, dòng kết quả, các cặp k=v)."""
+    s = cfg["sim"]
+    if s.get("pass_patterns"):
+        miss = [p for p in s["pass_patterns"] if not re.search(p, out, re.M)]
+        bad = [m.group(0) for p in s.get("fail_patterns") or [] for m in [re.search(p, out, re.M)] if m]
+        n_pass = sum(len(re.findall(p, out, re.M)) for p in s["pass_patterns"])
+        txt = f"PASS ({n_pass} pass lines)" if not miss and not bad else \
+            "FAIL: " + "; ".join(([f"missing /{p}/" for p in miss]) + [f"found {b!r}" for b in bad])
+        return not miss and not bad, txt, {}
+    m = RESULT_RE.search(out)
+    fields = dict(kv.split("=", 1) for kv in m.group(2).split() if "=" in kv) if m else {}
+    return bool(m) and m.group(1) == "PASS", (m.group(0) if m else None), fields
+
+
 def sh(cmd: str, cwd: str, env: dict | None = None, timeout: int = 1800) -> tuple[int, str, float]:
     """Chạy lệnh bash, trả (mã thoát, stdout+stderr, số giây)."""
     t0 = time.time()

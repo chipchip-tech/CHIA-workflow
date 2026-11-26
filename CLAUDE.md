@@ -247,6 +247,12 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   baseline|agent|sweep ...` (job submit từ gốc repo, `python -m flow.<pha> --project ...`). Sau `finish`, DRC ‖ LVS ‖ STA mỗi
   corner (0,25 slot `asic`) ‖ GLS chạy cùng lúc. Trang status tiếng Anh. Script cũ `run_demo.py`, `status_page.py`,
   `baseline.py`, `agent.py` trong demo đã xoá (còn trong lịch sử git); baseline cũ không dùng làm mốc cho agent mới được.
+  **Khối RTL "cắm là chạy" (26/11/2026, mới thử trong sandbox):** project chỉ cần RTL + testbench tự kiểm + `project.py`
+  (`flow/new.py` tạo khung); flow sinh `run_sim.sh`, `config.mk`, SDC, Vivado out-of-context (`fpga.mode = "ooc"`, không
+  bitstream; SAIF + GLS bằng testbench Sim trên netlist); PASS/FAIL theo regex; lint mặc định `errors` (ALU giữ `strict`).
+  Project thử: `projects/ascon-core/` (lõi Ascon-AEAD128 giải mã của người dùng; tách `ascon_pkg.svh`, tb chỉ dùng cổng).
+  Yosys 0.33 trong sandbox không đọc được mảng packed nhiều chiều của ASCON; Yosys 0.68 của ORFS chưa kiểm. Phần B (SoC
+  Chipyard) làm sau.
   **Từ 24/11/2026 chia 2 session trên nhánh `demo`:** session làm việc (củng cố demo ALU, sửa mọi thứ trừ `report/`) và
   session slide (chỉ sửa `projects/demo-alu/report/**`, brief ở `report/REPORT.md`, 4 deck tiếng Anh `report/guides/`).
   Báo cáo cũ `ProgressReport_22-11.pptx`, `Draft_22-11-2026.docx` đã xoá khỏi nhánh (còn trong lịch sử git).

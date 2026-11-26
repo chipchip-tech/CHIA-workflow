@@ -13,7 +13,7 @@ from pathlib import Path
 
 from chia.base.ChiaFunction import ChiaFunction
 
-from flow.common import RESULT_RE, profile_info, read, sh, timed
+from flow.common import judge_log, profile_info, read, sh, timed
 
 FCOV_RE = re.compile(r"^FCOV: hit=(\d+) total=(\d+)", re.M)
 FCOV_MISS_RE = re.compile(r"^FCOV_MISS: (.*)$", re.M)
@@ -26,17 +26,19 @@ def sim_build(run_dir: str, cfg: dict) -> dict:
     cố định) phải sạch với -Wall (cảnh báo nào cũng là lỗi)."""
     sim = os.path.join(run_dir, "sim")
     _, ver, _ = sh("verilator --version", sim)
-    lint_ok, lint_msgs, lout = True, [], ""
-    if cfg["sim"].get("lint", True):
-        rtl = " ".join(sorted(str(p) for p in Path(run_dir, "rtl").glob("*.v")))
-        lrc, lout, _ = sh(f"verilator --lint-only -Wall --top-module {cfg['dut']} {rtl}", sim)
+    lint_ok, lint_msgs, lout, mode = True, [], "", cfg["sim"].get("lint", "strict")
+    if mode:
+        rtl = " ".join(str(Path(run_dir, r)) for r in cfg["rtl"] if not r.endswith((".svh", ".vh")))
+        inc = " ".join(f"-I{Path(run_dir, d)}" for d in cfg.get("include_dirs", []))
+        lrc, lout, _ = sh(f"verilator --lint-only -Wall -Wno-fatal {inc} --top-module {cfg['dut']} {rtl}", sim)
         lint_msgs = re.findall(r"^%(?:Warning|Error)-?(\w*)", lout, re.M)
-        lint_ok = lrc == 0 and not lint_msgs
+        errors = re.findall(r"^%Error", lout, re.M)
+        lint_ok = (lrc == 0 and not lint_msgs) if mode == "strict" else not errors
     rc, out, sec = sh("./run_sim.sh", sim, {"BUILD_ONLY": "1"})
     ok = lint_ok and rc == 0 and os.path.isfile(os.path.join(sim, "build", "obj", "Vtb"))
     profile_info(step="sim_build", ok=ok, seconds=sec)
-    tail = out[-2000:] if lint_ok else "LINT (verilator --lint-only -Wall) không sạch:\n" + lout[-2000:]
-    return {"ok": ok, "rc": rc, "seconds": sec, "verilator": ver.strip(), "lint_ok": lint_ok,
+    tail = out[-2000:] if lint_ok else f"LINT (verilator --lint-only -Wall, chế độ {mode}) không đạt:\n" + lout[-2000:]
+    return {"ok": ok, "rc": rc, "seconds": sec, "verilator": ver.strip(), "lint_ok": lint_ok, "lint_mode": mode,
             "lint_warnings": len(lint_msgs), "lint_ids": sorted(set(lint_msgs)), "log_tail": tail}
 
 
@@ -61,17 +63,16 @@ def sim_run(run_dir: str, cfg: dict, plusargs: list[str]) -> dict:
     """Chạy binary đã build. Gate: dòng RESULT là PASS, không có FCOV_ERROR (kiểm tra âm của fcov)."""
     sim = os.path.join(run_dir, "sim")
     rc, out, sec = sh("./run_sim.sh " + " ".join(plusargs), sim, {"SKIP_BUILD": "1"})
-    m = RESULT_RE.search(out)
-    fields = dict(kv.split("=", 1) for kv in m.group(2).split() if "=" in kv) if m else {}
-    vcd = os.path.join(sim, "build", "wave.vcd")
-    res = {"ok": rc == 0 and bool(m) and m.group(1) == "PASS", "rc": rc, "seconds": sec,
-           "result": m.group(0) if m else None, **fields,
+    passed, result, fields = judge_log(out, cfg)
+    vcds = sorted(Path(sim, "build").glob("*.vcd"))
+    vcd = str(vcds[0]) if vcds else os.path.join(sim, "build", "wave.vcd")
+    res = {"ok": rc == 0 and passed, "rc": rc, "seconds": sec, "result": result, **fields,
            "vcd": vcd if os.path.isfile(vcd) else None, "vcd_bytes": os.path.getsize(vcd) if os.path.isfile(vcd) else 0,
            "log_tail": out[-2000:]}
     fc, miss = FCOV_RE.search(out), FCOV_MISS_RE.search(out)
     res["fcov_hit"], res["fcov_total"] = (int(fc.group(1)), int(fc.group(2))) if fc else (None, None)
     res["fcov_miss"] = [] if not miss or miss.group(1).strip() == "-" else miss.group(1).strip().split(",")
-    dut_files = {p.name for p in Path(run_dir, "rtl").glob("*.v")}
+    dut_files = {Path(r).name for r in cfg["rtl"]}
     cov = struct_cov(read(os.path.join(sim, "build", "coverage.dat")), dut_files)
     for kind in ("line", "toggle", "branch"):
         res[f"cov_{kind}"], res[f"cov_{kind}_total"] = cov.get(kind, [None, None])

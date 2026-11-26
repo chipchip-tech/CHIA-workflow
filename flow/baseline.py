@@ -68,12 +68,15 @@ def mw(w) -> str:
 
 def print_sim(tag: str, sub: dict) -> None:
     b = sub.get("sim_build", {})
-    print(f"{tag} lint (verilator -Wall): {'sạch' if b.get('lint_ok') else 'KHÔNG sạch'} "
-          f"({b.get('lint_warnings')} cảnh báo {b.get('lint_ids') or ''})", flush=True)
+    mode = b.get("lint_mode", "strict")
+    state = ("sạch" if mode == "strict" else "không lỗi (cảnh báo chỉ ghi lại)") if b.get("lint_ok") else "KHÔNG đạt"
+    print(f"{tag} lint (verilator -Wall, {mode}): {state}, {b.get('lint_warnings')} cảnh báo {b.get('lint_ids') or ''}",
+          flush=True)
     r = sub.get("sim_run")
     if r and r.get("ok"):
         print(f"{tag} {r['result']}", flush=True)
-        print(f"{tag} coverage: functional {r['fcov_hit']}/{r['fcov_total']} bin, line {r['cov_line']}/"
+        fc = f"functional {r['fcov_hit']}/{r['fcov_total']} bin, " if r.get("fcov_hit") is not None else ""
+        print(f"{tag} coverage: {fc}line {r['cov_line']}/"
               f"{r['cov_line_total']}, toggle {r['cov_toggle']}/{r['cov_toggle_total']}, branch {r['cov_branch']}/"
               f"{r['cov_branch_total']} (DUT); thiếu: {', '.join(r['fcov_miss']) or '-'}", flush=True)
         print(f"{tag} waveform: {r['vcd']} ({r['vcd_bytes']} byte)", flush=True)

@@ -151,7 +151,7 @@ def main() -> None:
             extra = ["--run-id", rid] + extra
         root.mkdir(parents=True, exist_ok=True)
         srv, port = serve(root, args.port)
-        url = f"http://127.0.0.1:{port}/{prj.group}/{prj.name}/{rid}/status.html"
+        url = f"http://127.0.0.1:{port}/{prj.rel_root()}/{rid}/status.html"
         print(f"[run] trang trạng thái: {url}", flush=True)
         if not args.no_open:
             open_browser(url, args.browser)

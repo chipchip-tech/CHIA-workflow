@@ -236,17 +236,29 @@ def gates(step: str, steps: dict, running: set[str], baseline: bool) -> list[tup
     out = []
     if step == "sim":
         b, r = steps.get("sim_build") or {}, steps.get("sim_run") or {}
-        out.append(("Lint clean (-Wall)", *st("sim_build", lambda x: x.get("lint_ok"), "0 warnings",
-                                               f"{b.get('lint_warnings')} warnings")))
-        out.append(("Testbench PASS", *st("sim_run", lambda x: x.get("ok"), f"{fmt(r.get('checked'))} checks", "FAIL")))
-        out.append(("Functional coverage", *st("sim_run", lambda x: True if x.get("fcov_hit") is not None else None,
-                                                f"{r.get('fcov_hit')}/{r.get('fcov_total')} bins")))
+        strict = b.get("lint_mode", "strict") == "strict"
+        out.append(("Lint clean (-Wall)" if strict else "Lint, no errors (-Wall)",
+                    *st("sim_build", lambda x: x.get("lint_ok"), f"{b.get('lint_warnings')} warnings",
+                        f"{b.get('lint_warnings')} warnings")))
+        out.append(("Testbench PASS", *st("sim_run", lambda x: x.get("ok"),
+                                          f"{fmt(r.get('checked'))} checks" if r.get("checked") else "PASS", "FAIL")))
+        if r.get("fcov_hit") is not None or "sim_run" not in steps:
+            out.append(("Functional coverage", *st("sim_run", lambda x: True if x.get("fcov_hit") is not None else None,
+                                                    f"{r.get('fcov_hit')}/{r.get('fcov_total')} bins")))
+        else:
+            out.append(("Code coverage (line · branch)", *st("sim_run", lambda x: True if x.get("cov_line") is not None
+                                                              else None, f"{r.get('cov_line')}/{r.get('cov_line_total')}"
+                                                              f" · {r.get('cov_branch')}/{r.get('cov_branch_total')}")))
     elif step == "fpga":
         f = steps.get("fpga") or {}
         if "fpga_sim" in steps or "fpga_sim" in running:
             out.append(("Early xsim check", *st("fpga_sim", lambda x: x.get("ok"), "PASS", "FAIL")))
-        out.append(("Bitstream", *st("fpga", lambda x: x.get("bitstream") is not None, f"{fmt(f.get('clock_mhz'))} MHz",
-                                     "missing")))
+        if (f.get("mode") or "board") == "ooc":
+            out.append(("Place & route (out-of-context)", *st("fpga", lambda x: x.get("routed"),
+                                                               f"{fmt(f.get('clock_mhz'))} MHz", "failed")))
+        else:
+            out.append(("Bitstream", *st("fpga", lambda x: x.get("bitstream") is not None,
+                                         f"{fmt(f.get('clock_mhz'))} MHz", "missing")))
         out.append(("Timing (WNS, WHS ≥ 0)", *st("fpga", lambda x: x.get("timing_met"),
                                                   f"WNS {fmt(f.get('wns_ns'))} ns", f"WNS {fmt(f.get('wns_ns'))} ns",
                                                   warn=baseline)))
@@ -445,8 +457,11 @@ def render_baseline(report: dict, final: bool) -> str:
         m = (steps.get("sim_run") if step == "sim" else steps.get("fpga") if step == "fpga" else steps.get("asic")) or {}
         head = ""
         if step == "sim" and m.get("ok"):
-            head = f'coverage {m.get("fcov_hit")}/{m.get("fcov_total")} bins · {fmt(m.get("checked"))} checks'
-        elif step == "fpga" and m.get("bitstream"):
+            head = (f'coverage {m.get("fcov_hit")}/{m.get("fcov_total")} bins · {fmt(m.get("checked"))} checks'
+                    if m.get("fcov_hit") is not None else
+                    f'line {m.get("cov_line")}/{m.get("cov_line_total")} · branch {m.get("cov_branch")}/'
+                    f'{m.get("cov_branch_total")}')
+        elif step == "fpga" and (m.get("bitstream") or m.get("routed")):
             head = f'{fmt(m.get("clock_mhz"))} MHz · {fmt(m.get("lut"))} LUT · {fmt(m.get("power_dynamic_w"), 1000)} mW'
         elif step == "asic" and steps.get("asic_finish", {}).get("gds"):
             fin = steps["asic_finish"]
@@ -506,6 +521,9 @@ def headline_agent(step: str, base: dict, best: dict) -> str:
         except (KeyError, TypeError, ValueError, ZeroDivisionError):
             return "?"
     if step == "sim":
+        if base.get("fcov_hit") is None:
+            return (f'line {base.get("cov_line")} → {best.get("cov_line")} · branch {base.get("cov_branch")} → '
+                    f'{best.get("cov_branch")} · toggle {base.get("cov_toggle")} → {best.get("cov_toggle")}')
         return f'coverage {base.get("fcov_hit")}/{base.get("fcov_total")} → {best.get("fcov_hit")}/{best.get("fcov_total")} bins'
     if step == "fpga":
         return f'WNS {fmt(base.get("wns_ns"))} → {fmt(best.get("wns_ns"))} ns · dyn. power {pct("power_dynamic_w")}'

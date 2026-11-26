@@ -17,7 +17,7 @@ from pathlib import Path
 
 from chia.base.ChiaFunction import ChiaFunction
 
-from flow.common import num, profile_info, read, sh, timed
+from flow.common import judge_log, num, profile_info, read, sh, timed
 
 
 def sources(fpga_dir: str) -> list[str]:
@@ -83,6 +83,7 @@ def fpga_sim(run_dir: str, cfg: dict) -> dict:
 @timed
 def fpga_build(run_dir: str, cfg: dict, timeout_s: int = 3600, power_cycles: int = 20000) -> dict:
     f = cfg["fpga"]
+    ooc = f.get("mode") == "ooc"
     fpga = os.path.join(run_dir, "fpga")
     os.makedirs(os.path.join(fpga, "out"), exist_ok=True)
     _, ver, _ = sh("vivado -version | head -1", fpga)
@@ -93,8 +94,10 @@ def fpga_build(run_dir: str, cfg: dict, timeout_s: int = 3600, power_cycles: int
     bit = os.path.join(fpga, "out", f"{f['top']}.bit")
     period = period_of(fpga)
     clk = re.search(r"^\s*sys_clk\s+\{[^}]*\}\s+([\d.]+)\s+([\d.]+)", tim, re.M)
+    dcp = os.path.join(fpga, "out", "post_route.dcp")
     res = {
-        "vivado": ver.strip(), "rc": rc, "seconds": sec, "bitstream": bit if os.path.isfile(bit) else None,
+        "vivado": ver.strip(), "rc": rc, "seconds": sec, "mode": f.get("mode", "board"),
+        "bitstream": bit if os.path.isfile(bit) else None, "routed": os.path.isfile(dcp),
         **timing(tim),
         "clock_period_ns": period, "clock_mhz": round(1000 / period, 2) if period else None,
         "clock_in_report_ns": float(clk.group(1)) if clk else None,
@@ -114,7 +117,7 @@ def fpga_build(run_dir: str, cfg: dict, timeout_s: int = 3600, power_cycles: int
         abs(res["clock_in_report_ns"] - period) < 1e-3
     tail = out[-3000:]
     power_ok = power_cycles <= 0
-    if res["bitstream"] and power_cycles > 0:
+    if res["routed"] and power_cycles > 0:
         prc, pout, psec = sh(f"vivado -mode batch -nojournal -log out/power.log -source power_saif.tcl "
                              f"-tclargs {period} {power_cycles}", fpga, timeout=timeout_s)
         p = power(rep("power_saif.rpt"), f.get("power_instance"))
@@ -135,7 +138,14 @@ def fpga_build(run_dir: str, cfg: dict, timeout_s: int = 3600, power_cycles: int
     res["methodology_critical"] = sum(v["count"] for v in meth.values() if v["severity"] in ("Critical Warning", "Error"))
     res["signoff_met"] = res["timing_met"] and res["methodology_critical"] == 0
     gls_ok = power_cycles <= 0
-    if power_ok and power_cycles > 0 and os.path.isfile(os.path.join(fpga, "out", "funcsim.v")):
+    if ooc and power_ok and power_cycles > 0:
+        # Out-of-context: lần mô phỏng ghi SAIF chính là testbench của Sim chạy trên netlist sau route (GLS).
+        glog = read(os.path.join(fpga, "xsim_pw", "xsim.log"))
+        gls_ok, gres, _ = judge_log(glog, cfg)
+        res.update({"gls_ok": gls_ok, "gls_result": gres})
+        if not gls_ok:
+            tail += "\n--- mô phỏng gate-level (testbench Sim trên netlist sau route) ---\n" + glog[-2000:]
+    elif power_ok and power_cycles > 0 and os.path.isfile(os.path.join(fpga, "out", "funcsim.v")):
         ps = int(round(period * 1000 / 2)) * 2
         grc, gout, gsec = sh("rm -rf xsim_gls && mkdir xsim_gls && cd xsim_gls && "
                              f"xvlog -nolog -d TB_PERIOD_PS={ps} ../out/funcsim.v ../tb_gls.v "
@@ -150,7 +160,8 @@ def fpga_build(run_dir: str, cfg: dict, timeout_s: int = 3600, power_cycles: int
             tail += "\n--- mô phỏng gate-level (tb_gls.v) ---\n" + gout[-2000:]
     elif power_cycles > 0:
         res["gls_ok"] = False
-    res["ok"] = rc == 0 and res["bitstream"] is not None and wns is not None and clock_ok and power_ok and gls_ok
+    built = res["routed"] if ooc else res["bitstream"] is not None
+    res["ok"] = rc == 0 and built and wns is not None and clock_ok and power_ok and gls_ok
     if not clock_ok:
         tail += f"\nclock trong timing.rpt ({res['clock_in_report_ns']}) khác clock.xdc ({period})"
     res["log_tail"] = tail
