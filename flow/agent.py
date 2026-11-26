@@ -342,14 +342,16 @@ def judge_sim(best: dict, new: dict) -> tuple[bool, str]:
     for name, k in kinds:
         a, b = best.get(k), new.get(k)
         if a is None or b is None:
-            notes.append(f"{name} ?")
+            if not (name == "functional" and best.get("fcov_hit") is None):   # project không có fcov: không ghi
+                notes.append(f"{name} ?")
             continue
         notes.append(f"{name} {a} → {b}")
         if b < a:
             worse.append(name)
         elif b > a:
             better.append(name)
-    notes.append(f"checked {best.get('checked')} → {new.get('checked')}")
+    if best.get("checked") is not None or new.get("checked") is not None:
+        notes.append(f"checked {best.get('checked')} → {new.get('checked')}")
     if best.get("fcov_hit") is None:                     # project không có functional coverage: chỉ line/toggle/branch
         ok = not worse and bool(better)
         why = ("more coverage: " + ", ".join(better)) if ok else (("coverage dropped: " + ", ".join(worse)) if worse
@@ -390,7 +392,8 @@ def judge(step: str, best: dict, new: dict) -> tuple[bool, str]:
         else:
             a, b = best.get(key), new.get(key)
         if a is None or b is None:
-            notes.append(f"{name} ?")
+            if not (name == "functional" and best.get("fcov_hit") is None):   # project không có fcov: không ghi
+                notes.append(f"{name} ?")
             continue
         delta = (b - a) * sign                                   # > 0: tốt hơn
         if isinstance(tol, tuple):                               # ("pct", x): được kém x, tốt hơn khi vượt 0,5
