@@ -422,3 +422,8 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    `bdo_type` là `logic [3:0]`. Sandbox: Sim ASCON PASS (line 25/35, toggle 3007/3438, branch 44/60, lint 12 cảnh báo),
    tb chạy được kiểu GLS; ALU vẫn 51/55 và 51/57 bin, lint sạch. Yosys 0.33 sandbox lỗi cú pháp ở `logic [UROL-1:0][63:0]
    x0_aff1, ...`; chạy `sv2v` tải về bị sandbox chặn.
+   Chạy lại NoCG baseline trên flow đã sửa (26/11/2026 21:01): trùng từng số. ASCON baseline: bước FPGA chạy gần 10 phút
+   (người dùng báo, nghi race khi `start` và `key_valid` bật cùng lúc). Nguyên nhân nhiều khả năng: `glbl.v` của Vivado giữ
+   GSR 100 ns đầu, testbench ASCON bắt đầu nạp khóa ở ~45 ns nên mọi flop của netlist bỏ qua, `send_key` chờ `key_ready`
+   mãi. Sửa trong flow (không đụng tb): `power_saif_ooc.tcl` dùng bản chép `glbl.v` với `ROC_WIDTH` 1 ns; xsim và GLS
+   Verilator có `timeout` (`sim.gls_timeout_s`, mặc định 600 s, in `GLS_TIMEOUT`).

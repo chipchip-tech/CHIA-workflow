@@ -36,6 +36,7 @@ DEFAULTS = {
         "fcov_module": None,            # module functional coverage (sim/fcov_<dut>.sv), tuỳ chọn
         "lint": "errors",               # "strict": -Wall phải sạch; "errors": chỉ chặn lỗi, ghi số cảnh báo; False: tắt
         "gls": True,                    # GLS ASIC/FPGA dùng testbench Sim (define GLS) nếu project không có tb GLS riêng
+        "gls_timeout_s": 600,           # GLS treo trên netlist (ví dụ testbench chờ mãi) thì dừng sau ngần này giây
     },
     "fpga": {
         "tool": "Vivado",

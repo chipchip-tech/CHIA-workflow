@@ -263,7 +263,9 @@ def asic_gls(run_dir: str, cfg: dict, plusargs: list[str], timeout_s: int = 1800
         f"-I{os.path.join(run_dir, d)}" for d in cfg.get("include_dirs", []))
     rc, out, sec = sh(f"verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style {inc} "
                       f"--top-module {top} -Mdir obj -o Vgls {tb} 6_final.v cells.v ../cells_extra.v > build.log 2>&1 && "
-                      f"./obj/Vgls {' '.join(plusargs)} | tee sim.log", b, timeout=timeout_s)
+                      f"timeout {cfg['sim'].get('gls_timeout_s', 600)} ./obj/Vgls {' '.join(plusargs)} | tee sim.log; "
+                      "rc=${PIPESTATUS[0]}; [ $rc = 124 ] && echo 'GLS_TIMEOUT: mô phỏng netlist quá giờ (testbench treo?)'; "
+                      "exit $rc", b, timeout=timeout_s)
     passed, result, fields = judge_log(out, cfg)
     res = {"ok": rc == 0 and passed, "rc": rc, "seconds": sec, "gls_result": result,
            "gls_checked": fields.get("checked"),

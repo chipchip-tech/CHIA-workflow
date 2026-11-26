@@ -126,6 +126,7 @@ set tb_top   {s['tb_top']}
 set dut_inst {s['dut_instance']}
 set tb_files {{{tbfiles}}}
 set inc_dirs {{{incs}}}
+set sim_timeout {s.get('gls_timeout_s', 600)}
 """
     return {"sources.f": "# sources.f - SINH BỞI flow/generate.py: RTL đọc vào Vivado (đường dẫn tính từ fpga/).\n" + srcs + "\n",
             "build.tcl": build, "sim_cfg.tcl": simcfg}
