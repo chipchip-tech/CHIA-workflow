@@ -129,7 +129,7 @@ chia job submit --working-dir . -- python baseline.py
 | Phần | Trạng thái |
 |---|---|
 | Pha 1 baseline, cả hai demo, đủ Sim/FPGA/ASIC (ra GDS) | **Chạy thật**, chạy lại lần hai ra đúng từng số (công cụ tất định) |
-| Pha 2 `agent.py --rounds 2`, cả hai demo | **Chạy thật**, `KẾT QUẢ: OK` |
+| Pha 2 `agent.py --rounds 2`, cả hai demo | **Chạy thật**, `KẾT QUẢ: OK` (lần cuối 26/11/2026 với đủ gate sign-off: `agent-20261126-082319`, `agent-20261126-083923`) |
 | Pha 3 `compare.md` | **Chạy thật** (sinh bởi `agent.py`) |
 | `status_page.py`: `python status_page.py <run_dir>` dựng lại trang từ lần chạy agent thật | Chạy thật (ra file `status.html`); chưa xem trang trên trình duyệt |
 | `status_page.py` ghi trực tiếp trong lúc job chạy | Chỉ thử trong sandbox với dữ liệu giả |
@@ -138,6 +138,6 @@ chia job submit --working-dir . -- python baseline.py
 | Bước LVS (`asic_lvs`, thêm 24/11/2026) | **Chạy thật 25/11/2026** (`baseline.py --stages asic`), cả hai demo LVS khớp. Thử cố ý làm sai (đổi dây CLK/D một flop trong CDL): LVS báo không khớp, đúng. Agent ASIC với gate LVS: chưa chạy |
 | Coverage ở bước Sim (thêm 25/11/2026) | **Chạy thật 25/11/2026** (`baseline.py --stages sim`, Verilator 5.022 của Chipyard): NoCG 51/55 bin, CG 51/57 bin, trùng số trong sandbox. Agent với luật mới: chạy thật 25/11 (`REPORT.md` mục 9) |
 | FPGA: clock chung, biến thể BUFGCE/CE, công suất SAIF, `fpga_sweep.py` (thêm 25/11/2026) | **Chạy thật 25/11/2026** `baseline.py --stages fpga` ở 100 MHz (NoCG, CG `bufgce`, CG `ce`) có SAIF; `fpga_sweep.py fmax` và `power --period 5.3` chạy thật cả hai demo |
-| Gate sign-off (lint, DRC KLayout, antenna, STA corner, GLS FPGA và ASIC, methodology FPGA; thêm 25/11/2026) | **Chạy thật 25/11/2026** baseline đủ 3 bước cả hai demo (`baseline-20261125-230550`, `baseline-20261125-231121`), `KẾT QUẢ: OK`. Chỉ có corner tt (chưa có `.lib` ss/ff). Agent với các gate này: chưa chạy |
+| Gate sign-off (lint, DRC KLayout, antenna, STA corner, GLS FPGA và ASIC, methodology FPGA; thêm 25/11/2026) | **Chạy thật 25/11/2026** baseline đủ 3 bước cả hai demo (`baseline-20261125-230550`, `baseline-20261125-231121`), `KẾT QUẢ: OK`. Chỉ có corner tt (chưa có `.lib` ss/ff). Agent `--rounds 2` với các gate này: **chạy thật 26/11/2026**, cả hai `KẾT QUẢ: OK` (`REPORT.md` mục 9) |
 | Nạp bitstream xuống board | Chưa (chưa có board) |
 | Slide, video | Chưa làm |

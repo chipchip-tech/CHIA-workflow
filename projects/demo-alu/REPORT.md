@@ -190,6 +190,7 @@ Cả bốn vòng được nhận, và vẫn PASS trên Verilator thật.
    - Sim: số lần kiểm tra tăng 86–241 lần.
    - ASIC: die −20 đến −38 %, công suất CG −6,8 %.
    - FPGA: không vòng nào được nhận, nhưng CG r1 cho thấy agent tìm đúng vấn đề clock gating trên FPGA.
+   - Cập nhật 26/11 (luật mới, đủ gate sign-off): CG fpga-r1 được nhận, P động −21,3 %; xem mục 9.
 3. **Gate và đo trên công cụ thật là phần không thể thiếu.** Dự đoán của agent không thay được đo thật: ở FPGA, cả bốn
    dự đoán về tài nguyên hoặc timing đều sai một phần. Vòng lặp "đề xuất → đo → nhận/loại" của CHIA giữ cho kết quả
    cuối không bao giờ kém baseline.
@@ -364,3 +365,35 @@ Baseline mốc: NoCG `baseline-20261125-214405`, CG `baseline-20261125-214709` (
 - **Lỗi lộ ra khi chạy và đã sửa:** vòng đầu của agent chép cây project (`clock.xdc` mặc định 10 ns) thay cho bản đã chuẩn
   bị như baseline (5,3 ns), và gate chỉ so clock với chính vòng đó. Giờ agent dựng nguồn theo tham số của baseline và gate
   so chu kỳ với baseline.
+
+### Agent với đủ gate sign-off (chạy thật 26/11/2026)
+
+Lần chạy cuối, một mạch liền cho mỗi demo, mọi vòng phải qua toàn bộ gate ở trên (lint, methodology, GLS FPGA và ASIC,
+DRC KLayout, antenna, LVS, STA hai corner). Baseline mốc: NoCG `baseline-20261125-230550`, CG `baseline-20261125-231121`.
+Lần agent: NoCG `agent-20261126-082319` (khoảng 16 phút), CG `agent-20261126-083923`. Cả hai `KẾT QUẢ: OK`.
+
+| | NoCG: baseline → agent | CG: baseline → agent |
+|---|---|---|
+| **Sim**: bin functional | 51/55 → **55/55** (r1) | 51/57 → **57/57**, branch 8 → 10 (r1) |
+| **Sim**: số phép so sánh | 6 272 → 6 277 | 6 272 → 6 305 |
+| **FPGA** 188,7 MHz | 2 vòng LOẠI, giữ baseline | r1 NHẬN, r2 LOẠI |
+| FPGA: WNS (ns) | 0,588 | 0 → 0,524 |
+| FPGA: methodology critical | 0 | 2 (TIMING-14) → **0** |
+| FPGA: P động SAIF (mW) | 5,575 | 6,602 → 5,193 (**−21,3 %**) |
+| FPGA: LUT+FF | 280 | 283 → 287 (+1,4 %) |
+| **ASIC**: diện tích cell (µm²) | 3 077,95 → 3 042,92 (−1,1 %) | 2 975,35 → 2 865,25 (−3,7 %) |
+| **ASIC**: diện tích die (µm²) | 7 534,24 → 5 459,73 (−27,5 %) | 6 925,57 → 5 504,90 (−20,5 %) |
+| **ASIC**: công suất (mW) | 0,368 → 0,362 (−1,4 %) | 0,324 → 0,257 (**−20,4 %**) |
+| Vòng được nhận | sim-r1, asic-r1 | sim-r1, fpga-r1, asic-r1 |
+
+- **Sim:** như lần 25/11, agent phủ đủ bin ngay vòng 1, vòng 2 không còn gì để sửa.
+- **FPGA CG r1** (`build.tcl`, `sources.f`) được nhận theo luật "bản tốt nhất chưa đạt sign-off": baseline latch có
+  TIMING-14, vòng này hết critical và WNS dương. Nó cũng thắng theo luật thường (P động −21,3 %, LUT+FF +1,4 % < 3 %).
+  Số đo gần trùng lần 25/11 (5,174 mW) và biến thể `ce` viết tay (5,19 mW). r2 (`build.tcl`) tăng WNS nhưng P động
+  +12 %, bị loại.
+- **FPGA NoCG:** r1 (`build.tcl`) gần như không đổi gì; r2 (`NoCG_alu_fpga.v`) giảm 7 ô LUT+FF nhưng WNS 0,588 →
+  0,456 ns, bị loại. Giống lần 25/11.
+- **ASIC NoCG:** r1 trùng từng số với lần 25/11. r2 giảm cell −4,2 % và die −15 % nhưng công suất +1,5 % (ngưỡng 1 %), bị loại.
+- **ASIC CG:** r1 được nhận. r2 giảm die −16 % nhưng công suất +2,7 %, bị loại. Lần 25/11 CG nhận cả 2 vòng ASIC
+  (cell −8,2 %, die −27,5 %); lần này agent đề xuất khác. Công cụ tất định, agent thì không.
+- Mọi vòng ASIC, kể cả vòng bị loại, đều qua gate sign-off: lý do loại chỉ là "kém hơn", không có vòng nào hỏng gate.

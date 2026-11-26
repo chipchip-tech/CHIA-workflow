@@ -389,3 +389,10 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    6,477/0,447, CG 6,789/0,350 ns; GLS ASIC PASS (6 272/6 272) cả hai. Số khác trùng baseline 21:44/21:47. Lần đầu STA lỗi
    `wrong # args: should be "load_design design_file"` (ORFS bản mới chỉ nhận `.odb`); `signoff.tcl` giờ dò số tham số, đọc
    lại SDC nếu không có clock, và gate đòi clocks > 0. `clean_runs.py` dọn thêm `sweep-*` và thư mục mô phỏng mới.
+   **Agent `--rounds 2` với đủ gate (26/11/2026, chạy thật, `KẾT QUẢ: OK` cả hai):** NoCG `agent-20261126-082319`: sim-r1
+   NHẬN (51 → 55 bin, checked 6 277), sim-r2 không đổi; fpga-r1 LOẠI (`build.tcl`, không tốt hơn), fpga-r2 LOẠI
+   (`NoCG_alu_fpga.v`, LUT+FF 280 → 273 nhưng WNS 0,588 → 0,456); asic-r1 NHẬN (cell 3 042,92, die 5 459,73, P 0,362 mW, trùng
+   25/11), asic-r2 LOẠI (công suất +1,5 %). CG `agent-20261126-083923`: sim-r1 NHẬN (51 → 57, branch 8 → 10, checked 6 305);
+   fpga-r1 NHẬN (`build.tcl` + `sources.f`, WNS 0 → 0,524, methodology critical 2 → 0, P động 6,602 → 5,193 mW, LUT+FF
+   283 → 287), fpga-r2 LOẠI (P động 5,825 mW); asic-r1 NHẬN (cell 2 865,25, die 5 504,90, P 0,257 mW), asic-r2 LOẠI (công
+   suất +2,7 %). Mọi vòng qua gate sign-off; lý do loại đều là "kém hơn".

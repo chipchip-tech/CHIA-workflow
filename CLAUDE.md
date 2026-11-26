@@ -240,7 +240,8 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   **Gate sign-off (25/11/2026, chạy thật baseline cả hai demo, `KẾT QUẢ: OK`):** lint `-Wall`, methodology Vivado (CG latch
   báo TIMING-14, chỉ cảnh báo ở baseline), GLS FPGA (`tb_gls.v`) và ASIC (`6_final.v` + model cell Yosys, khối chipyard), DRC
   KLayout, antenna, STA sau route `asic/signoff.tcl` (tt và tt + OCV ±10 %, chỉ có `.lib` tt). ORFS trên máy: `load_design`
-  chỉ nhận `.odb`. Chưa: agent với các gate này.
+  chỉ nhận `.odb`. **Agent `--rounds 2` với đủ gate chạy thật 26/11/2026** (`KẾT QUẢ: OK` cả hai): NoCG nhận sim-r1, asic-r1
+  (die −27,5 %); CG nhận sim-r1, fpga-r1 (methodology 2 → 0, P động −21,3 %), asic-r1 (die −20,5 %, công suất −20,4 %).
   **Từ 24/11/2026 chia 2 session trên nhánh `demo`:** session làm việc (củng cố demo ALU, sửa mọi thứ trừ `report/`) và
   session slide (chỉ sửa `projects/demo-alu/report/**`, brief ở `report/REPORT.md`, 4 deck tiếng Anh `report/guides/`).
   Báo cáo cũ `ProgressReport_22-11.pptx`, `Draft_22-11-2026.docx` đã xoá khỏi nhánh (còn trong lịch sử git).
