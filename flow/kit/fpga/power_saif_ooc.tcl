@@ -15,9 +15,6 @@ write_verilog -mode funcsim -force out/funcsim.v
 file delete -force xsim_pw
 file mkdir xsim_pw
 set fh [open xsim_pw/saif.tcl w]
-# Ép GSR của glbl về 0 ngay từ đầu (xem ghi chú ở dưới về glbl.v): chắc chắn hơn bản chép glbl.v, vì xelab có thể lấy
-# glbl dựng sẵn trong thư viện unisims_ver (đo thật 26/11/2026: bản chép có ROC_WIDTH 1 ns nhưng GSR vẫn bật tới 100 ns).
-puts $fh "if {\[catch {add_force /glbl/GSR_int 0} e\]} { puts \"GSR_FORCE: không ép được (\$e)\" } else { puts \"GSR_FORCE: /glbl/GSR_int = 0\" }"
 puts $fh "open_saif act.saif"
 puts $fh "set objs \[get_objects -quiet -r /$tb_top/$dut_inst/*\]"
 puts $fh "if {\[llength \$objs\] == 0} { puts \"SAIF_SCOPE: không thấy /$tb_top/$dut_inst\"; set objs \[get_objects -quiet -r /*\] }"
@@ -32,14 +29,7 @@ set incs {}
 foreach d $inc_dirs { lappend incs -i $d }
 if {![info exists sim_timeout]} { set sim_timeout 600 }
 cd xsim_pw
-# glbl.v của Vivado giữ GSR (reset toàn cục của mọi flop trong netlist) 100 ns đầu mô phỏng: testbench viết cho RTL
-# thường bắt đầu sớm hơn thế, mọi ghi vào flop bị bỏ qua và testbench chờ mãi. Bản chép ở đây rút GSR còn 1 ns; reset
-# của chính thiết kế vẫn do testbench điều khiển như khi chạy RTL.
-set fh [open $::env(XILINX_VIVADO)/data/verilog/src/glbl.v]; set g [read $fh]; close $fh
-set n [regsub {parameter\s+ROC_WIDTH\s*=\s*[0-9]+\s*;} $g {parameter ROC_WIDTH = 1000;} g]
-puts "GLBL_ROC_WIDTH: [expr {$n ? {1000 ps} : {giữ nguyên (không thấy tham số)}}]"
-set fh [open glbl.v w]; puts -nonewline $fh $g; close $fh
-exec xvlog -nolog -sv -d GLS {*}$incs ../out/funcsim.v {*}$tb_files glbl.v >& xvlog.log
+exec xvlog -nolog -sv -d GLS {*}$incs ../out/funcsim.v {*}$tb_files $::env(XILINX_VIVADO)/data/verilog/src/glbl.v >& xvlog.log
 exec xelab -nolog -debug typical --timescale 1ns/1ps -L unisims_ver -s tbp $tb_top glbl >& xelab.log
 # -onfinish stop: $finish của testbench dừng mô phỏng nhưng vẫn chạy tiếp close_saif. timeout: testbench treo trên
 # netlist thì dừng sau sim_timeout giây (thay vì giữ khối vivado tới khi job hết giờ).

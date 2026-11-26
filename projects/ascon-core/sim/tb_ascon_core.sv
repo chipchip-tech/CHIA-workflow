@@ -269,7 +269,10 @@ module tb_ascon_core;
     start     = 1'b0;
     bdo_ready = 1'b0;
 
-    #20;
+    // Hold reset for 100 ns before any stimulus: in gate-level simulation of the Xilinx netlist every flop is held in
+    // global reset (GSR, glbl.v) for the first 100 ns, as in Vivado-generated testbenches ("wait 100 ns for global
+    // reset to finish"). Same behaviour in RTL simulation, only later.
+    #100;
     rst = 1'b1;
     #20;
 

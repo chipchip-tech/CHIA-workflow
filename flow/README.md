@@ -18,6 +18,8 @@ Rồi điền `agent.description`, `agent.sim_hints` trong `project.py` và ch�
 Testbench phải theo hai quy ước để GLS (mô phỏng netlist ASIC sau route và FPGA sau route) dùng lại được nó:
 chỉ dùng **cổng** của DUT (không `u_dut.tín_hiệu_trong`; `new.py` cảnh báo khi thấy), và tự `include file khai báo
 kiểu/hằng nó dùng (khai báo đặt trong file RTL sẽ không còn khi chạy trên netlist). Khi GLS, flow define `GLS`.
+Testbench giữ reset ít nhất 100 ns rồi mới đưa kích thích: netlist Xilinx giữ mọi flop trong reset toàn cục (GSR,
+`glbl.v` của Vivado, flow không sửa) 100 ns đầu, theo quy trình mô phỏng gate-level chuẩn của Vivado.
 Project có vỏ board riêng (`fpga/build.tcl`, `fpga_top.v`, tb riêng) thì chạy chế độ `board` như demo ALU.
 **SoC Chipyard: chưa hỗ trợ** (phần B, làm sau).
 

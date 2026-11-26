@@ -429,5 +429,6 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    Verilator có `timeout` (`sim.gls_timeout_s`, mặc định 600 s, in `GLS_TIMEOUT`). Đo thật trên máy (xsim snapshot của lần
    chạy, `get_value` mỗi 5 ns): bản chép `glbl.v` có `ROC_WIDTH = 1000` nhưng GSR vẫn bằng 1 tới 100 ns (xelab lấy `glbl` của
    thư viện dựng sẵn); `key_ready` luôn 0, `start`/`key_valid` bật ở 40 ns: xác nhận treo do GSR, không phải race của tb
-   (bản RTL đổi flop sang gán blocking em dùng để thử race là mô hình sai: lõi tự chạy đua). Sửa: saif.tcl `add_force
-   /glbl/GSR_int 0` trước khi chạy.
+   (bản RTL đổi flop sang gán blocking em dùng để thử race là mô hình sai: lõi tự chạy đua). Người dùng yêu cầu chạy đúng quy trình, không tự chế: gỡ cả bản chép `glbl.v` lẫn `add_force`; dùng
+   `glbl.v` gốc của Vivado; testbench ASCON giữ reset 100 ns (thay 20 ns) trước kích thích, như testbench Vivado tự sinh. Giữ
+   `timeout` cho mô phỏng netlist. Quy ước này ghi vào `flow/README.md` và `flow/new.py`.

@@ -13,6 +13,8 @@ Logic không đổi. Hai sửa nhỏ để testbench chạy được trên netli
   `ascon_core.sv` và testbench `include file này;
 - testbench: `wait_for_idle` chờ cổng `auth_valid` thay vì đọc `u_ascon_core.fsm_q`; `bdo_type` khai báo `logic [3:0]`
   (cổng của netlist là vector thường).
+- testbench giữ reset 100 ns (trước là 20 ns) rồi mới nạp khóa: netlist Xilinx giữ mọi flop trong GSR 100 ns đầu
+  (quy trình mô phỏng gate-level của Vivado). Lần chạy trước treo ở bước nạp khóa vì lý do này (đo thật 26/11/2026).
 
 ## Chạy
 

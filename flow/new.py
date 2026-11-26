@@ -10,6 +10,7 @@ Không viết gì khác: run_sim.sh, config.mk, constraint.sdc, build.tcl out-of
 Không có --pass thì testbench phải in dòng `RESULT: PASS|FAIL ...` (như demo ALU).
 Quy ước để GLS (mô phỏng netlist) dùng lại được testbench: testbench chỉ đọc cổng của DUT (không tham chiếu tín hiệu
 bên trong), và tự `include file khai báo kiểu/hằng nó dùng (không dựa vào khai báo nằm trong file RTL).
+Và giữ reset >= 100 ns trước kích thích đầu tiên (GSR của netlist Xilinx, glbl.v).
 """
 from __future__ import annotations
 
