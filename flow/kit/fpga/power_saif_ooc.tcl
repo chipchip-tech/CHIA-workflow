@@ -15,6 +15,9 @@ write_verilog -mode funcsim -force out/funcsim.v
 file delete -force xsim_pw
 file mkdir xsim_pw
 set fh [open xsim_pw/saif.tcl w]
+# Ép GSR của glbl về 0 ngay từ đầu (xem ghi chú ở dưới về glbl.v): chắc chắn hơn bản chép glbl.v, vì xelab có thể lấy
+# glbl dựng sẵn trong thư viện unisims_ver (đo thật 26/11/2026: bản chép có ROC_WIDTH 1 ns nhưng GSR vẫn bật tới 100 ns).
+puts $fh "if {\[catch {add_force /glbl/GSR_int 0} e\]} { puts \"GSR_FORCE: không ép được (\$e)\" } else { puts \"GSR_FORCE: /glbl/GSR_int = 0\" }"
 puts $fh "open_saif act.saif"
 puts $fh "set objs \[get_objects -quiet -r /$tb_top/$dut_inst/*\]"
 puts $fh "if {\[llength \$objs\] == 0} { puts \"SAIF_SCOPE: không thấy /$tb_top/$dut_inst\"; set objs \[get_objects -quiet -r /*\] }"

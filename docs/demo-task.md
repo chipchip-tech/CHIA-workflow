@@ -426,4 +426,8 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    (người dùng báo, nghi race khi `start` và `key_valid` bật cùng lúc). Nguyên nhân nhiều khả năng: `glbl.v` của Vivado giữ
    GSR 100 ns đầu, testbench ASCON bắt đầu nạp khóa ở ~45 ns nên mọi flop của netlist bỏ qua, `send_key` chờ `key_ready`
    mãi. Sửa trong flow (không đụng tb): `power_saif_ooc.tcl` dùng bản chép `glbl.v` với `ROC_WIDTH` 1 ns; xsim và GLS
-   Verilator có `timeout` (`sim.gls_timeout_s`, mặc định 600 s, in `GLS_TIMEOUT`).
+   Verilator có `timeout` (`sim.gls_timeout_s`, mặc định 600 s, in `GLS_TIMEOUT`). Đo thật trên máy (xsim snapshot của lần
+   chạy, `get_value` mỗi 5 ns): bản chép `glbl.v` có `ROC_WIDTH = 1000` nhưng GSR vẫn bằng 1 tới 100 ns (xelab lấy `glbl` của
+   thư viện dựng sẵn); `key_ready` luôn 0, `start`/`key_valid` bật ở 40 ns: xác nhận treo do GSR, không phải race của tb
+   (bản RTL đổi flop sang gán blocking em dùng để thử race là mô hình sai: lõi tự chạy đua). Sửa: saif.tcl `add_force
+   /glbl/GSR_int 0` trước khi chạy.
