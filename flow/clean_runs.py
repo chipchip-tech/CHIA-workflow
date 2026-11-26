@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""clean_runs.py - dọn thư mục chạy của demo-alu trong WORK_DIR (mặc định ~/chia_demo) để tiết kiệm đĩa.
+"""clean_runs.py - dọn thư mục chạy của mọi project trong WORK_DIR (mặc định ~/chia_demo) để tiết kiệm đĩa.
 
 Mặc định CHỈ LIỆT KÊ (không xoá gì). Thêm --yes để xoá thật. Chạy trên host (không cần cluster):
-  python projects/demo-alu/clean_runs.py                 # xem dung lượng và kế hoạch
-  python projects/demo-alu/clean_runs.py --yes           # làm theo kế hoạch
+  python flow/clean_runs.py                 # xem dung lượng và kế hoạch
+  python flow/clean_runs.py --yes           # làm theo kế hoạch
+  python flow/clean_runs.py --only demo-alu/CG   # chỉ một project (<group>/<project>)
 
-Kế hoạch, cho từng demo (NoCG, CG):
+Kế hoạch, cho từng project (thư mục <WORK_DIR>/<group>/<project>/ có baseline-*, agent-*, sweep-*):
   - giữ --keep-baseline lần baseline OK mới nhất (mặc định 1: agent.py dùng bản này làm mốc) và baseline mà các lần
     agent được giữ đã dùng làm mốc; xoá các baseline khác (kể cả bản lỗi);
   - giữ --keep-agent lần agent mới nhất (mặc định 2), xoá các lần cũ hơn;
@@ -20,7 +21,6 @@ import os
 import shutil
 from pathlib import Path
 
-DEMOS = ("NoCG", "CG")
 
 
 def size(p: Path) -> int:
@@ -79,16 +79,18 @@ def main() -> None:
     ap.add_argument("--keep-agent", type=int, default=2)
     ap.add_argument("--keep-sweep", type=int, default=1, help="số lần fpga_sweep.py giữ lại cho mỗi chế độ")
     ap.add_argument("--yes", action="store_true", help="xoá thật (mặc định chỉ liệt kê)")
+    ap.add_argument("--only", help="chỉ project này (<group>/<project>)")
     args = ap.parse_args()
 
-    root = Path(os.path.realpath(args.work_dir)) / "demo-alu"
+    root = Path(os.path.realpath(args.work_dir))
     if not root.is_dir():
         raise SystemExit(f"không có {root}")
+    projects = sorted({p.parent for pat in ("*/*/baseline-*", "*/*/agent-*", "*/*/sweep-*") for p in root.glob(pat)})
+    if args.only:
+        projects = [d for d in projects if d.relative_to(root).as_posix() == args.only.strip("/")]
     delete, slim = [], []
-    for demo in DEMOS:
-        d = root / demo
-        if not d.is_dir():
-            continue
+    for d in projects:
+        demo = d.relative_to(root).as_posix()
         bases = sorted(d.glob("baseline-*"), reverse=True)
         keep_b = [b for b in bases if baseline_ok(b)][:args.keep_baseline]
         agents = sorted(d.glob("agent-*"), reverse=True)

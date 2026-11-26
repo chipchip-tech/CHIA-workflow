@@ -396,3 +396,17 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    fpga-r1 NHẬN (`build.tcl` + `sources.f`, WNS 0 → 0,524, methodology critical 2 → 0, P động 6,602 → 5,193 mW, LUT+FF
    283 → 287), fpga-r2 LOẠI (P động 5,825 mW); asic-r1 NHẬN (cell 2 865,25, die 5 504,90, P 0,257 mW), asic-r2 LOẠI (công
    suất +2,7 %). Mọi vòng qua gate sign-off; lý do loại đều là "kém hơn".
+   **Thư viện `flow/` (26/11/2026, viết xong, mới thử trong sandbox):** người dùng duyệt sau phỏng vấn: NoCG/CG là bản
+   thử, flow thành mẫu cho project sau (RTL Verilog khác, SoC Chipyard, chỉ FPGA hoặc chỉ ASIC, board/PDK khác), chạy ổn
+   trên `demo` thì nhập sang `setup`. Gộp `baseline.py`, `agent.py`, `status_page.py`, `fpga_sweep.py` (giống nhau ở hai
+   demo, `baseline.py` chỉ khác 8 dòng), `run_demo.py`, `clean_runs.py` vào `flow/` ở gốc repo; mỗi demo còn nguồn thiết
+   kế + `project.py` (phần chung ở `projects/demo-alu/common/alu_project.py`). File cố định dùng chung chuyển vào
+   `flow/kit/` (`sim_main.cpp`, `power_saif.tcl`, `signoff.tcl`, `render_gds.py`, `cells_extra.v`), flow chép vào thư mục
+   chạy. Điều phối: sau `finish`, `asic_drc` ‖ `asic_lvs` ‖ `asic_sta_<corner>` (mỗi task 0,25 slot `asic`, Ray cho resource
+   lẻ, không sửa cluster) ‖ `asic_gls` (chipyard) chạy cùng lúc; `gls_prep` gộp vào `finish`; Sim → FPGA → ASIC vẫn lần lượt
+   (người dùng chọn); `fpga_sim` giữ làm bộ lọc sớm. Trang status tiếng Anh (`flow/status.py`): flow có gate, timeline
+   Gantt theo khối (thời điểm ghi trên worker), kết quả, log thu gọn; lý do nhận/loại và tóm tắt agent cũng tiếng Anh.
+   Đổi tên khoá: `power_alu_w` → `power_inst_w`. Thử trong sandbox: Ray 2.54 + chialoops 2.0.1 cục bộ, Sim chạy thật
+   (Verilator 5.020: NoCG 51/55 bin, 6 272 phép, trùng máy thật), FPGA/ASIC bằng task giả: 5 task kiểm tra song song
+   5,9 s thay vì 13,5 s; LVS giả trượt thì dừng đúng `asic_lvs`; agent giả 2 vòng × 3 bước, `rtl/` bị hoàn lại. Chưa chạy
+   trên cluster thật; chạy song song `make drc`/`make lvs`/`make run` trong cùng `WORK_HOME` là điểm cần xem.
