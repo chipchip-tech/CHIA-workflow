@@ -29,5 +29,4 @@ python ~/CHIA-workflow/flow/run.py projects/ascon-core agent --rounds 1
 
 - Sandbox (26/11/2026): Sim chạy thật bằng Verilator 5.020: PASS, line 25/35, toggle 3007/3438, branch 44/60; lint
   `-Wall` 12 cảnh báo (ghi lại, không chặn). Testbench đã sửa cũng PASS khi biên dịch như GLS (`-DGLS`, RTL sau tb).
-- Chưa chạy trên cluster. Rủi ro: Yosys của ORFS đọc mảng packed nhiều chiều (`logic [UROL-1:0][63:0] ...`); nếu lỗi,
-  thêm `"config_extra": ["export SYNTH_HDL_FRONTEND = slang"]` vào `asic` của `project.py` (nếu ORFS có plugin slang).
+- Chạy thật trên cluster 26/11/2026 (`baseline-20261126-213109`, `KẾT QUẢ: OK`): Sim PASS, lint 12 cảnh báo, line 25/35, toggle 3007/3438, branch 44/60; FPGA out-of-context 100 MHz: LUT 1592, FF 473, WNS 1,292 / WHS 0,217 ns (Fmax ước lượng 114,8 MHz), methodology 0 critical (TIMING-18 mức Warning: chưa có độ trễ I/O), SAIF khớp 66 % net, P động 23,4 mW, GLS trên netlist PASS; ASIC sky130hd 10 ns: Yosys 0.68 đọc được SV, 48 859 µm² cell (util 44,7 %), 5 464 cell, 479 flop, setup/hold WS 2,626/0,474 ns (tt), 2,088/0,430 ns (OCV ±10 %), P 9,96 mW, DRC router/KLayout 0, antenna 0, LVS khớp, GLS PASS; route 605 s; kiểm tra sau finish song song 41,7 s (lần lượt 72,4 s).

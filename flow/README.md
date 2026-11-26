@@ -121,6 +121,6 @@ Biến `PROJECT` (dict, gộp với `DEFAULTS` trong `flow/project.py`) và hàm
 - 26/11/2026: khối RTL "cắm là chạy" (file tự sinh, `.sv` + header, PASS/FAIL theo regex, lint `errors`, FPGA
   out-of-context, GLS dùng testbench Sim, `flow/new.py`). Thử trong sandbox với `projects/ascon-core`: Sim chạy thật
   (Verilator 5.020, PASS, line 25/35, toggle 3007/3438, branch 44/60), FPGA/ASIC giả; demo ALU vẫn ra đúng số Sim cũ.
-  Chưa chạy trên cluster: Yosys 0.33 trong sandbox không đọc được mảng packed nhiều chiều của ASCON (Yosys 0.68 của
-  ORFS chưa kiểm), Vivado out-of-context, GLS trên netlist thật.
+  ASCON chạy thật trên cluster 26/11/2026 (`baseline-20261126-213109`, `KẾT QUẢ: OK`): Sim PASS, lint 12 cảnh báo, line 25/35, toggle 3007/3438, branch 44/60; FPGA out-of-context 100 MHz: LUT 1592, FF 473, WNS 1,292 / WHS 0,217 ns (Fmax ước lượng 114,8 MHz), methodology 0 critical (TIMING-18 mức Warning: chưa có độ trễ I/O), SAIF khớp 66 % net, P động 23,4 mW, GLS trên netlist PASS; ASIC sky130hd 10 ns: Yosys 0.68 đọc được SV, 48 859 µm² cell (util 44,7 %), 5 464 cell, 479 flop, setup/hold WS 2,626/0,474 ns (tt), 2,088/0,430 ns (OCV ±10 %), P 9,96 mW, DRC router/KLayout 0, antenna 0, LVS khớp, GLS PASS; route 605 s; kiểm tra sau finish song song 41,7 s (lần lượt 72,4 s). Lỗi lộ ra và cách sửa: GLS FPGA treo vì testbench bắt
+  đầu trước khi GSR của netlist Xilinx nhả (100 ns): testbench giữ reset 100 ns (quy trình chuẩn, không sửa `glbl.v`).
 - Chưa có: nhiều clock, `sim.kind = "chipyard"` (SoC), `flow.sweep` trên cluster.

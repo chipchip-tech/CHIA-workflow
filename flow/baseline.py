@@ -87,12 +87,14 @@ def print_fpga(tag: str, r: dict, fcfg: dict, inst: str | None) -> None:
           f"FF={r.get('ff')} BUFG={r.get('bufg')} WNS={r.get('wns_ns')} WHS={r.get('whs_ns')} ns (Fmax ước lượng "
           f"{r.get('fmax_est_mhz')} MHz, timing {'đạt' if r.get('timing_met') else 'KHÔNG đạt'})  cảnh báo="
           f"{r.get('warnings')} (critical {r.get('critical_warnings')})", flush=True)
-    print(f"{tag} fpga công suất SAIF: động {mw(r.get('power_dynamic_w'))} mW, {inst or 'instance'} "
-          f"{mw(r.get('power_inst_w'))} mW, tổng {mw(r.get('power_total_w'))} mW (độ tin cậy "
+    ip = f", {inst} {mw(r.get('power_inst_w'))} mW" if inst else ""
+    print(f"{tag} fpga công suất SAIF: động {mw(r.get('power_dynamic_w'))} mW{ip}, tổng {mw(r.get('power_total_w'))} mW (độ tin cậy "
           f"{r.get('power_confidence')}, net khớp {r.get('saif_nets_matched_pct')} %); vector-less: động "
           f"{mw(r.get('power_dynamic_vl_w'))} mW", flush=True)
-    print(f"{tag} bitstream: {r.get('bitstream')}", flush=True)
-    meth = ", ".join(k for k, v in (r.get("methodology") or {}).items() if v["severity"] != "Advisory") or "-"
+    print(f"{tag} bitstream: {r.get('bitstream') or ('không có (out-of-context)' if r.get('mode') == 'ooc' else None)}",
+          flush=True)
+    meth = ", ".join(f"{k} ({v['severity']})" for k, v in (r.get("methodology") or {}).items()
+                     if v["severity"] != "Advisory") or "-"
     print(f"{tag} fpga sign-off: methodology critical={r.get('methodology_critical')} ({meth}), mô phỏng gate-level: "
           f"{r.get('gls_result')}", flush=True)
 
