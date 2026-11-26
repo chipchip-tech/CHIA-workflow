@@ -37,6 +37,11 @@ DEFAULTS = {
         "lint": "errors",               # "strict": -Wall phải sạch; "errors": chỉ chặn lỗi, ghi số cảnh báo; False: tắt
         "gls": True,                    # GLS ASIC/FPGA dùng testbench Sim (define GLS) nếu project không có tb GLS riêng
         "gls_timeout_s": 600,           # GLS treo trên netlist (ví dụ testbench chờ mãi) thì dừng sau ngần này giây
+        "metrics": [],                  # số liệu riêng của project đọc từ log mô phỏng, hiện trên trang status:
+                                        # [{"key": "latency_ns", "label": "Decrypt latency (ns)", "regex": r"done at (\d+)",
+                                        #   "better": -1, "scale": 1}]: số ở nhóm 1 của lần khớp cuối, nhân scale;
+                                        # "count": True thì lấy số lần khớp (không cần nhóm). better -1/0/+1 chỉ để tô
+                                        # màu thay đổi; không ảnh hưởng gate hay luật nhận/loại của agent
     },
     "fpga": {
         "tool": "Vivado",
@@ -159,6 +164,15 @@ class Project:
                 err.append(f"không có {r}")
         if not (self.dir / c["sim"]["tb"]).is_file():
             err.append(f"không có testbench {c['sim']['tb']} (đặt sim.tb)")
+        for m in c["sim"]["metrics"]:
+            if not re.fullmatch(r"[A-Za-z_]\w*", str(m.get("key", ""))) or not m.get("regex"):
+                err.append(f"sim.metrics: mỗi mục cần key (tên biến) và regex: {m}")
+                continue
+            try:
+                if not m.get("count") and re.compile(m["regex"]).groups < 1:
+                    err.append(f"sim.metrics {m['key']}: regex cần một nhóm (...) chứa số")
+            except re.error as ex:
+                err.append(f"sim.metrics {m['key']}: regex lỗi ({ex})")
         if c["fpga"]["mode"] not in ("board", "ooc"):
             err.append("fpga.mode phải là board hoặc ooc")
         if err:

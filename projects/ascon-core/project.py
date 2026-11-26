@@ -14,6 +14,10 @@ PROJECT = {
         "pass_patterns": [r"\[PASS\] Decrypted Plaintext Match", r"\[PASS\] Tag Verification", r"SIMULATION COMPLETED"],
         "fail_patterns": [r"\[FAIL\]"],
         "lint": "errors",                                     # 12 cảnh báo -Wall của RTL gốc được ghi lại, không chặn
+        # Số liệu riêng hiện trên trang status (không ảnh hưởng gate): số dòng [PASS] testbench in ra.
+        "metrics": [
+            {"key": "pass_lines", "label": "[PASS] lines", "regex": r"\[PASS\]", "count": True, "better": 1},
+        ],
     },
     "fpga": {"part": "xc7a100tcsg324-1", "board": "Artix-7 100T, out-of-context"},
     "asic": {"platform": "sky130hd"},

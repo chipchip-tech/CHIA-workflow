@@ -79,6 +79,9 @@ def print_sim(tag: str, sub: dict) -> None:
         print(f"{tag} coverage: {fc}line {r['cov_line']}/"
               f"{r['cov_line_total']}, toggle {r['cov_toggle']}/{r['cov_toggle_total']}, branch {r['cov_branch']}/"
               f"{r['cov_branch_total']} (DUT); thiếu: {', '.join(r['fcov_miss']) or '-'}", flush=True)
+        xs = {k[2:]: v for k, v in r.items() if k.startswith("x_")}
+        if xs:
+            print(f"{tag} số liệu project (sim.metrics): " + ", ".join(f"{k}={v}" for k, v in xs.items()), flush=True)
         print(f"{tag} waveform: {r['vcd']} ({r['vcd_bytes']} byte)", flush=True)
 
 

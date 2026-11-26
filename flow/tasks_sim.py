@@ -76,6 +76,17 @@ def sim_run(run_dir: str, cfg: dict, plusargs: list[str]) -> dict:
     cov = struct_cov(read(os.path.join(sim, "build", "coverage.dat")), dut_files)
     for kind in ("line", "toggle", "branch"):
         res[f"cov_{kind}"], res[f"cov_{kind}_total"] = cov.get(kind, [None, None])
+    for m in cfg["sim"].get("metrics") or []:            # số liệu riêng của project (sim.metrics), chỉ để hiển thị
+        hits = re.findall(m["regex"], out, re.M)
+        if m.get("count"):
+            res[f"x_{m['key']}"] = len(hits)
+            continue
+        v = hits[-1] if hits else None
+        v = v[0] if isinstance(v, tuple) else v
+        try:
+            res[f"x_{m['key']}"] = float(v) * float(m.get("scale", 1)) if v is not None else None
+        except ValueError:
+            res[f"x_{m['key']}"] = None
     if "FCOV_ERROR" in out:
         res["ok"] = False
     profile_info(step="sim_run", ok=res["ok"], seconds=sec)

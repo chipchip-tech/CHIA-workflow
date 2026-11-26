@@ -56,7 +56,7 @@ python flow/clean_runs.py [--yes] [--only <group>/<project>]
 | `tasks_sim.py`, `tasks_fpga.py`, `tasks_asic.py` | các task CHIA và cách đọc kết quả của công cụ |
 | `baseline.py` | pha 1 |
 | `agent.py` | pha 2 + `results/compare.md`; luật phạm vi sửa và luật nhận/loại |
-| `status.py` | trang status (tiếng Anh): flow có gate, timeline Gantt theo khối, kết quả, log và file |
+| `status.py` | trang status (tiếng Anh): flow có gate, timeline Gantt theo khối, kết quả, log và file. Dùng chung cho mọi project: số ô flow và cột kết quả theo `steps` (1–3 bước), nhãn công cụ và dòng thông tin (DUT, clock, part, platform) lấy từ `project.py`, dòng ICG/công suất instance chỉ hiện khi project có, thêm dòng của `sim.metrics` |
 | `sweep.py` | quét FPGA: Fmax từng biến thể, công suất SAIF theo một opt của project |
 | `run.py`, `clean_runs.py` | submit + mở trang; dọn `WORK_DIR` |
 | `kit/` | file cố định chép vào thư mục chạy nếu project không có bản riêng: `sim/sim_main.cpp`, `fpga/power_saif.tcl`, `asic/signoff.tcl`, `asic/render_gds.py`, `platforms/<platform>/cells_extra.v` → `asic/gls/cells_extra.v` |
@@ -91,6 +91,7 @@ Biến `PROJECT` (dict, gộp với `DEFAULTS` trong `flow/project.py`) và hàm
 | `sim.lint` | `"errors"` (mặc định: lỗi lint mới chặn, cảnh báo ghi lại), `"strict"` (-Wall sạch, demo ALU), `False` |
 | `sim.plusargs` | plusarg mặc định của testbench |
 | `sim.fcov_module` | module functional coverage (tuỳ chọn); không có thì luật Sim của agent dùng line/toggle/branch |
+| `sim.metrics` | số liệu riêng của project đọc từ log mô phỏng, hiện ở bảng Sim của trang status và `compare.md`: `[{"key", "label", "regex", "better", "scale"}]` (nhóm 1 của lần khớp cuối) hoặc `"count": True` (số lần khớp). Chỉ để xem, không ảnh hưởng gate hay luật agent |
 | `fpga.mode` | `"board"` (có `fpga/build.tcl` + vỏ board, ra bitstream) hoặc `"ooc"` (mặc định khi không có: out-of-context, không bitstream; công suất SAIF và GLS chạy testbench Sim trên netlist sau route) |
 | `fpga.part`, `fpga.board`, `fpga.top`, `fpga.period_ns` | part (bắt buộc khi bật fpga), tên board để hiển thị, top, chu kỳ mặc định (mặc định: chu kỳ clock chính) |
 | `fpga.variants` | `{tên: {replace: {dòng sources.f: file thay}, synth: [tham số], note}}`; biến thể đầu là mặc định |

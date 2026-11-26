@@ -21,19 +21,49 @@ from pathlib import Path
 STEPS = ("sim", "fpga", "asic")
 TITLE = {"sim": "Simulation", "fpga": "FPGA", "asic": "ASIC"}
 BLOCKS = ["chipyard", "verilator", "vivado", "asic", "claude"]
-BLOCK_NOTE = {"chipyard": "Verilator build · GLS", "verilator": "simulation runs", "vivado": "Vivado 2025.1",
+BLOCK_NOTE = {"chipyard": "Verilator build · GLS", "verilator": "simulation runs", "vivado": "synth · P&R · xsim",
               "asic": "Yosys + OpenROAD + KLayout", "claude": "Claude Code agent"}
 
 e = lambda s: html.escape(str(s))
 
 
 def tool_of(step: str, cfg: dict) -> str:
+    """Công cụ và đích của một bước, lấy từ khai báo project (không ghi cứng theo demo)."""
     if step == "sim":
-        return "Verilator"
+        s = cfg.get("sim", {})
+        return "Verilator · " + ("Chipyard SoC" if s.get("kind") == "chipyard" else "self-checking testbench")
     if step == "fpga":
         f = cfg.get("fpga", {})
-        return f"{f.get('tool', 'Vivado')} · {f.get('board') or f.get('part', '')}"
+        where = f.get("board") or f.get("part", "")
+        if f.get("mode") == "ooc" and "context" not in where:
+            where += " · out-of-context"
+        return f"{f.get('tool', 'Vivado')} · {where}"
     return f"ORFS (Yosys + OpenROAD) · {cfg.get('asic', {}).get('platform', '')}"
+
+
+def clocks_txt(cfg: dict) -> str:
+    cl = cfg.get("clocks") or []
+    return ", ".join(f"{c.get('port')} {fmt(c.get('period_ns'))} ns" for c in cl)
+
+
+def info_line(cfg: dict) -> str:
+    """Một dòng mô tả project dưới tiêu đề: DUT, clock, số file RTL, đích FPGA/ASIC."""
+    parts = []
+    if cfg.get("dut"):
+        parts.append(f"DUT <code>{e(cfg['dut'])}</code>")
+    if clocks_txt(cfg):
+        parts.append("clock " + e(clocks_txt(cfg)))
+    if cfg.get("rtl"):
+        parts.append(f"{len(cfg['rtl'])} RTL file" + ("s" if len(cfg["rtl"]) > 1 else ""))
+    steps = cfg.get("steps") or list(STEPS)
+    if "fpga" in steps and (cfg.get("fpga") or {}).get("part"):
+        parts.append("FPGA " + e(cfg["fpga"]["part"]))
+    if "asic" in steps and (cfg.get("asic") or {}).get("platform"):
+        parts.append("ASIC " + e(cfg["asic"]["platform"]))
+    return " · ".join(parts)
+
+
+HIDE_ZERO = {"n_icg"}          # dòng chỉ hiện khi khác 0 (ví dụ ICG: project không clock gating thì bỏ)
 
 
 def rows(step: str, cfg: dict) -> list:
@@ -49,7 +79,8 @@ def rows(step: str, cfg: dict) -> list:
                  ("Methodology critical", "methodology_critical", 1, -1, False), ("LUT", "lut", 1, -1, False),
                  ("FF", "ff", 1, -1, False), ("BUFG", "bufg", 1, 0, False),
                  ("Dynamic power, SAIF (mW)", "power_dynamic_w", 1000, -1, False),
-                 (f"{inst} power, SAIF (mW)", "power_inst_w", 1000, -1, False),
+                 *([(f"{inst} power, SAIF (mW)", "power_inst_w", 1000, -1, False)]
+                   if (cfg.get("fpga") or {}).get("power_instance") else []),
                  ("Total power, SAIF (mW)", "power_total_w", 1000, -1, False),
                  ("Dynamic power, vector-less (mW)", "power_dynamic_vl_w", 1000, -1, False)],
         "asic": [("Cell area (µm²)", "area_um2", 1, -1, False), ("Die area (µm²)", "die_area_um2", 1, -1, False),
@@ -59,7 +90,8 @@ def rows(step: str, cfg: dict) -> list:
                  ("STA setup WS, worst corner (ns)", "sta_setup_ws_min_ns", 1, +1, True),
                  ("STA hold WS, worst corner (ns)", "sta_hold_ws_min_ns", 1, +1, True),
                  ("Power (mW)", "power_total_w", 1000, -1, False)],
-    }[step]
+    }[step] + ([(m.get("label") or m["key"], f"x_{m['key']}", 1, int(m.get("better", 0)), False)
+                for m in (cfg.get("sim") or {}).get("metrics") or []] if step == "sim" else [])
 
 
 CSS = """
@@ -68,8 +100,9 @@ CSS = """
 --warnbg:#3a2c0c;--wait:#8b949e;--waitbg:#21262d;--accent:#a371f7}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 "Inter",system-ui,
 -apple-system,"Segoe UI",Roboto,sans-serif}main{max-width:1320px;margin:0 auto;padding:22px 16px 56px}
-a{color:var(--run)}code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--mute)}
+a{color:var(--run)}code{white-space:nowrap;font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--mute)}
 header{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;align-items:flex-end;margin-bottom:6px}
+header>div:first-child{flex:1 1 480px;min-width:0}
 h1{font-size:27px;margin:0;letter-spacing:-.01em}h1 small{color:var(--mute);font-weight:500;font-size:17px}
 .sub{color:var(--mute);font-size:13.5px}h2{font-size:13px;text-transform:uppercase;letter-spacing:.09em;color:var(--mute);
 margin:30px 0 10px;font-weight:600}
@@ -78,7 +111,7 @@ white-space:nowrap}.c-ok{background:var(--okbg);color:var(--ok)}.c-bad{backgroun
 .c-run{background:var(--runbg);color:var(--run)}.c-wait{background:var(--waitbg);color:var(--wait)}
 .c-warn{background:var(--warnbg);color:var(--warn)}.big{font-size:14px;padding:4px 12px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
-.flow{display:grid;grid-template-columns:minmax(0,1fr) 34px minmax(0,1fr) 34px minmax(0,1fr);align-items:stretch}
+.flow{display:grid;align-items:stretch}
 .arrow{display:grid;place-items:center;color:var(--mute);font-size:24px}
 .step{border-width:2px;display:flex;flex-direction:column;gap:8px}.step.s-run{border-color:var(--run);
 box-shadow:0 0 0 3px var(--runbg)}.step.s-ok{border-color:var(--ok)}.step.s-bad{border-color:var(--bad)}
@@ -102,7 +135,7 @@ min-width:3px;color:#0d1117;font-weight:600}.b-ok{background:var(--ok)}.b-bad{ba
 .ticks{position:relative;height:16px}.ticks span{position:absolute;transform:translateX(-50%)}
 .legend{display:flex;gap:14px;font-size:12px;color:var(--mute);margin-top:8px}.legend i{display:inline-block;width:10px;
 height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
-.results{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:start}
+.results{display:grid;gap:12px;align-items:start}
 .results.agent{grid-template-columns:minmax(0,1fr)}
 table{border-collapse:collapse;width:100%;font-size:13.5px}th,td{padding:4px 6px;border-bottom:1px solid var(--line);
 text-align:right;font-variant-numeric:tabular-nums}th:first-child,td:first-child{text-align:left}th{color:var(--mute);
@@ -119,8 +152,8 @@ figcaption{font-size:12px;color:var(--mute)}.imgs{display:grid;grid-template-col
 details{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 14px;margin-bottom:8px}
 summary{cursor:pointer;font-weight:600}details pre{white-space:pre-wrap;font:12px ui-monospace,monospace;max-height:320px;
 overflow:auto;color:var(--mute)}.links a{margin-right:16px}.timer{font-variant-numeric:tabular-nums}
-@media (max-width:900px){.flow{grid-template-columns:1fr}.arrow{transform:rotate(90deg);height:30px}
-.results,.agentrow,.imgs{grid-template-columns:1fr}.grow,.axis{grid-template-columns:90px minmax(0,1fr)}}
+@media (max-width:900px){.flow{grid-template-columns:1fr!important}.arrow{transform:rotate(90deg);height:30px}
+.results,.agentrow,.imgs{grid-template-columns:1fr!important}.grow,.axis{grid-template-columns:90px minmax(0,1fr)}}
 """
 
 JS = """<script>
@@ -153,6 +186,8 @@ def fmt(v, scale=1) -> str:
 
 
 def delta(a, b, scale, good, ns) -> str:
+    if isinstance(a, str) and isinstance(b, str) and "/" in a and "/" in b:      # coverage "đã gặp/tổng": so số đã gặp
+        a, b = a.split("/")[0], b.split("/")[0]
     try:
         a, b = float(a) * scale, float(b) * scale
     except (TypeError, ValueError):
@@ -202,6 +237,8 @@ def table(step: str, cfg: dict, base: dict, best: dict | None = None) -> str:
     out = []
     for name, k, sc, good, ns in rows(step, cfg):
         if base.get(k) is None and (best is None or best.get(k) is None):
+            continue
+        if k in HIDE_ZERO and not base.get(k) and not (best or {}).get(k):
             continue
         if best is None:
             out.append(f"<tr><td>{e(name)}</td><td>{fmt(base.get(k), sc)}</td></tr>")
@@ -335,7 +372,8 @@ def flow_html(cards: list[str]) -> str:
         if i:
             out.append('<div class="arrow">→</div>')
         out.append(c)
-    return f'<h2>Flow</h2><div class="flow">{"".join(out)}</div>'
+    cols = " 34px ".join(["minmax(0,1fr)"] * max(len(cards), 1))
+    return f'<h2>Flow</h2><div class="flow" style="grid-template-columns:{cols}">{"".join(out)}</div>'
 
 
 # ---------------------------------------------------------------------------
@@ -480,10 +518,11 @@ def render_baseline(report: dict, final: bool) -> str:
             fails.append((name, r["log_tail"]))
     title = f'{e(report.get("project", report.get("demo", "")))} <small>· baseline</small>'
     sub = (f'{e(cfg.get("title", ""))} · phase 1: reference run orchestrated by CHIA, no agent · '
-           f'<code>{e(report.get("run_id", ""))}</code>')
+           f'<code>{e(report.get("run_id", ""))}</code><br>{info_line(cfg)}')
     body = flow_html(cards) + timeline_html(report, final)
     if res_cards:
-        body += f'<h2>Results</h2><div class="results">{"".join(res_cards)}</div>'
+        body += (f'<h2>Results</h2><div class="results" style="grid-template-columns:repeat({len(res_cards)},'
+                 f'minmax(0,1fr))">{"".join(res_cards)}</div>')
     body += files_html(run_dir, report, fails)
     return page(f'{report.get("project", "")} baseline', title, sub, overall(final, report, report.get("stopped_at")), body,
                 not final)
@@ -584,7 +623,7 @@ def render_agent(report: dict, final: bool) -> str:
     title = f'{e(report.get("project", ""))} <small>· agent</small>'
     sub = (f'{e(cfg.get("title", ""))} · phase 2: Claude ({e(report.get("model", ""))}) proposes edits, CHIA re-measures '
            f'on the real tools and accepts or rejects · baseline <code>{e(os.path.basename(report.get("baseline", "")))}'
-           f'</code> · <code>{e(report.get("run_id", ""))}</code>')
+           f'</code> · <code>{e(report.get("run_id", ""))}</code><br>{info_line(cfg)}')
     body = flow_html(cards) + timeline_html(report, final)
     if sections:
         body += f'<h2>Results</h2><div class="results agent">{"".join(sections)}</div>'

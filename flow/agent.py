@@ -330,7 +330,7 @@ def _int(v):
 def metrics_of(step: str, r: dict) -> dict:
     if step == "sim":
         return {"checked": _int(r.get("checked")), "errors": _int(r.get("errors")), "result": r.get("result"),
-                **{k: r.get(k) for k in SIM_KEYS}}
+                **{k: r.get(k) for k in SIM_KEYS}, **{k: v for k, v in r.items() if k.startswith("x_")}}
     return {k: r.get(k) for k in (FPGA_KEYS if step == "fpga" else ASIC_KEYS)}
 
 
@@ -619,7 +619,9 @@ def compare_md(report: dict) -> str:
         st = report["result"][step]
         b, a = st["baseline"], st["best"]
         out.append(f"\n## {step.upper()}\n\n| | Baseline | Agent | Change |\n|---|---|---|---|")
-        for name, k in ROWS[step]:
+        extra = [(m.get("label") or m["key"], f"x_{m['key']}") for m in
+                 ((report.get("cfg") or {}).get("sim", {}).get("metrics") or [])] if step == "sim" else []
+        for name, k in ROWS[step] + extra:
             x, y = b.get(k), a.get(k)
             if isinstance(x, (int, float)) and isinstance(y, (int, float)) and not isinstance(x, bool) and x:
                 ch = f"{(y - x) / abs(x) * 100:+.1f} %" if step != "fpga" or not k.endswith("_ns") else f"{y - x:+.3f}"
