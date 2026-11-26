@@ -242,7 +242,7 @@ Kiểm chứng khi chạy thật (project `rocket-fmax`, 25/10/2026):
   KLayout, antenna, STA sau route `asic/signoff.tcl` (tt và tt + OCV ±10 %, chỉ có `.lib` tt). ORFS trên máy: `load_design`
   chỉ nhận `.odb`. **Agent `--rounds 2` với đủ gate chạy thật 26/11/2026** (`KẾT QUẢ: OK` cả hai): NoCG nhận sim-r1, asic-r1
   (die −27,5 %); CG nhận sim-r1, fpga-r1 (methodology 2 → 0, P động −21,3 %), asic-r1 (die −20,5 %, công suất −20,4 %).
-  **Thư viện `flow/` (26/11/2026, mới thử trong sandbox):** code điều phối của hai demo gộp vào `flow/` ở gốc repo (mẫu cho
+  **Thư viện `flow/` (26/11/2026, chạy thật baseline + agent `--rounds 1` cả hai demo, `KẾT QUẢ: OK`, baseline trùng số 25/11):** code điều phối của hai demo gộp vào `flow/` ở gốc repo (mẫu cho
   project sau, nhập sang `setup` khi ổn); mỗi project có `project.py`. Lệnh: `python flow/run.py projects/demo-alu/<demo>
   baseline|agent|sweep ...` (job submit từ gốc repo, `python -m flow.<pha> --project ...`). Sau `finish`, DRC ‖ LVS ‖ STA mỗi
   corner (0,25 slot `asic`) ‖ GLS chạy cùng lúc. Trang status tiếng Anh. Script cũ `run_demo.py`, `status_page.py`,

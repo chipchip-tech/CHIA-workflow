@@ -408,5 +408,5 @@ build/kiểm tra** trên Chipyard 1.15.0. Đây là mảnh cần smoke test đ�
    Gantt theo khối (thời điểm ghi trên worker), kết quả, log thu gọn; lý do nhận/loại và tóm tắt agent cũng tiếng Anh.
    Đổi tên khoá: `power_alu_w` → `power_inst_w`. Thử trong sandbox: Ray 2.54 + chialoops 2.0.1 cục bộ, Sim chạy thật
    (Verilator 5.020: NoCG 51/55 bin, 6 272 phép, trùng máy thật), FPGA/ASIC bằng task giả: 5 task kiểm tra song song
-   5,9 s thay vì 13,5 s; LVS giả trượt thì dừng đúng `asic_lvs`; agent giả 2 vòng × 3 bước, `rtl/` bị hoàn lại. Chưa chạy
-   trên cluster thật; chạy song song `make drc`/`make lvs`/`make run` trong cùng `WORK_HOME` là điểm cần xem.
+   5,9 s thay vì 13,5 s; LVS giả trượt thì dừng đúng `asic_lvs`; agent giả 2 vòng × 3 bước, `rtl/` bị hoàn lại. 
+   Chạy thật trên cluster 26/11/2026: baseline NoCG `baseline-20261126-195910`, CG `baseline-20261126-200321`, `KẾT QUẢ: OK`, mọi số (coverage, LUT/FF, WNS, SAIF, diện tích, STA, GLS) trùng từng số với baseline 25/11; 5 task kiểm tra sau finish chạy song song 5,2 s (cộng lần lượt 12,3–12,5 s), `make drc`/`lvs`/`run` cùng `WORK_HOME` không xung đột. Agent `--rounds 1`: NoCG `agent-20261126-200829` nhận sim-r1 (51 → 55 bin), asic-r1 (die 7 534 → 5 460 µm², trùng lần trước), loại fpga-r1; CG `agent-20261126-201926` nhận sim-r1 (51 → 57, branch 8 → 10), fpga-r1 (sign-off, WNS 0 → 0,524, methodology 2 → 0), asic-r1 (cell 2 975 → 2 930, die 6 926 → 5 018 µm², công suất −6,4 %).

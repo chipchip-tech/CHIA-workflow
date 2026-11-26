@@ -89,10 +89,6 @@ Biến `PROJECT` (dict, gộp với `DEFAULTS` trong `flow/project.py`) và hàm
 
 ## Trạng thái
 
-- Ngày 26/11/2026 mới chỉ thử trong sandbox. Ray cục bộ có đủ các resource của cluster.
-- Sim chạy thật bằng Verilator, cho đúng số của máy thật. FPGA và ASIC dùng task giả.
-- Phần đã kiểm trong lần thử đó:
-  - 5 task kiểm tra chạy song song sau `finish`;
-  - trang status lúc đang chạy, lúc xong và lúc lỗi;
-  - agent hoàn lại thay đổi ngoài phạm vi.
-- Chưa chạy trên cluster thật.
+- Chạy thật trên cluster 26/11/2026: baseline NoCG `baseline-20261126-195910`, CG `baseline-20261126-200321`, `KẾT QUẢ: OK`, mọi số (coverage, LUT/FF, WNS, SAIF, diện tích, STA, GLS) trùng từng số với baseline 25/11; 5 task kiểm tra sau finish chạy song song 5,2 s (cộng lần lượt 12,3–12,5 s), `make drc`/`lvs`/`run` cùng `WORK_HOME` không xung đột. Agent `--rounds 1`: NoCG `agent-20261126-200829` nhận sim-r1 (51 → 55 bin), asic-r1 (die 7 534 → 5 460 µm², trùng lần trước), loại fpga-r1; CG `agent-20261126-201926` nhận sim-r1 (51 → 57, branch 8 → 10), fpga-r1 (sign-off, WNS 0 → 0,524, methodology 2 → 0), asic-r1 (cell 2 975 → 2 930, die 6 926 → 5 018 µm², công suất −6,4 %).
+- Trước đó thử trong sandbox (Ray cục bộ, FPGA/ASIC giả): trang status lúc lỗi, agent hoàn lại sửa ngoài phạm vi.
+- Chưa có: project thứ hai (mẫu mới dùng cho ALU), `sim.kind = "chipyard"`, `flow.sweep` trên cluster.
