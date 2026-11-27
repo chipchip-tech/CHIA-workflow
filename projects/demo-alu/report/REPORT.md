@@ -31,7 +31,7 @@ do session làm việc cập nhật.
   văn 1–2 dòng từ log/report thật (Courier New, `H.evidence`), không chụp ảnh `.rpt`/`.log`. Ảnh chụp chỉ dùng cho thứ
   vốn là hình (layout, trang status, timeline). Đang dùng: dòng `RESULT:` Sim NoCG baseline, `FCOV: hit=57 total=57` CG
   sim-r1, câu chẩn đoán trong summary của agent CG fpga-r1, `Netlists match` + `RESULT:` GLS NoCG baseline; ASCON: câu "If it has a bug ... [FAIL] ..." trong summary
-  sim-r1 (agent tự viết mô hình tham chiếu Ascon-AEAD128 + 10 corner case), `Netlists match` LVS baseline (12,4 s).
+  sim-r1 (agent tự viết mô hình tham chiếu Ascon-AEAD128 + 10 corner case), `Netlists match` LVS baseline (12,4 s); FPGA ASCON: dòng bảng tóm tắt `methodology.rpt` (TIMING-18 Warning 120, không có rule Critical).
 - Style: nền trắng, Times New Roman (code Courier New), thang xám, `LAYOUT_WIDE`.
 
 ## 3. Bộ slide hiện có (`guides/`, sinh bởi `src/build_guides.js`)

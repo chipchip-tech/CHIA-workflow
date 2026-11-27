@@ -614,7 +614,8 @@ async function fpgaDeck() {
       { x: 0.85, y: 1.35, w: 6.6, colW: [2.9, 3.7], boldFirstCol: true });
     H.head(s, "Out-of-context", 7.85, 1.35, 4.65);
     H.bullets(s, ["No board wrapper: Vivado builds the core alone, no bitstream.", "The flow writes build.tcl itself from project.py.",
-      "I/O delays not set yet (TIMING-18 warning)."], { x: 7.85, y: 1.75, w: 4.65, h: 4.2 });
+      "I/O delays not set yet: 120 TIMING-18 warnings, no critical."], { x: 7.85, y: 1.75, w: 4.65, h: 2.9 });
+    H.evidence(s, "methodology.rpt, ASCON baseline (Vivado 2025.1, fully routed)", ["| TIMING-18 | Warning  | Missing input or output delay | 120    |"], 0.85, 4.95, 11.65);
     H.msg(s, "A new design reaches FPGA sign-off without a hand-written wrapper or build script.");
   }
 
