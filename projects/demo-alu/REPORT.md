@@ -212,11 +212,15 @@ Cả bốn vòng được nhận, và vẫn PASS trên Verilator thật.
 - **Mỗi bước chỉ 2 vòng, mỗi cấu hình chạy một lần.** Công cụ tất định, nhưng agent thì không: chạy lại có thể ra đề
   xuất khác.
 - **Chưa nạp board.** Nhánh FPGA dừng ở bitstream vì chưa có board.
+- **GLS chưa có SDF.** Mô phỏng netlist (FPGA và ASIC) là zero-delay: kiểm chức năng của netlist, chưa kiểm timing.
+- **Một clock, chưa kiểm CDC/RDC.** FPGA out-of-context (ASCON) chưa đặt độ trễ I/O (Vivado báo TIMING-18, mức Warning).
+- **Kiểm chứng chức năng ASCON còn mỏng:** testbench có hướng, một bộ vector, chưa có mô hình tham chiếu (mục 10).
+- **Ngoài phạm vi:** DFT/scan, IR drop/EM, PDK thương mại và deck DRC của foundry.
 
 ## 8. Bước tiếp theo
 
 - **Slide:** ba slide chính Sim, FPGA, ASIC, kèm slide mở đầu về cluster và slide kết.
-- **Video:** quay `run_demo.py` với trang trạng thái và timeline CHIA.
+- **Video:** quay `flow/run.py` với trang status và timeline CHIA (mục 10).
 - **Demo 2 (tuỳ chọn):** mini-SoC PicoRV32, dùng lại loop, task và khối của Demo 1.
 
 ## 9. Củng cố ngày 25/11/2026
@@ -397,3 +401,73 @@ Lần agent: NoCG `agent-20261126-082319` (khoảng 16 phút), CG `agent-2026112
 - **ASIC CG:** r1 được nhận. r2 giảm die −16 % nhưng công suất +2,7 %, bị loại. Lần 25/11 CG nhận cả 2 vòng ASIC
   (cell −8,2 %, die −27,5 %); lần này agent đề xuất khác. Công cụ tất định, agent thì không.
 - Mọi vòng ASIC, kể cả vòng bị loại, đều qua gate sign-off: lý do loại chỉ là "kém hơn", không có vòng nào hỏng gate.
+
+## 10. Mẫu flow dùng chung: thêm một khối RTL thứ hai (26/11/2026)
+
+Mục tiêu: một thiết kế mới chỉ cần đưa RTL và testbench vào là cả ba nhánh chạy được, không sửa mã điều phối. Code của
+hai demo ALU gộp thành thư viện `flow/` ở gốc repo; mỗi project chỉ còn khai báo `project.py`. Lệnh chung cho mọi
+project:
+
+```bash
+python flow/run.py projects/<project> baseline        # hoặc agent --rounds N, sweep
+```
+
+### Hai mức dùng mẫu
+
+| | ALU NoCG / CG | ASCON (`projects/ascon-core/`) |
+|---|---|---|
+| Nguồn của project | RTL, tb, `project.py` + phần mở rộng: vỏ board Arty, tb GLS riêng, functional coverage, ba biến thể clock gating FPGA | Chỉ RTL (`ascon_core.sv`, `ascon_pkg.svh`), tb, `project.py` (khoảng 20 dòng, `flow/new.py` tạo khung) |
+| Flow tự sinh | | `run_sim.sh`, `config.mk`, SDC, `build.tcl` Vivado out-of-context, script công suất SAIF và GLS |
+| FPGA | Có vỏ board, ra bitstream | Out-of-context (không bitstream); GLS chạy chính tb của bước Sim trên netlist sau route |
+| PASS/FAIL | Dòng `RESULT: PASS` | Regex khai báo trong `project.py` (`[PASS] ...`, không có `[FAIL]`) |
+| Lint | `strict`: `-Wall` phải sạch | `errors`: chặn lỗi, ghi 12 cảnh báo |
+
+ASCON là lõi Ascon-AEAD128 giải mã và kiểm tag (bus 32 bit, một vòng mỗi clock) của người dùng, chưa từng chạy qua CHIA.
+Những gì phải sửa để đưa vào mẫu cũng chính là quy ước cho thiết kế sau:
+
+- tb tự in kết quả nhận diện được: dòng `RESULT:` hoặc regex pass/fail;
+- tb chỉ đọc cổng của DUT. tb gốc đọc `fsm_q` bên trong, nên GLS trên netlist sẽ hỏng; giờ tb chờ `auth_valid`;
+- tb tự `include` kiểu và hằng nó dùng: tách `ascon_pkg.svh` khỏi file RTL, logic RTL giữ nguyên;
+- giữ reset ≥ 100 ns trước kích thích đầu tiên. GSR của netlist Xilinx (`glbl.v`) khoá mọi flop trong 100 ns đầu; tb
+  gốc nạp khoá từ khoảng 45 ns nên GLS FPGA treo. Sửa ở tb theo cách Vivado tự làm, không sửa `glbl.v`;
+- một clock; SystemVerilog mà Verilator 5.022 và Yosys 0.68 đọc được.
+
+### Kết quả ASCON (chạy thật trên cluster)
+
+Baseline `baseline-20261126-213109`, chạy lại `baseline-20261126-223426` ra trùng từng số. `KẾT QUẢ: OK` cả hai lần.
+
+| Bước | Kết quả |
+|---|---|
+| Sim | PASS; lint 12 cảnh báo, 0 lỗi; coverage line 25/35, toggle 3 007/3 438, branch 44/60 |
+| FPGA Artix-7 100T, 100 MHz | LUT 1 592, FF 473; WNS 1,292 / WHS 0,217 ns (Fmax ước lượng 114,8 MHz); methodology 0 critical; SAIF khớp 66 % net, P động 23,4 mW; GLS PASS |
+| ASIC sky130hd, 10 ns | Cell 48 859 µm² (util 44,7 %), die 111 934 µm², 5 464 cell, 479 flop; setup/hold WS 2,626/0,474 ns (tt), 2,088/0,430 ns (tt + OCV ±10 %); P 9,96 mW; DRC router và KLayout 0, antenna 0, LVS khớp; GLS PASS |
+| Thời gian | Route khoảng 10 phút, cả lần chạy 13,3 phút; DRC ‖ LVS ‖ STA ‖ GLS song song 41,7 s (lần lượt 72,4 s) |
+
+Agent `--rounds 1` (`agent-20261126-215007`, `KẾT QUẢ: OK`), cùng luật nhận/loại như ALU:
+
+| Vòng | Agent sửa | Kết quả |
+|---|---|---|
+| sim-r1 | thêm kích thích vào tb | **NHẬN**: line 25 → 34/35, toggle 3 007 → 3 383, branch 44 → 57/60 |
+| fpga-r1 | `build.tcl` | LOẠI: WNS 1,292 → 0,71 ns, P động 23,4 → 30,5 mW |
+| asic-r1 | `config.mk` | LOẠI: die −15 %, P −1,6 %, nhưng cell 48 859 → 51 204 µm² (+4,8 %); route 1 211 s |
+
+Vòng ASIC dùng tb mới của sim-r1 và GLS vẫn PASS: tb do agent viết chạy đúng trên netlist. Project ASCON không có
+functional coverage, nên luật Sim tự chuyển sang line/toggle/branch.
+
+### Trang status dùng chung
+
+Trang status (`flow/status.py`) chỉ đọc `project.py` và kết quả chạy: số ô Flow và cột Results theo các bước bật (1–3),
+nhãn công cụ và dòng thông tin (DUT, clock, part, platform) lấy từ khai báo, dòng không áp dụng tự ẩn (ICG, công suất
+instance). Project tự thêm số liệu riêng qua `sim.metrics` (regex trên log mô phỏng, chỉ để xem; ASCON đếm dòng
+`[PASS]`). Đã xem trên cluster với ASCON; trường hợp chỉ Sim và Sim + ASIC mới thử trong sandbox.
+
+### Kết luận
+
+- Cả ba thiết kế (ALU NoCG, ALU CG, ASCON) chạy trên cùng một bộ điều phối `flow/`. Thiết kế mới theo năm quy ước trên
+  chỉ cần RTL, tb và `project.py`; muốn thêm board, coverage riêng hay biến thể thì khai báo thêm, không sửa `flow/`.
+- Flow phủ đủ các bước RTL → GDS và RTL → netlist FPGA, mỗi bước có gate sign-off cơ bản: lint, tb tự kiểm, coverage,
+  timing, methodology, DRC, antenna, LVS, STA sau route có SPEF, GLS. Kết quả tất định.
+- Chưa phải sign-off tape-out: STA một corner, GLS không SDF, chưa có LEC, công suất ASIC chưa theo hoạt động thật, một
+  clock (mục 7).
+- Chưa làm: SoC Chipyard (`sim.kind = "chipyard"`), nhiều clock.
+
