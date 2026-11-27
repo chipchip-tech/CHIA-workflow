@@ -493,11 +493,13 @@ async function simDeck() {
     const s = H.slide("Example · ASCON in the Sim Step");
     H.bars(s, [{ name: "baseline", labels: ["Line", "Toggle", "Branch"], values: [71.4, 87.5, 73.3] },
       { name: "agent", labels: ["Line", "Toggle", "Branch"], values: [97.1, 98.4, 95.0] }],
-      { x: 0.85, y: 1.35, w: 6.3, h: 4.3, title: "ASCON coverage, baseline vs sim-r1 (%)", fmt: '0.0"%"', min: 0, max: 110, legend: true });
+      { x: 0.85, y: 1.3, w: 6.3, h: 3.35, title: "ASCON coverage, baseline vs sim-r1 (%)", fmt: '0.0"%"', min: 0, max: 110, legend: true });
     H.head(s, "Same step, other settings", 7.55, 1.35, 4.95);
-    H.bullets(s, ["PASS from a regex in project.py ([PASS], no [FAIL]).", "Lint mode errors: 0 errors, 12 warnings logged.",
-      "No functional bins: the rule switches to line / toggle / branch by itself.", "Line 25 → 34/35, toggle 3 007 → 3 383/3 438, branch 44 → 57/60."],
-      { x: 7.55, y: 1.75, w: 4.95, h: 4.3 });
+    H.bullets(s, ["PASS from a regex in project.py ([PASS], no [FAIL]); lint: 0 errors.", "No functional bins: the rule uses line / toggle / branch.",
+      "sim-r1: the agent wrote an Ascon-AEAD128 reference model and 10 corner cases (empty AD/MSG, wrong tag, stalls)."],
+      { x: 7.55, y: 1.75, w: 4.95, h: 2.9 });
+    H.evidence(s, "the agent's summary, ASCON sim-r1 (before any run)", ["\"If it has a bug, the new checks will print [FAIL] and the round will be",
+      " rejected, not accepted with wrong values.\""], 0.85, 4.85, 11.65);
     H.msg(s, "The Sim step and its agent rule worked unchanged on a second design.");
   }
 
@@ -507,7 +509,7 @@ async function simDeck() {
     H.bullets(s, ["CHIA splits one step over two containers and gates the rest of the flow on its result.",
       "Coverage tells the agent where the gaps are; it closed them in one round."], { x: 0.85, y: 1.7, w: 5.6, h: 4.2 });
     H.head(s, "Limits", 6.85, 1.3, 5.65);
-    H.bullets(s, ["Functional bins are hand-written; ASCON has none (directed test, no reference model).",
+    H.bullets(s, ["Functional bins are hand-written; ASCON has none (its reference model came from the agent).",
       "One clock; no CDC / RDC check.", "Two rounds, one run each; the agent is not deterministic."], { x: 6.85, y: 1.7, w: 5.65, h: 4.2 });
     H.msg(s, "Next, Part 2: the same ALU goes through Vivado to a bitstream.");
   }
@@ -724,6 +726,7 @@ async function asicDeck() {
     H.table(s, [["ASCON, sky130hd, 10 ns", "Baseline"], ["Cells · flops", "5 464 · 479"], ["Cell / die area (µm²)", "48 859 / 111 934"],
       ["Setup / hold, tt (ns)", "2.626 / 0.474"], ["tt + OCV ±10 % (ns)", "2.088 / 0.430"], ["Power (mW)", "9.96"], ["DRC · antenna · LVS · GLS", "0 · 0 · match · PASS"]],
       { x: 0.85, y: 1.35, w: 6.6, colW: [3.3, 3.3], boldFirstCol: true });
+    H.evidence(s, "the LVS log, ASCON baseline (KLayout, 12.4 s)", ["INFO : Congratulations! Netlists match."], 0.85, 4.95, 6.6);
     H.head(s, "Timing of the run", 7.85, 1.35, 4.65);
     H.bullets(s, ["Route ≈ 10 min; whole run 13.3 min.", "Sign-off checks in parallel: 41.7 s (72.4 s in series).",
       "Agent asic-r1: die −15 %, cell +4.8 %, rejected.", "GLS ran the agent's new testbench: PASS."], { x: 7.85, y: 1.75, w: 4.65, h: 4.3 });
