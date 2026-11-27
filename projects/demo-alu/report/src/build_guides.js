@@ -55,6 +55,12 @@ function deck(name, titleText) {
       s.addText([{ text: (label || "Result") + "  ", options: { bold: true, color: K.black } }, { text: t, options: { color: K.ink } }],
         { x, y, w, h: h || 0.5, fontFace: F, fontSize: FS, valign: "middle", margin: [4, 8, 4, 8], line: { color: K.ink, width: 1, dashType: "dash" }, isTextBox: true });
     },
+    // trích nguyên văn từ log/report thật
+    evidence(s, src, lines, x, y, w) {
+      const runs = [{ text: "From " + src, options: { fontFace: F, italic: true, color: K.mute, breakLine: true } }];
+      lines.forEach((l, i) => runs.push({ text: l, options: { fontFace: M, color: K.black, breakLine: i < lines.length - 1 } }));
+      s.addText(runs, { x, y, w, h: 0.3 + 0.3 * lines.length, fontSize: FS, valign: "top", margin: [3, 8, 3, 8], line: { color: K.line, width: 0.75 }, isTextBox: true });
+    },
     caption(s, t, x, y, w, h) {
       s.addText(t, { x, y, w, h: h || 0.32, fontFace: F, fontSize: FS, italic: true, color: K.mute, margin: 0, isTextBox: true });
     },
@@ -450,7 +456,7 @@ async function simDeck() {
     H.table(s, [["Baseline Sim", "ALU NoCG", "ALU CG", "ASCON"], ["Result · lint", "PASS · 0 warnings", "PASS · 0 warnings", "PASS · 12 warnings"],
       ["Functional bins", "51/55", "51/57", "-"], ["Line · branch", "15/16 · 8/8", "14/15 · 8/10", "25/35 · 44/60"]],
       { x: 0.85, y: 3.85, w: 11.65, colW: [2.75, 2.95, 2.95, 3.0], boldFirstCol: true });
-    H.caption(s, "Missing ALU bins: reset mid-run (both); CG also en changing while the clock is high.", 0.85, 5.55, 11.65);
+    H.evidence(s, "the Sim log, NoCG baseline", ["RESULT: PASS dut=NoCG_alu seed=1 cycles=20249 ... checked=6272 errors=0"], 0.85, 5.35, 11.65);
     H.msg(s, "Same test, same result: Sim cannot see the cost of clock gating; FPGA and ASIC can.");
   }
 
@@ -462,7 +468,8 @@ async function simDeck() {
     H.head(s, "What it added", 7.85, 1.35, 4.65);
     H.bullets(s, ["10-15 targeted checks: reset mid-run, en changing while the clock is high.", "Round 2: nothing left to cover, no edit.",
       "ASCON: new stimulus; later the ASIC gate-level sim ran this testbench and passed."], { x: 7.85, y: 1.75, w: 4.65, h: 4.2 });
-    H.caption(s, "Under the old rule (count comparisons) the agent added 0.5-1.5 million comparisons.", 0.85, 4.35, 6.6, 0.7);
+    H.evidence(s, "the Sim log, CG after sim-r1", ["FCOV: hit=57 total=57", "FCOV_MISS: -"], 0.85, 3.95, 6.6);
+    H.caption(s, "Under the old rule (count comparisons) the agent added 0.5-1.5 million comparisons.", 0.85, 5.15, 6.6, 0.7);
     H.msg(s, "Full functional coverage in one round with a few dozen checks; every round 1 accepted.");
   }
 
@@ -565,8 +572,8 @@ async function fpgaDeck() {
       ["CG r2", "build.tcl", "WNS up, power +12 %", "rejected"],
       ["ASCON r1", "build.tcl", "WNS 1.292 → 0.71 ns; power 23.4 → 30.5 mW", "rejected"]],
       { x: 0.85, y: 1.35, w: 11.65, colW: [1.35, 4.4, 4.55, 1.35], boldFirstCol: true });
-    H.bullets(s, ["CG r1: the agent read the reports, found the latch and TIMING-14, and picked the right fix.",
-      "Rejected under the old strict rule on 21/11 (+3 LUT+FF); the rule was changed before this run."], { x: 0.85, y: 4.85, w: 11.65, h: 1.25 });
+    H.evidence(s, "the agent's summary, CG r1 (before any build)", ["\"WNS is exactly 0.000 ns only because the latch borrows time.\""], 0.85, 4.7, 11.65);
+    H.caption(s, "The same change was rejected under the old strict rule on 21/11 (+3 LUT+FF); the rule was changed before this run.", 0.85, 5.5, 11.65);
     H.msg(s, "The agent fixed the real FPGA problem of clock gating: sign-off clean and power −21 %.");
   }
 
@@ -652,7 +659,8 @@ async function asicDeck() {
     H.head(s, "Why CG is better here", 8.8, 1.35, 3.7);
     H.bullets(s, ["The ICG replaces the feedback mux: 50 fewer cells.", "Cost: twice as many clock buffers.",
       "CTS handles the ICG cells."], { x: 8.8, y: 1.75, w: 3.7, h: 4.2 });
-    H.caption(s, "Power: OpenSTA with default activity, not from simulation.", 0.85, 4.75, 7.6);
+    H.caption(s, "Power: OpenSTA with default activity, not from simulation.", 0.85, 4.45, 7.6);
+    H.evidence(s, "the LVS log and the gate-level sim log, NoCG", ["INFO : Congratulations! Netlists match.", "RESULT: PASS dut=NoCG_alu seed=1 ... checked=6272 errors=0"], 0.85, 4.95, 11.65);
     H.msg(s, "Clock gating pays off on ASIC: 50 fewer cells, power −12 %. The opposite of FPGA.");
   }
 
