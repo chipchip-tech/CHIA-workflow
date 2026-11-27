@@ -4,24 +4,97 @@ Thư viện điều phối, gate, vòng agent Claude và trang status, tách ra 
 26/11/2026. Một project chỉ cần nguồn thiết kế theo các quy ước dưới đây và một file khai báo `project.py`.
 Nhánh `demo` dùng và kiểm chứng trước; ổn định thì nhập sang `setup` cho các project sau.
 
-## Project mới: tối thiểu cần gì
+## Hướng dẫn: đưa một khối RTL mới vào flow
 
-Một khối RTL chỉ cần **RTL + testbench tự kiểm + `project.py`**; mọi file còn lại flow tự sinh trong thư mục chạy
+Một khối RTL chỉ cần **RTL + testbench tự kiểm + `project.py`**. Mọi file còn lại flow tự sinh trong thư mục chạy
 (`flow/generate.py`): `sim/run_sim.sh`, `asic/config.mk`, `asic/constraint.sdc`, và cho FPGA chế độ out-of-context
-`fpga/build.tcl`, `sources.f`, `sim_cfg.tcl`. Tạo khung:
+`fpga/build.tcl`, `sources.f`, `sim_cfg.tcl`. Ví dụ đã chạy thật: `projects/ascon-core/`. Ví dụ dưới đây giả sử có
+`my_block.sv` (top `my_block`), header `my_pkg.svh` và `tb_my_block.sv`.
+
+### Bước 0: kiểm testbench
+
+Testbench theo đủ năm quy ước thì flow chạy được ngay. Đây cũng là những chỗ lõi ASCON đã phải sửa:
+
+1. **Tự kiểm và in kết quả:** dòng `RESULT: PASS ...` / `RESULT: FAIL ...`, hoặc kiểu riêng (`[PASS] ...`, `TEST OK`)
+   rồi khai báo regex ở bước 1.
+2. **Chỉ đọc cổng của DUT**, không đọc `dut.fsm_q` hay tín hiệu bên trong: GLS (mô phỏng netlist ASIC và FPGA sau
+   route) dùng lại chính testbench này, mà netlist không còn tên tín hiệu bên trong. `new.py` cảnh báo khi thấy.
+3. **Kiểu và hằng tb dùng nằm trong file `.svh`/`.vh` riêng**, tb tự `include`. Khai báo đặt trong file RTL sẽ không
+   còn khi chạy trên netlist. Khi GLS, flow define `GLS`.
+4. **Giữ reset ít nhất 100 ns** trước kích thích đầu tiên: netlist Xilinx giữ mọi flop trong reset toàn cục (GSR,
+   `glbl.v` của Vivado, flow không sửa) 100 ns đầu, theo quy trình mô phỏng gate-level chuẩn của Vivado.
+5. **Một clock**, SystemVerilog mà Verilator 5.022 và Yosys 0.68 đọc được.
+
+### Bước 1: tạo project
+
+Trên head, từ gốc repo:
 
 ```bash
-python flow/new.py projects/<tên> --top <module> --rtl a.sv pkg.svh --tb tb_<module>.sv --clock clk:10 --pass "REGEX" --fail "REGEX"
+python flow/new.py projects/my-block --top my_block --rtl ~/src/my_block.sv ~/src/my_pkg.svh --tb ~/src/tb_my_block.sv --clock clk:10 --pass "TEST PASSED" --fail "ERROR"
 ```
 
-Rồi điền `agent.description`, `agent.sim_hints` trong `project.py` và chạy baseline. Ví dụ: `projects/ascon-core/`.
-Testbench phải theo hai quy ước để GLS (mô phỏng netlist ASIC sau route và FPGA sau route) dùng lại được nó:
-chỉ dùng **cổng** của DUT (không `u_dut.tín_hiệu_trong`; `new.py` cảnh báo khi thấy), và tự `include file khai báo
-kiểu/hằng nó dùng (khai báo đặt trong file RTL sẽ không còn khi chạy trên netlist). Khi GLS, flow define `GLS`.
-Testbench giữ reset ít nhất 100 ns rồi mới đưa kích thích: netlist Xilinx giữ mọi flop trong reset toàn cục (GSR,
-`glbl.v` của Vivado, flow không sửa) 100 ns đầu, theo quy trình mô phỏng gate-level chuẩn của Vivado.
-Project có vỏ board riêng (`fpga/build.tcl`, `fpga_top.v`, tb riêng) thì chạy chế độ `board` như demo ALU.
-**SoC Chipyard: chưa hỗ trợ** (phần B, làm sau).
+- Chép RTL vào `rtl/`, tb vào `sim/`, viết `project.py` và `README.md`; kiểm ngay `module my_block` có trong RTL, tb có
+  instance của DUT, tb có đọc tín hiệu bên trong không.
+- Bỏ `--pass`/`--fail` nếu tb in dòng `RESULT:`. Tuỳ chọn khác: `--steps sim,asic` (bỏ FPGA), `--part`, `--platform`,
+  `--title`.
+- Mở `projects/my-block/project.py`, điền hai dòng TODO cho agent: `agent.description` (khối làm gì, giao tiếp thế
+  nào) và `agent.sim_hints` (trường hợp biên tb nên phủ). Các trường khác xem mục "Khai báo project".
+- Không cần `git push` để chạy: job mang theo nguyên thư mục repo trên head, kể cả file chưa commit.
+
+### Bước 2: baseline
+
+Cluster theo khối đã bật (`python scripts/chia-up-blocks.py --fpga --asic`, trong `chia_env`). Chạy thử riêng Sim
+(khoảng 1 phút), rồi cả ba bước:
+
+```bash
+python flow/run.py projects/my-block baseline --stages sim
+```
+```bash
+python flow/run.py projects/my-block baseline
+```
+
+Trình duyệt tự mở trang status. Flow chạy:
+
+- **Sim** (khối chipyard → verilator): lint `-Wall` (mặc định chỉ chặn lỗi, cảnh báo ghi lại), build và chạy tb, xét
+  PASS/FAIL theo regex, coverage line/toggle/branch của DUT, VCD.
+- **FPGA** (khối vivado): synth + place & route out-of-context theo part khai báo, clock 10 ns; WNS/WHS, methodology,
+  LUT/FF; chạy chính tb trên netlist sau route để lấy GLS và SAIF, ra công suất động.
+- **ASIC** (khối asic): synth → floorplan → place → CTS → route → GDS; sau `finish`, DRC KLayout, LVS, STA mỗi corner
+  và GLS ASIC chạy song song.
+
+`KẾT QUẢ: OK` là qua mọi gate. Kết quả ở `~/chia_demo/my-block/baseline-<giờ>/`. Khối cỡ ASCON mất khoảng 13 phút,
+phần lớn là route.
+
+### Bước 3: agent
+
+```bash
+python flow/run.py projects/my-block agent --rounds 2
+```
+
+Lấy baseline OK mới nhất làm mốc. Mỗi bước, Claude sửa đúng phần được phép (Sim: tb; FPGA: `build.tcl`; ASIC:
+`config.mk`; RTL cố định), CHIA đo lại qua đủ gate, rồi nhận nếu tốt hơn (Sim: coverage tăng; FPGA: WNS và công suất
+không kém; ASIC: diện tích và công suất không kém), loại nếu không.
+
+### Bước 4: dọn đĩa
+
+```bash
+python flow/clean_runs.py --only my-block
+```
+
+Mặc định chỉ liệt kê; thêm `--yes` để xoá thật.
+
+### Khi bị chặn
+
+| Hiện tượng | Nguyên nhân thường gặp | Sửa |
+|---|---|---|
+| Sim FAIL dù tb in đúng | regex `--pass` không khớp | sửa `sim.pass_patterns` trong `project.py` |
+| Lint chặn | lỗi lint thật (không phải cảnh báo) | sửa RTL, hoặc tạm `"lint": False` |
+| GLS FPGA treo hoặc FAIL | tb đọc tín hiệu bên trong, hoặc reset dưới 100 ns | quy ước 2 và 4 ở bước 0 |
+| ASIC dừng ở synth | Yosys không đọc được cú pháp SV đó | viết lại đoạn đó |
+| Timing âm | 10 ns quá nhanh cho khối | tăng `period_ns` trong `clocks` |
+
+Project có vỏ board riêng (`fpga/build.tcl`, `fpga_top.v`, tb riêng) thì chạy chế độ `board` như demo ALU (mục "Quy ước
+nguồn khi project tự viết file"). **SoC Chipyard: chưa hỗ trợ** (phần B, làm sau).
 
 ## Lệnh
 
