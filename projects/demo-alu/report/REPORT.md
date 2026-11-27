@@ -37,10 +37,10 @@ do session làm việc cập nhật.
 
 | File | Slide |
 |---|---|
-| `0_Setup.pptx` (14) | Cover · How CHIA Runs Work · Example: One Simulation Task Through CHIA · Machine and Software Used · Setup Process · Steps 1-2 Host and Python · Tools Live on the Host, Workers Mount Them · Steps 3-4 Installing the Tools · Step 5 The Block Cluster · Bring-up and Smoke Test · Remote Workers: Architecture (PLAN) · Remote Workers: Planned Steps (PLAN) · Shared Flow: A New Design Needs Three Files · Setup Status |
-| `1_Sim.pptx` (7) | Cover · Where Sim Fits · Running the Baseline Sim on CHIA · Agent: Improve the Testbench · NoCG vs CG: Same Test, Different Clocking · What the Agent Added · Takeaways and Limits |
+| `0_Setup.pptx` (15) | Cover · How CHIA Runs Work · Example: One Simulation Task Through CHIA · Machine and Software Used · Setup Process · Steps 1-2 Host and Python · Tools Live on the Host, Workers Mount Them · Steps 3-4 Installing the Tools · Step 5 The Block Cluster · Bring-up and Smoke Test · Remote Workers: Architecture (PLAN) · Remote Workers: Planned Steps (PLAN) · Shared Flow: A New Design Needs Three Files · Proof: ASCON Through the Same Flow · Setup Status |
+| `1_Sim.pptx` (8, thêm ASCON in the Sim Step trước Takeaways) | Cover · Where Sim Fits · Running the Baseline Sim on CHIA · Agent: Improve the Testbench · NoCG vs CG: Same Test, Different Clocking · What the Agent Added · Takeaways and Limits |
 | `2_FPGA.pptx` (9) | Cover · Where FPGA Fits · Running the FPGA Build on CHIA · Agent: Tune the FPGA Build · Baseline: Clock Gating Hurts on FPGA (3 biểu đồ) · Three Ways to Gate a Clock on FPGA · Agent Rounds: CG r1 Accepted · Second Design: ASCON, Out-of-Context · Takeaways and Limits |
-| `3_ASIC.pptx` (8) | Cover · Where ASIC Fits · Running the ASIC Flow on CHIA · Agent: Tune config.mk · Baseline: Clock Gating Pays Off on ASIC · What the Agent Changed (biểu đồ %) · Layouts, Same Scale · Takeaways and Limits |
+| `3_ASIC.pptx` (9, thêm ASCON from RTL to GDS trước Takeaways; chừa chỗ ảnh layout ASCON) | Cover · Where ASIC Fits · Running the ASIC Flow on CHIA · Agent: Tune config.mk · Baseline: Clock Gating Pays Off on ASIC · What the Agent Changed (biểu đồ %) · Layouts, Same Scale · Takeaways and Limits |
 
 Ảnh layout: `img/{NoCG,CG}_{baseline,agent}_layout.png`. `NoCG_agent` là của lần 21/11 (die 4 642 µm²), không khớp số chốt 26/11 (5 460 µm²) nên đã bỏ khỏi slide; `CG_agent` khớp (5 505 µm²). Cần xin người dùng ảnh NoCG agent 26/11 và layout ASCON.
 

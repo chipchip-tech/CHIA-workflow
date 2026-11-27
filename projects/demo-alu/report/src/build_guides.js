@@ -367,6 +367,22 @@ async function setupDeck() {
     H.msg(s, "Tested with a second design, the ASCON core: only RTL, testbench and project.py were added.");
   }
 
+  // 12c. ASCON chứng minh mẫu flow
+  {
+    const s = H.slide("Proof: ASCON Through the Same Flow");
+    H.head(s, "What was added", 0.85, 1.3, 5.6);
+    H.bullets(s, ["Ascon-AEAD128 decrypt + tag check, 32-bit bus; never run on CHIA before.", "RTL (2 files), testbench, project.py (≈ 20 lines).",
+      "No change to flow/: same driver, tasks, gates and agent rules as the ALU."], { x: 0.85, y: 1.7, w: 5.6, h: 2.0 });
+    H.head(s, "Testbench fixes it needed", 0.85, 3.7, 5.6);
+    H.bullets(s, ["Read fsm_q inside the DUT → wait for auth_valid.", "Package split into ascon_pkg.svh.", "Key loaded at 45 ns → reset ≥ 100 ns (GSR)."],
+      { x: 0.85, y: 4.1, w: 5.6, h: 1.3 });
+    H.head(s, "Result", 6.85, 1.3, 5.65);
+    H.table(s, [["Run", "Result"], ["Baseline, Sim → FPGA → ASIC", "OK, 13.3 min"], ["Baseline again", "identical numbers"], ["Agent, 1 round per step", "OK; Sim accepted"]],
+      { x: 6.85, y: 1.7, w: 5.65, colW: [3.35, 2.3], boldFirstCol: true });
+    H.cmd(s, "python flow/run.py projects/ascon-core baseline", 0.85, 5.5, 7.0);
+    H.msg(s, "A design the flow had never seen ran end to end with only RTL, testbench and project.py.");
+  }
+
   // 13. Trạng thái
   {
     const s = H.slide("Setup Status");
@@ -471,6 +487,18 @@ async function simDeck() {
     H.evidence(s, "the Sim log, CG after sim-r1", ["FCOV: hit=57 total=57", "FCOV_MISS: -"], 0.85, 3.95, 6.6);
     H.caption(s, "Under the old rule (count comparisons) the agent added 0.5-1.5 million comparisons.", 0.85, 5.15, 6.6, 0.7);
     H.msg(s, "Full functional coverage in one round with a few dozen checks; every round 1 accepted.");
+  }
+
+  {
+    const s = H.slide("Example · ASCON in the Sim Step");
+    H.bars(s, [{ name: "baseline", labels: ["Line", "Toggle", "Branch"], values: [71.4, 87.5, 73.3] },
+      { name: "agent", labels: ["Line", "Toggle", "Branch"], values: [97.1, 98.4, 95.0] }],
+      { x: 0.85, y: 1.35, w: 6.3, h: 4.3, title: "ASCON coverage, baseline vs sim-r1 (%)", fmt: '0.0"%"', min: 0, max: 110, legend: true });
+    H.head(s, "Same step, other settings", 7.55, 1.35, 4.95);
+    H.bullets(s, ["PASS from a regex in project.py ([PASS], no [FAIL]).", "Lint mode errors: 0 errors, 12 warnings logged.",
+      "No functional bins: the rule switches to line / toggle / branch by itself.", "Line 25 → 34/35, toggle 3 007 → 3 383/3 438, branch 44 → 57/60."],
+      { x: 7.55, y: 1.75, w: 4.95, h: 4.3 });
+    H.msg(s, "The Sim step and its agent rule worked unchanged on a second design.");
   }
 
   {
@@ -689,6 +717,17 @@ async function asicDeck() {
       s.addText(t, { x: x - 0.1, y: 4.75, w: S + 0.2, h: 0.32, fontFace: F, fontSize: 14, color: K.ink, align: "center", margin: 0, isTextBox: true }));
     H.caption(s, "Picture side ∝ √(die area), relative to the NoCG baseline.", 0.85, 5.35, 11.65);
     H.msg(s, "The agent shrank the die by packing the same cells tighter, not by changing the design.");
+  }
+
+  {
+    const s = H.slide("Example · ASCON from RTL to GDS");
+    H.table(s, [["ASCON, sky130hd, 10 ns", "Baseline"], ["Cells · flops", "5 464 · 479"], ["Cell / die area (µm²)", "48 859 / 111 934"],
+      ["Setup / hold, tt (ns)", "2.626 / 0.474"], ["tt + OCV ±10 % (ns)", "2.088 / 0.430"], ["Power (mW)", "9.96"], ["DRC · antenna · LVS · GLS", "0 · 0 · match · PASS"]],
+      { x: 0.85, y: 1.35, w: 6.6, colW: [3.3, 3.3], boldFirstCol: true });
+    H.head(s, "Timing of the run", 7.85, 1.35, 4.65);
+    H.bullets(s, ["Route ≈ 10 min; whole run 13.3 min.", "Sign-off checks in parallel: 41.7 s (72.4 s in series).",
+      "Agent asic-r1: die −15 %, cell +4.8 %, rejected.", "GLS ran the agent's new testbench: PASS."], { x: 7.85, y: 1.75, w: 4.65, h: 4.3 });
+    H.msg(s, "A 5 000-cell design passes the same sign-off gates as the ALU, with no change to the flow.");
   }
 
   {
