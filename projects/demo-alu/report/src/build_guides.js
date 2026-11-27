@@ -344,6 +344,23 @@ async function setupDeck() {
     H.msg(s, "Scripts and config are written; testing waits for a second machine (lab PC or cloud VM).");
   }
 
+  // 12b. Mẫu flow dùng chung
+  {
+    const s = H.slide("Shared Flow: A New Design Needs Three Files");
+    H.hflow(s, [["RTL", "the design"], ["Testbench", "self-checking"], ["project.py", "≈ 20 lines"]], 1.35, 0.9, { w: 6.2, dark: [2] });
+    H.arrow(s, 7.05, 1.8, 7.55, 1.8);
+    H.box(s, "flow/ generates", "sim script, config.mk, SDC, Vivado build.tcl, SAIF and GLS scripts", 7.55, 1.35, 4.95, 0.9);
+    H.head(s, "5 testbench rules", 0.85, 2.6, 6.2);
+    H.bullets(s, ["Prints its own PASS / FAIL (RESULT: line or a regex).", "Reads only DUT ports, so it also runs on netlists (GLS).",
+      "Types and constants in a separate .svh file.", "Reset ≥ 100 ns (Xilinx global reset).", "One clock; SV that Verilator 5.022 and Yosys 0.68 read."],
+      { x: 0.85, y: 3.0, w: 6.2, h: 2.6, fs: 14 });
+    H.head(s, "4 steps", 7.55, 2.6, 4.95);
+    H.table(s, [["1", "create project (flow/new.py)"], ["2", "baseline"], ["3", "agent --rounds N"], ["4", "clean the run folders"]],
+      { x: 7.55, y: 3.0, w: 4.95, colW: [0.5, 4.45], noHeader: true, boldFirstCol: true });
+    H.cmd(s, "python flow/run.py <project> baseline", 7.55, 4.75, 4.95);
+    H.msg(s, "Tested with a second design, the ASCON core: only RTL, testbench and project.py were added.");
+  }
+
   // 13. Trạng thái
   {
     const s = H.slide("Setup Status");
@@ -353,6 +370,8 @@ async function setupDeck() {
       ["Clean shutdown", "verified 15/11/2026"],
       ["Shared run folder between blocks", "verified 20/11/2026"],
       ["ALU demo: Sim, FPGA, ASIC, baseline and agent", "verified 20-21/11/2026"],
+      ["Sign-off gates (coverage, LVS, STA, GLS ...), agent rerun", "verified 25-26/11/2026"],
+      ["Shared flow/ with a second design (ASCON)", "verified 26/11/2026"],
       ["Remote worker on a LAN", "written, not tested"],
       ["Cloud VM through Tailscale", "written, not tested"]],
       { x: 0.85, y: 1.35, w: 11.65, colW: [7.65, 4.0] });
@@ -376,9 +395,9 @@ async function simDeck() {
     H.bullets(s, ["ALU RTL: 8 bit, 8 ops, 2-stage pipeline (locked).", "Self-checking testbench with its own reference model.",
       "Seed 1, 20 000 cycles, en active 30 % of cycles."], { x: 0.85, y: 2.95, w: 5.5, h: 3.0 });
     H.head(s, "Output", 6.85, 2.55, 5.65);
-    H.bullets(s, ["RESULT line: number of checks (checked) and errors.", "Waveform of the whole run.", "Numbers saved as the reference for the agent."],
+    H.bullets(s, ["RESULT line: PASS / FAIL and errors.", "Coverage: functional bins (fixed file) + line, toggle, branch.", "Lint (verilator -Wall), waveform."],
       { x: 6.85, y: 2.95, w: 5.65, h: 3.0 });
-    H.msg(s, "Sim is the first gate: FPGA and ASIC only start after the testbench prints RESULT: PASS.");
+    H.msg(s, "Sim is the first gate: FPGA and ASIC start only after lint is clean and the testbench passes.");
   }
 
   {
@@ -387,29 +406,29 @@ async function simDeck() {
     H.box(s, "Build task", "chipyard worker · Verilator", 4.2, 1.4, 3.3, 0.95);
     H.box(s, "Run task", "verilator worker", 4.2, 2.85, 3.3, 0.95);
     H.box(s, "Shared run folder", "binary, log, waveform", 8.4, 2.1, 4.1, 0.95);
-    H.box(s, "Gate", "RESULT: PASS ?", 4.2, 4.3, 3.3, 0.8);
+    H.box(s, "Gate", "lint + PASS ?", 4.2, 4.3, 3.3, 0.8);
     H.box(s, "FPGA step", "Part 2", 8.4, 4.3, 4.1, 0.8);
     H.arrow(s, 3.45, 1.875, 4.2, 1.875); H.arrow(s, 5.85, 2.35, 5.85, 2.85); H.arrow(s, 5.85, 3.8, 5.85, 4.3);
     H.arrow(s, 7.5, 1.875, 8.4, 2.4); H.arrow(s, 8.4, 2.8, 7.5, 3.325); H.arrow(s, 7.5, 4.7, 8.4, 4.7);
     H.para(s, "writes", { x: 7.45, y: 1.6, w: 1.0, h: 0.32, fs: 14, align: "center" });
     H.para(s, "reads", { x: 7.45, y: 3.45, w: 1.0, h: 0.32, fs: 14, align: "center" });
     H.para(s, "pass", { x: 7.5, y: 4.3, w: 0.9, h: 0.32, fs: 14, align: "center" });
-    H.result(s, "both demos: PASS, 6 272 checks, 0 errors", 0.85, 2.85, 2.95, 1.25);
-    H.cmd(s, "python run_demo.py NoCG baseline --stages sim", 0.85, 5.45, 7.0);
+    H.result(s, "ALU NoCG, CG and ASCON: all PASS", 0.85, 2.85, 2.95, 1.25);
+    H.cmd(s, "python flow/run.py projects/demo-alu/NoCG baseline", 0.85, 5.45, 7.0);
     H.msg(s, "Build and run are split over two containers that share one run folder.");
   }
 
   {
     const s = H.slide("Agent: Improve the Testbench");
-    H.loop(s, 1.4, "testbench only", "checks must rise");
+    H.loop(s, 1.4, "testbench only", "coverage must rise");
     H.head(s, "Rules for the agent", 0.85, 2.85, 5.6);
     H.bullets(s, ["Edits only the testbench; the RTL is the reference.", "Edits to other files are undone before measuring.",
       "Each round works in its own copy; prompt, diff and summary are kept."], { x: 0.85, y: 3.25, w: 5.6, h: 2.1 });
     H.head(s, "Gate and rule", 6.85, 2.85, 5.65);
-    H.table(s, [["", "Sim"], ["Gate", "Verilator build + run prints RESULT: PASS"], ["Accept", "checked greater than the best so far"], ["Rounds", "up to 2"]],
+    H.table(s, [["", "Sim"], ["Gate", "lint + testbench PASS"], ["Accept", "no coverage drops, more bins covered"], ["Rounds", "up to 2"]],
       { x: 6.85, y: 3.25, w: 5.65, colW: [1.3, 4.35], boldFirstCol: true });
-    H.cmd(s, "python run_demo.py NoCG agent --rounds 2", 0.85, 5.45, 7.0);
-    H.msg(s, "A round counts only if Verilator still passes and the number of checks goes up.");
+    H.cmd(s, "python flow/run.py projects/demo-alu/NoCG agent --rounds 2", 0.85, 5.45, 8.4);
+    H.msg(s, "More comparisons alone do not count: a round must cover a case not covered before.");
   }
 
   {
@@ -428,34 +447,33 @@ async function simDeck() {
     H.arrow(s, 8.05, 2.075, 8.4, 2.075); H.arrow(s, 10.1, 2.075, 10.45, 2.075); H.arrow(s, 8.05, 2.825, 10.45, 2.825);
     H.caption(s, "en = 0: the mux feeds a_q back", 0.85, 3.3, 5.6);
     H.caption(s, "en = 0: the clock stops, the flip-flop holds", 6.85, 3.3, 5.65);
-    H.table(s, [["Baseline Sim", "NoCG", "CG"], ["Result", "PASS", "PASS"], ["checked / errors", "6 272 / 0", "6 272 / 0"]],
-      { x: 0.85, y: 4.0, w: 11.65, colW: [3.0, 4.325, 4.325], boldFirstCol: true });
+    H.table(s, [["Baseline Sim", "ALU NoCG", "ALU CG", "ASCON"], ["Result · lint", "PASS · 0 warnings", "PASS · 0 warnings", "PASS · 12 warnings"],
+      ["Functional bins", "51/55", "51/57", "-"], ["Line · branch", "15/16 · 8/8", "14/15 · 8/10", "25/35 · 44/60"]],
+      { x: 0.85, y: 3.85, w: 11.65, colW: [2.75, 2.95, 2.95, 3.0], boldFirstCol: true });
+    H.caption(s, "Missing ALU bins: reset mid-run (both); CG also en changing while the clock is high.", 0.85, 5.55, 11.65);
     H.msg(s, "Same test, same result: Sim cannot see the cost of clock gating; FPGA and ASIC can.");
   }
 
   {
     const s = H.slide("Example · What the Agent Added");
-    H.table(s, [["", "NoCG", "CG"], ["Baseline checks", "6 272", "6 272"], ["After 2 rounds", "542 046 (×86)", "1 509 090 (×241)"], ["Still PASS", "yes", "yes"]],
-      { x: 0.85, y: 1.35, w: 6.2, colW: [2.2, 2.0, 2.0], boldFirstCol: true });
-    H.head(s, "Round 1: cases not checked before", 0.85, 3.3, 6.2);
-    H.bullets(s, ["valid exactly 2 cycles after en", "edge values 7F/80, FF/00; large shifts", "back-to-back and idle en patterns; reset mid-run"],
-      { x: 0.85, y: 3.7, w: 6.2, h: 2.3 });
-    H.head(s, "Round 2: exhaustive", 7.35, 1.35, 5.15);
-    H.bullets(s, ["ADD, SUB, SLT over all 256 × 256 operand pairs."], { x: 7.35, y: 1.75, w: 5.15, h: 1.2 });
-    H.head(s, "CG only: glitch check", 7.35, 3.3, 5.15);
-    H.bullets(s, ["Counts gated-clock edges every cycle: 1 when en = 1, 0 when idle.", "Tests directly that the ICG never makes a spurious pulse."],
-      { x: 7.35, y: 3.7, w: 5.15, h: 2.3 });
-    H.msg(s, "All 4 rounds accepted; on CG the agent added a clock-gating check without being asked.");
+    H.table(s, [["Round 1", "Baseline", "Agent"], ["ALU NoCG: bins", "51/55", "55/55"], ["ALU CG: bins · branch", "51/57 · 8/10", "57/57 · 10/10"],
+      ["ASCON: line · branch", "25/35 · 44/60", "34/35 · 57/60"], ["ALU comparisons", "6 272", "6 277 / 6 305"]],
+      { x: 0.85, y: 1.35, w: 6.6, colW: [2.8, 1.9, 1.9], boldFirstCol: true });
+    H.head(s, "What it added", 7.85, 1.35, 4.65);
+    H.bullets(s, ["10-15 targeted checks: reset mid-run, en changing while the clock is high.", "Round 2: nothing left to cover, no edit.",
+      "ASCON: new stimulus; later the ASIC gate-level sim ran this testbench and passed."], { x: 7.85, y: 1.75, w: 4.65, h: 4.2 });
+    H.caption(s, "Under the old rule (count comparisons) the agent added 0.5-1.5 million comparisons.", 0.85, 4.35, 6.6, 0.7);
+    H.msg(s, "Full functional coverage in one round with a few dozen checks; every round 1 accepted.");
   }
 
   {
     const s = H.slide("Takeaways and Limits");
     H.head(s, "What this step shows", 0.85, 1.3, 5.6);
     H.bullets(s, ["CHIA splits one step over two containers and gates the rest of the flow on its result.",
-      "The agent found real gaps in the testbench; Verilator confirmed every new check."], { x: 0.85, y: 1.7, w: 5.6, h: 4.2 });
+      "Coverage tells the agent where the gaps are; it closed them in one round."], { x: 0.85, y: 1.7, w: 5.6, h: 4.2 });
     H.head(s, "Limits", 6.85, 1.3, 5.65);
-    H.bullets(s, ["checked counts comparisons, not coverage.", "Bigger tests cost time and disk (waveform ≈ 90 MB).",
-      "Two rounds, one run each; the agent is not deterministic."], { x: 6.85, y: 1.7, w: 5.65, h: 4.2 });
+    H.bullets(s, ["Functional bins are hand-written; ASCON has none (directed test, no reference model).",
+      "One clock; no CDC / RDC check.", "Two rounds, one run each; the agent is not deterministic."], { x: 6.85, y: 1.7, w: 5.65, h: 4.2 });
     H.msg(s, "Next, Part 2: the same ALU goes through Vivado to a bitstream.");
   }
   await H.save("1_Sim.pptx");
@@ -467,7 +485,7 @@ async function simDeck() {
 async function fpgaDeck() {
   const H = deck("Part 2 · FPGA", "Part 2: FPGA with Vivado");
   H.cover("PART 2 · FPGA", "Step 2 of the Flow:", "FPGA with Vivado 2025.1",
-    "Self-checking wrapper, bitstream on the vivado worker, then agent rounds under a strict rule");
+    "Self-checking wrapper, sign-off checks on the vivado worker, SAIF power, then agent rounds");
 
   {
     const s = H.slide("Where FPGA Fits");
@@ -481,7 +499,8 @@ async function fpgaDeck() {
     H.box(s, "MISR", "signature of all results", 6.95, y, 2.5, 1.0);
     H.arrow(s, 9.45, y + 0.5, 10.05, y + 0.5);
     H.box(s, "4 LEDs", "PASS · FAIL · done", 10.05, y, 2.45, 1.0);
-    H.bullets(s, ["Arty A7-100T, 100 MHz; Vivado 2025.1 in batch mode.", "Gate: bitstream written and WNS ≥ 0. No board yet: the flow ends at the bitstream."],
+    H.bullets(s, ["ALU: Arty A7-100T at 188.7 MHz, bitstream (no board yet). ASCON: out-of-context, 100 MHz, no bitstream.",
+      "Gate: WNS ≥ 0, methodology 0 critical, gate-level sim PASS on the routed netlist."],
       { x: 0.85, y: 4.35, w: 11.65, h: 1.6 });
     H.msg(s, "The wrapper makes the ALU testable on a board with only clock, reset and 4 LEDs.");
   }
@@ -490,63 +509,85 @@ async function fpgaDeck() {
     const s = H.slide("Running the FPGA Build on CHIA");
     H.hflow(s, [["read", "sources, pins"], ["synth", null], ["opt", null], ["place", null], ["route", null], ["reports", "timing, util, power"], ["bitstream", null]],
       1.4, 0.95, { g: 0.25, dark: [6] });
-    H.caption(s, "build.tcl, run by one task on the vivado worker (≈ 64 s per demo)", 0.85, 2.45, 11.65);
+    H.caption(s, "build.tcl, run by one task on the vivado worker; then netlist sim writes SAIF for power", 0.85, 2.45, 11.65);
     H.head(s, "Locked vs editable by the agent", 0.85, 2.95, 6.2);
     H.table(s, [["Part", "Agent"], ["ALU RTL, wrapper, pins, clock, checker", "locked"], ["build.tcl (Vivado options)", "may edit"],
       ["Source list, new FPGA-only .v files", "may edit"]], { x: 0.85, y: 3.35, w: 6.2, colW: [4.6, 1.6] });
     H.head(s, "Measured from the reports", 7.45, 2.95, 5.05);
-    H.bullets(s, ["WNS (gate: ≥ 0)", "LUT + FF", "Dynamic power", "Vivado warnings"], { x: 7.45, y: 3.35, w: 5.05, h: 1.9 });
-    H.cmd(s, "python run_demo.py NoCG baseline --stages sim,fpga", 0.85, 5.45, 7.4);
-    H.msg(s, "One CHIA task builds the bitstream and reads WNS, LUT + FF, power and warnings.");
+    H.bullets(s, ["WNS and methodology (gate)", "LUT + FF", "Dynamic power from SAIF (real activity)", "Gate-level sim (gate)"], { x: 7.45, y: 3.35, w: 5.05, h: 1.9 });
+    H.cmd(s, "python flow/run.py projects/demo-alu/CG baseline", 0.85, 5.45, 7.4);
+    H.msg(s, "Power is measured from simulated activity (SAIF), not Vivado's vector-less guess.");
   }
 
   {
     const s = H.slide("Agent: Tune the FPGA Build");
-    H.loop(s, 1.4, "build.tcl, FPGA-only files", "strict Pareto");
+    H.loop(s, 1.4, "build.tcl, FPGA-only files", "LUT+FF ≤ 3 % worse");
     H.head(s, "Why these files only", 0.85, 2.85, 5.6);
     H.bullets(s, ["The RTL is shared with ASIC; FPGA tricks stay in FPGA-only files.", "A functional check in xsim runs before the build."],
       { x: 0.85, y: 3.25, w: 5.6, h: 2.1 });
     H.head(s, "Gate and rule", 6.85, 2.85, 5.65);
-    H.table(s, [["", "FPGA"], ["Gate", "xsim check PASS, bitstream, WNS ≥ 0"], ["Accept", "WNS, power, LUT+FF all no worse, one better"], ["Rounds", "up to 2"]],
+    H.table(s, [["", "FPGA"], ["Gate", "WNS ≥ 0, methodology, GLS PASS"], ["Accept", "WNS, SAIF power no worse; LUT+FF ≤ 3 % worse"], ["Rounds", "up to 2"]],
       { x: 6.85, y: 3.25, w: 5.65, colW: [1.3, 4.35], boldFirstCol: true });
-    H.cmd(s, "python run_demo.py NoCG agent --rounds 2", 0.85, 5.45, 7.0);
-    H.msg(s, "Strict Pareto: a round is accepted only if no metric gets worse.");
+    H.cmd(s, "python flow/run.py projects/demo-alu/NoCG agent --rounds 2", 0.85, 5.45, 8.4);
+    H.msg(s, "Rule fixed before the run; if the best so far fails sign-off, a round that passes wins.");
   }
 
   {
     const s = H.slide("Example · Baseline: Clock Gating Hurts on FPGA");
     H.legend(s, 0.85, 1.3);
     const cw = 2.15;
-    [["WNS (ns)", [4.579, 1.502], 6], ["Dyn. power (mW)", [2, 5], 6.5], ["LUT + FF", [277, 281], 340]].forEach(([t, v, mx], i) => {
+    [["WNS (ns)", [0.588, 0], 0.8], ["SAIF power (mW)", [5.575, 6.602], 8], ["LUT + FF", [280, 283], 340]].forEach(([t, v, mx], i) => {
       H.bars(s, [{ name: "NoCG", labels: [""], values: [v[0]] }, { name: "CG", labels: [""], values: [v[1]] }],
         { x: 0.85 + i * (cw + 0.05), y: 1.75, w: cw, h: 4.2, title: t, min: 0, max: mx, noCat: true });
     });
     H.head(s, "Why CG is worse here", 7.75, 1.35, 4.75);
-    H.bullets(s, ["FPGA flip-flops expect clock enables, not clocks gated by logic.", "The latch + LUT on the clock leaves half a cycle: WNS drops ≈ 3 ns.",
-      "Extra logic on the clock: more power, 3 more warnings.", "Still passes the gate, so the agent can try to fix it."], { x: 7.75, y: 1.75, w: 4.75, h: 4.3 });
-    H.msg(s, "Clock gating hurts on FPGA: WNS 4.58 → 1.50 ns, dynamic power 2 → 5 mW.");
+    H.bullets(s, ["At 188.7 MHz, all at 30 % activity.", "The latch + LUT on the clock: WNS 0 only by borrowing through the latch.",
+      "Methodology: 2 critical (TIMING-14, LUT on the clock tree), so CG fails sign-off.", "Fmax: NoCG 227 MHz, CG latch 128 MHz."], { x: 7.75, y: 1.75, w: 4.75, h: 4.3 });
+    H.msg(s, "Clock gating hurts on FPGA: zero slack, +18 % power, and it fails the methodology check.");
   }
 
   {
-    const s = H.slide("Example · Four Agent Rounds, None Accepted");
+    const s = H.slide("Example · Three Ways to Gate a Clock on FPGA");
+    H.bars(s, [{ name: "power", labels: ["NoCG", "CG latch", "CG BUFGCE", "CG CE"], values: [5.58, 6.60, 9.36, 5.19] }],
+      { x: 0.85, y: 1.35, w: 6.3, h: 4.2, title: "Dynamic power, SAIF, 30 % activity (mW)", min: 0, max: 11, colors: [K.bar] });
+    H.table(s, [["", "Fmax (MHz)"], ["NoCG", "227.3"], ["CG latch", "128.2"], ["CG BUFGCE", "196.1"], ["CG CE", "232.6"]],
+      { x: 7.55, y: 1.35, w: 4.95, colW: [2.5, 2.45], boldFirstCol: true });
+    H.bullets(s, ["BUFGCE: +3.6 mW, all in the clock network (96 %).", "All 139 flops use only 0.115 mW."], { x: 7.55, y: 3.65, w: 4.95, h: 1.9 });
+    H.msg(s, "On FPGA no gating style beats NoCG, even at 10 % activity; on ASIC CG saves 12 %.");
+  }
+
+  {
+    const s = H.slide("Example · Agent Rounds: CG r1 Accepted");
     H.table(s, [["Round", "What the agent did", "Measured", "Result"],
-      ["NoCG r1", "Retiming, hand-mapped LUTs, timing options", "WNS +0.36 ns; power +3 mW; LUT+FF +25", "rejected"],
-      ["NoCG r2", "One shared adder for ADD / SUB / SLT", "LUT+FF −15; WNS −0.37 ns", "rejected"],
-      ["CG r1", "Gated clock turned into clock enable at synthesis", "WNS ×3; power −60 %; LUT+FF +3", "rejected"],
-      ["CG r2", "FPGA-only ALU with clock enables + retiming", "WNS ×3; LUT+FF +31", "rejected"]],
-      { x: 0.85, y: 1.35, w: 11.65, colW: [1.3, 4.9, 4.1, 1.35], boldFirstCol: true });
-    H.bullets(s, ["Each round made at least one metric worse, so the baseline was kept.",
-      "CG r1 fixed the real problem but costs 3 LUT+FF (+1.1 %); the rule was fixed before the run and kept."], { x: 0.85, y: 4.35, w: 11.65, h: 1.7 });
-    H.msg(s, "The strict rule blocked a good trade-off (CG r1); choosing the rule is a design decision.");
+      ["NoCG r1", "Vivado options in build.tcl", "almost no change", "rejected"],
+      ["NoCG r2", "FPGA-only ALU file", "LUT+FF −7; WNS 0.588 → 0.456 ns", "rejected"],
+      ["CG r1", "Clock gating → clock enable (CE variant, gated_clock_conversion)", "critical 2 → 0; WNS 0 → 0.524 ns; power −21.3 %; LUT+FF +1.4 %", "accepted"],
+      ["CG r2", "build.tcl", "WNS up, power +12 %", "rejected"],
+      ["ASCON r1", "build.tcl", "WNS 1.292 → 0.71 ns; power 23.4 → 30.5 mW", "rejected"]],
+      { x: 0.85, y: 1.35, w: 11.65, colW: [1.35, 4.4, 4.55, 1.35], boldFirstCol: true });
+    H.bullets(s, ["CG r1: the agent read the reports, found the latch and TIMING-14, and picked the right fix.",
+      "Rejected under the old strict rule on 21/11 (+3 LUT+FF); the rule was changed before this run."], { x: 0.85, y: 4.85, w: 11.65, h: 1.25 });
+    H.msg(s, "The agent fixed the real FPGA problem of clock gating: sign-off clean and power −21 %.");
+  }
+
+  {
+    const s = H.slide("Example · Second Design: ASCON, Out-of-Context");
+    H.table(s, [["ASCON baseline", "Artix-7 100T, 100 MHz"], ["LUT / FF", "1 592 / 473"], ["WNS / WHS (ns)", "1.292 / 0.217 (≈ 114.8 MHz)"],
+      ["Methodology critical", "0"], ["SAIF power (66 % nets)", "23.4 mW"], ["Gate-level sim", "PASS (testbench of Sim)"]],
+      { x: 0.85, y: 1.35, w: 6.6, colW: [2.9, 3.7], boldFirstCol: true });
+    H.head(s, "Out-of-context", 7.85, 1.35, 4.65);
+    H.bullets(s, ["No board wrapper: Vivado builds the core alone, no bitstream.", "The flow writes build.tcl itself from project.py.",
+      "I/O delays not set yet (TIMING-18 warning)."], { x: 7.85, y: 1.75, w: 4.65, h: 4.2 });
+    H.msg(s, "A new design reaches FPGA sign-off without a hand-written wrapper or build script.");
   }
 
   {
     const s = H.slide("Takeaways and Limits");
     H.head(s, "What this step shows", 0.85, 1.3, 5.6);
-    H.bullets(s, ["The same RTL builds to a bitstream on the vivado worker, with a built-in self-check.",
-      "The agent reads real Vivado reports and proposes concrete fixes, checked in xsim first."], { x: 0.85, y: 1.7, w: 5.6, h: 4.2 });
+    H.bullets(s, ["Same RTL, real sign-off checks: methodology, gate-level sim, SAIF power.",
+      "The agent reads real Vivado reports; CG r1 fixed clock gating on FPGA."], { x: 0.85, y: 1.7, w: 5.6, h: 4.2 });
     H.head(s, "Limits", 6.85, 1.3, 5.65);
-    H.bullets(s, ["Strict Pareto rejects good trade-offs.", "Power is Vivado's estimate without simulation activity.", "No board yet."],
+    H.bullets(s, ["Gate-level sim without SDF (zero delay).", "No board yet; > 100 MHz needs an MMCM.", "Fmax has ≈ 0.1-0.2 ns noise."],
       { x: 6.85, y: 1.7, w: 5.65, h: 4.2 });
     H.msg(s, "Next, Part 3: the same RTL goes to a sky130 GDS, where clock gating pays off.");
   }
@@ -559,7 +600,7 @@ async function fpgaDeck() {
 async function asicDeck() {
   const H = deck("Part 3 · ASIC", "Part 3: ASIC with Yosys and OpenROAD");
   H.cover("PART 3 · ASIC", "Step 3 of the Flow:", "RTL to GDS with Yosys + OpenROAD",
-    "OpenROAD-flow-scripts on sky130hd, six CHIA tasks, then the agent tunes config.mk");
+    "OpenROAD-flow-scripts on sky130hd, sign-off checks in parallel, then the agent tunes config.mk");
 
   {
     const s = H.slide("Where ASIC Fits");
@@ -570,7 +611,8 @@ async function asicDeck() {
       H.box(s, a, b, x, 3.0, 1.65, 0.9, i === 5);
       if (i < 5) H.arrow(s, x + 1.65, 3.45, x + 1.98, 3.45);
     });
-    H.bullets(s, ["sky130hd, 10 ns clock (same 100 MHz as FPGA), ≈ 2.5 min per demo.", "Gate: GDS written, setup and hold slack ≥ 0, DRC = 0."],
+    H.bullets(s, ["After finish, four checks run in parallel: KLayout DRC ‖ LVS ‖ STA with SPEF (tt, tt + OCV ±10 %) ‖ gate-level sim.",
+      "Gate: GDS, slack ≥ 0, DRC and antenna = 0, LVS match, GLS PASS. ASCON: 41.7 s in parallel vs 72.4 s in series."],
       { x: 0.85, y: 4.3, w: 11.65, h: 1.6 });
     H.msg(s, "One task per stage: the timeline shows each stage, and a failure stops where it happened.");
   }
@@ -579,12 +621,12 @@ async function asicDeck() {
     const s = H.slide("Running the ASIC Flow on CHIA");
     H.head(s, "How it runs", 0.85, 1.3, 5.3);
     H.bullets(s, ["Each stage is one ORFS make call on the asic worker.", "All results stay in the run folder, not in ORFS.",
-      "Reads slack, cell and die area, power, DRC."], { x: 0.85, y: 1.7, w: 5.3, h: 3.4 });
+      "Reads slack, cell and die area, power, DRC, LVS."], { x: 0.85, y: 1.7, w: 5.3, h: 3.4 });
     H.head(s, "Baseline config.mk", 6.55, 1.3, 5.95);
     H.table(s, [["Variable", "NoCG", "CG"], ["DESIGN_NAME", "NoCG_alu", "CG_alu"], ["Extra file", "-", "sky130 ICG cell"],
       ["CORE_UTILIZATION", "40", "40"], ["PLACE_DENSITY", "0.65", "0.65"]],
       { x: 6.55, y: 1.7, w: 5.95, colW: [2.55, 1.6, 1.8], monoCols: [0] });
-    H.cmd(s, "python run_demo.py NoCG baseline", 0.85, 4.0, 7.0);
+    H.cmd(s, "python flow/run.py projects/ascon-core baseline", 0.85, 4.0, 7.0);
     H.msg(s, "config.mk says how to build; the RTL, PDK and clock stay fixed.");
   }
 
@@ -595,59 +637,62 @@ async function asicDeck() {
     H.bullets(s, ["Design, sources and clock are what is measured, so they are locked.", "Locked variables are checked before the six stages run."],
       { x: 0.85, y: 3.25, w: 5.6, h: 2.1 });
     H.head(s, "Gate and rule", 6.85, 2.85, 5.65);
-    H.table(s, [["", "ASIC"], ["Gate", "GDS, slack ≥ 0, DRC = 0"], ["Accept", "area, die, power ≤ 1 % worse; one > 1 % better"], ["Rounds", "up to 2"]],
+    H.table(s, [["", "ASIC"], ["Gate", "slack ≥ 0, DRC, antenna, LVS, GLS"], ["Accept", "area, die, power ≤ 1 % worse; one > 1 % better"], ["Rounds", "up to 2"]],
       { x: 6.85, y: 3.25, w: 5.65, colW: [1.3, 4.35], boldFirstCol: true });
-    H.cmd(s, "python run_demo.py NoCG agent --rounds 2", 0.85, 5.45, 7.0);
+    H.cmd(s, "python flow/run.py projects/demo-alu/NoCG agent --rounds 2", 0.85, 5.45, 8.4);
     H.msg(s, "The agent only changes how ORFS builds the same design.");
   }
 
   {
     const s = H.slide("Example · Baseline: Clock Gating Pays Off on ASIC");
-    H.table(s, [["Baseline", "NoCG", "CG"], ["Cell area (µm²)", "3 078", "2 975"], ["Die area (µm²)", "7 534", "6 926"],
-      ["Cells (ICG, clock buffers)", "356 (0, 9)", "306 (2, 18)"], ["Setup slack (ns)", "6.82", "6.96"], ["Power (mW)", "0.368", "0.324"], ["DRC", "0", "0"]],
-      { x: 0.85, y: 1.35, w: 6.6, colW: [3.0, 1.8, 1.8], boldFirstCol: true });
-    H.head(s, "Why CG is better here", 7.85, 1.35, 4.65);
-    H.bullets(s, ["The ICG replaces the feedback mux of each register: 50 fewer cells.", "Cost: twice as many clock buffers.",
-      "OpenROAD CTS handled the ICG cells correctly."], { x: 7.85, y: 1.75, w: 4.65, h: 4.3 });
+    H.table(s, [["Baseline, 10 ns", "NoCG", "CG", "ASCON"], ["Cell area (µm²)", "3 078", "2 975", "48 859"], ["Die area (µm²)", "7 534", "6 926", "111 934"],
+      ["Setup slack tt / OCV (ns)", "6.82 / 6.48", "6.96 / 6.79", "2.63 / 2.09"], ["Power (mW)", "0.368", "0.324", "9.96"],
+      ["DRC · antenna · LVS · GLS", "0 · 0 · ok · PASS", "0 · 0 · ok · PASS", "0 · 0 · ok · PASS"]],
+      { x: 0.85, y: 1.35, w: 7.6, colW: [2.65, 1.65, 1.65, 1.65], boldFirstCol: true });
+    H.head(s, "Why CG is better here", 8.8, 1.35, 3.7);
+    H.bullets(s, ["The ICG replaces the feedback mux: 50 fewer cells.", "Cost: twice as many clock buffers.",
+      "CTS handles the ICG cells."], { x: 8.8, y: 1.75, w: 3.7, h: 4.2 });
+    H.caption(s, "Power: OpenSTA with default activity, not from simulation.", 0.85, 4.75, 7.6);
     H.msg(s, "Clock gating pays off on ASIC: 50 fewer cells, power −12 %. The opposite of FPGA.");
   }
 
   {
     const s = H.slide("Example · What the Agent Changed");
     H.legend(s, 0.85, 1.3);
-    H.bars(s, [{ name: "NoCG", labels: ["Die area", "Cell area", "Power"], values: [-38.4, -1.8, -1.8] },
-      { name: "CG", labels: ["Die area", "Cell area", "Power"], values: [-20.5, -4.7, -6.8] }],
-      { x: 0.85, y: 1.75, w: 6.3, h: 4.3, title: "Change vs baseline (%)", fmt: '0.0"%"', min: -45, max: 0 });
-    H.head(s, "What the agent set", 7.55, 1.35, 4.95);
-    H.bullets(s, ["Both: synthesis for area (ABC_AREA).", "NoCG: utilization 40 → 65 %, density 0.65 → 0.85.",
-      "CG: utilization 40 → 50 %, fewer I/O buffers.", "All rounds: slack still positive, DRC 0."], { x: 7.55, y: 1.75, w: 4.95, h: 4.3 });
-    H.msg(s, "Same RTL, tighter packing: die area −38 % (NoCG), −21 % (CG), timing still met.");
+    H.bars(s, [{ name: "NoCG", labels: ["Die area", "Cell area", "Power"], values: [-27.5, -1.1, -1.4] },
+      { name: "CG", labels: ["Die area", "Cell area", "Power"], values: [-20.5, -3.7, -20.4] }],
+      { x: 0.85, y: 1.75, w: 6.3, h: 4.3, title: "Accepted (r1) vs baseline (%)", fmt: '0.0"%"', min: -32, max: 0 });
+    H.head(s, "Rejected rounds", 7.55, 1.35, 4.95);
+    H.bullets(s, ["NoCG r2: die −15 %, power +1.5 %.", "CG r2: die −16 %, power +2.7 %.", "ASCON r1: die −15 %, cell +4.8 %.",
+      "Every round passed all sign-off gates; rejects were only \"worse\"."], { x: 7.55, y: 1.75, w: 4.95, h: 4.3 });
+    H.msg(s, "Same RTL, tighter packing: die −28 % (NoCG), −21 % (CG); CG power −20 %.");
   }
 
   {
     const s = H.slide("Example · Layouts, Same Scale");
-    const S = 2.45;
-    [["NoCG_baseline", 0.85, 1, "NoCG baseline"], ["NoCG_agent", 3.85, Math.sqrt(4641.70 / 7534.24), "NoCG agent"],
-     ["CG_baseline", 6.85, Math.sqrt(6925.57 / 7534.24), "CG baseline"], ["CG_agent", 9.85, Math.sqrt(5504.90 / 7534.24), "CG agent"]].forEach(([f, x, k, t]) => {
-      const d = S * k, y = 1.5;
+    const S = 2.9;
+    [["NoCG_baseline", 0.85, 1, "NoCG baseline"], ["CG_baseline", 4.85, Math.sqrt(6925.57 / 7534.24), "CG baseline"],
+     ["CG_agent", 8.85, Math.sqrt(5504.90 / 7534.24), "CG agent"]].forEach(([f, x, k, t]) => {
+      const d = S * k, y = 1.35;
       s.addImage({ path: IMG + f + "_layout.png", x: x + (S - d) / 2, y: y + S - d, w: d, h: d });
       s.addText(t, { x: x - 0.1, y: y + S + 0.12, w: S + 0.2, h: 0.35, fontFace: F, fontSize: 15, bold: true, color: K.ink, align: "center", margin: 0, isTextBox: true });
     });
-    [["7 534 µm²", 0.85], ["4 642 µm²", 3.85], ["6 926 µm²", 6.85], ["5 505 µm²", 9.85]].forEach(([t, x]) =>
-      s.addText(t, { x: x - 0.1, y: 4.45, w: S + 0.2, h: 0.32, fontFace: F, fontSize: 14, color: K.ink, align: "center", margin: 0, isTextBox: true }));
-    H.caption(s, "Picture side ∝ √(die area), relative to the NoCG baseline.", 0.85, 5.1, 11.65);
+    [["7 534 µm²", 0.85], ["6 926 µm²", 4.85], ["5 505 µm²", 8.85]].forEach(([t, x]) =>
+      s.addText(t, { x: x - 0.1, y: 4.75, w: S + 0.2, h: 0.32, fontFace: F, fontSize: 14, color: K.ink, align: "center", margin: 0, isTextBox: true }));
+    H.caption(s, "Picture side ∝ √(die area), relative to the NoCG baseline.", 0.85, 5.35, 11.65);
     H.msg(s, "The agent shrank the die by packing the same cells tighter, not by changing the design.");
   }
 
   {
     const s = H.slide("Takeaways and Limits");
     H.head(s, "What this step shows", 0.85, 1.3, 5.6);
-    H.bullets(s, ["CHIA takes the same RTL from Sim to a sky130 GDS, one task per stage, with a gate.",
-      "Tuning only config.mk, the agent cut die area by 20-38 % with timing still met."], { x: 0.85, y: 1.7, w: 5.6, h: 4.2 });
+    H.bullets(s, ["RTL → GDS for three designs, each with basic sign-off: DRC, antenna, LVS, STA with SPEF, GLS.",
+      "Tuning only config.mk, the agent cut die 20-28 %, CG power 20 %; all gates still pass."], { x: 0.85, y: 1.7, w: 5.6, h: 4.2 });
     H.head(s, "Limits", 6.85, 1.3, 5.65);
-    H.bullets(s, ["Small design (≈ 300 cells), fixed RTL.", "Power estimated without simulation activity.", "Two rounds, one run each."],
+    H.bullets(s, ["Not tape-out sign-off: STA one corner (tt + OCV), GLS without SDF, no LEC.", "ASIC power without real activity; one clock.",
+      "Small ALU (≈ 300 cells); agent not deterministic."],
       { x: 6.85, y: 1.7, w: 5.65, h: 4.2 });
-    H.msg(s, "Clock gating helps on ASIC and hurts on FPGA; fixed RTL keeps the two branches apart.");
+    H.msg(s, "Full RTL → GDS flow with basic sign-off, not yet tape-out sign-off.");
   }
   await H.save("3_ASIC.pptx");
 }
