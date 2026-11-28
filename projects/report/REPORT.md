@@ -1,16 +1,18 @@
 # Brief làm slide báo cáo: Demo 1 (ALU 8 bit, Sim → FPGA → ASIC với agent trong CHIA)
 
 File này dành cho **session slide**. Đây là nguồn duy nhất session đó cần đọc để sửa hoặc làm slide: khán giả, quy ước,
-bộ slide hiện có, số liệu đang dùng và cách build. Kết quả kỹ thuật đầy đủ nằm ở `../REPORT.md` và `docs/demo-task.md`,
+bộ slide hiện có, số liệu đang dùng và cách build. Kết quả kỹ thuật đầy đủ nằm ở `../demo-alu/REPORT.md` và `docs/demo-task.md`,
 do session làm việc cập nhật.
 
-## 1. Phạm vi và cách phối hợp
+> Chuyển từ `projects/demo-alu/report/` sang `projects/report/` ngày 28/11/2026 (theo yêu cầu người dùng).
+
+ Phạm vi và cách phối hợp
 
 - Hai session cùng làm trên nhánh `demo`, chia theo thư mục:
-  - **Session slide** chỉ sửa `projects/demo-alu/report/**`.
-  - **Session làm việc** sửa mọi thứ khác (code, `../REPORT.md`, `docs/`, `CLAUDE.md`) và không đụng `report/`.
+  - **Session slide** chỉ sửa `projects/report/**`.
+  - **Session làm việc** sửa mọi thứ khác (code, `../demo-alu/REPORT.md`, `docs/`, `CLAUDE.md`) và không đụng `report/`.
 - Luôn `git pull` (hoặc `git fetch origin demo && git merge --no-edit FETCH_HEAD`) trước khi commit; không rebase, không force-push.
-- Đồng bộ số liệu: khi session làm việc có kết quả mới, session slide đọc `git log` + `../REPORT.md` + `docs/demo-task.md`,
+- Đồng bộ số liệu: khi session làm việc có kết quả mới, session slide đọc `git log` + `../demo-alu/REPORT.md` + `docs/demo-task.md`,
   sửa **mục 4 của file này trước**, rồi mới sửa slide. Ghi commit đã đồng bộ ở dòng "Đồng bộ tới".
 - Người dùng không `git push` được; session slide commit + push lên `demo` và gửi file `.pptx` cho người dùng.
 
@@ -62,7 +64,7 @@ do session làm việc cập nhật.
 
 ## 4. Số liệu đang dùng trong slide
 
-**Đồng bộ tới:** commit `48d80e4` (27/11/2026). Nguồn: `../REPORT.md` mục 7, 9, 10; `flow/README.md` mục "Hướng dẫn:
+**Đồng bộ tới:** commit `48d80e4` (27/11/2026). Nguồn: `../demo-alu/REPORT.md` mục 7, 9, 10; `flow/README.md` mục "Hướng dẫn:
 đưa một khối RTL mới vào flow". Số ALU chốt là bảng "Agent với đủ gate sign-off (chạy thật 26/11/2026)".
 
 **Lệnh chạy chung (mọi project):** `python flow/run.py projects/<project> baseline` (hoặc `agent --rounds N`, `sweep`).
@@ -148,7 +150,7 @@ mô hình tham chiếu; FPGA OOC chưa đặt I/O delay (TIMING-18). Setup chạ
 # 1. pptxgenjs không cài sẵn toàn cục: cài vào scratchpad của session
 cd <scratchpad> && npm install pptxgenjs
 # 2. build 4 deck vào report/guides/
-cd projects/demo-alu/report && NODE_PATH=<scratchpad>/node_modules node src/build_guides.js
+cd projects/report && NODE_PATH=<scratchpad>/node_modules node src/build_guides.js
 # 3. vá lỗi <a:pPr> thừa của pptxgenjs (bắt buộc, từng file)
 for f in guides/*.pptx; do python3 src/fix_pptx.py "$f"; done
 # 4. kiểm tra: validate.py của skill pptx, rồi render xem bằng mắt
