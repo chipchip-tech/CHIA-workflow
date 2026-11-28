@@ -155,7 +155,7 @@ function deck(name, titleText) {
       T(s, dl, { x: R + 0.18, y: top + 0.32, w: RW - 0.3, h: dh - 0.42, valign: "top" });
       let ry = top - 0.05 + dh + 0.25;
       if (o.alt) {
-        H.head(s, "Other distros · not tested", R, ry, RW);
+        H.head(s, o.altLabel || "Other distros · not tested", R, ry, RW);
         H.table(s, o.alt, { x: R, y: ry + 0.32, w: RW, colW: [1.0, RW - 1.0], noHeader: true, boldFirstCol: true, monoCols: [1], fs: 12 });
       } else if (o.out) {
         H.head(s, "Output", R, ry, RW);
@@ -274,7 +274,7 @@ async function setupDeck() {
       { x: 0.85, y: 1.8, w: 5.6, colW: [1.2, 4.4], noHeader: true, boldFirstCol: true });
     H.head(s, "Installed by you, outside these steps", 6.9, 1.45, 5.6);
     H.table(s, [["Vivado 2025.1", "at ~/tools/Xilinx/2025.1 (AMD installer; free edition covers Artix-7 100T); only for FPGA"],
-      ["Claude Code", "logged in once on the host (~/.claude); only for the agent"], ["git, curl", "from the distro"]],
+      ["Claude Code", "logged in once on the host (~/.claude); only for the agent"], ["git, curl, unzip", "from the distro"]],
       { x: 6.9, y: 1.8, w: 5.6, colW: [1.6, 4.0], noHeader: true, boldFirstCol: true });
     H.head(s, "Versions that must match", 0.85, 4.35, 11.65);
     H.table(s, [["Python 3.10.19", "Ray 2.54.0", "chialoops 2.0.1", "Chipyard 1.15.0", "Verilator 5.022", "Yosys 0.68 + ORFS"]],
@@ -289,7 +289,7 @@ async function setupDeck() {
       ["1", "Docker without sudo", "10 min", "docker run hello-world works"],
       ["2", "SSH to itself, linger", "5 min", "passwordless ssh to own IP"],
       ["3", "conda env + CHIA", "10 min", "Python 3.10.19, ray 2.54.0"],
-      ["4", "Clone repo, check host", "2 min", "All required checks passed."],
+      ["4", "Unpack project, check host", "2 min", "All required checks passed."],
       ["5", "Build Chipyard 1.15.0", "several hours", "VERIFY_OK"],
       ["6", "SoC config (base for projects)", "5 min", "MIXIN_OK"],
       ["7", "ORFS image (ASIC tools)", "20 min", "VERIFY_OK"],
@@ -327,12 +327,16 @@ async function setupDeck() {
     done: { say: "The last command prints:", log: ["Python 3.10.19", "ray, version 2.54.0"] },
     fails: [["conda: command not found", "open a new terminal after conda init"]] });
 
-  H.step({ n: 4, total: TOTAL, title: "Step 4 · Clone the Repo and Check the Host",
-    where: "host terminal",
-    cmds: ["git clone -b setup https://github.com/chipchip-tech/CHIA-workflow.git ~/CHIA-workflow", "cd ~/CHIA-workflow && scripts/check-bazzite-env.sh"],
-    does: ["Checks docker, sshd, passwordless SSH, linger, chia_env, disk and RAM.", "On another distro the OS line is only a WARN."],
+  H.step({ n: 4, total: TOTAL, title: "Step 4 · Unpack and Check the Host",
+    where: "host terminal; CHIA-workflow.zip is the archive you were given",
+    cmds: ["unzip ~/Downloads/CHIA-workflow.zip -d ~          # must give ~/CHIA-workflow/scripts/...",
+      "cd ~/CHIA-workflow && chmod +x scripts/*.sh", "scripts/check-bazzite-env.sh"],
+    does: ["Puts the scripts, configs and demo projects at ~/CHIA-workflow; later steps assume this path.",
+      "The check covers docker, sshd, passwordless SSH, linger, chia_env, disk and RAM; on another distro the OS line is only a WARN."],
     done: { say: "The script ends with:", log: ["All required checks passed."] },
-    fails: [["[FAIL] linger off / sshd not active", "go back to step 2"], ["[FAIL] Python must be 3.10.x", "go back to step 3"]] });
+    fails: [["unzip made ~/CHIA-workflow-<something>", "mv ~/CHIA-workflow-* ~/CHIA-workflow"],
+      ["Permission denied on a script", "the archive lost the run bit: chmod +x scripts/*.sh"],
+      ["[FAIL] linger off / sshd not active", "go back to step 2"], ["[FAIL] Python must be 3.10.x", "go back to step 3"]] });
 
   H.step({ n: 5, total: TOTAL, title: "Step 5 · Build Chipyard 1.15.0",
     where: "host terminal; runs in a temporary container; keep the machine awake",
