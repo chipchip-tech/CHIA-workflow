@@ -47,6 +47,12 @@ do session làm việc cập nhật.
   gắn "not tested". Vivado chỉ là một dòng trong Prerequisites.
 - **Làm từng deck một** (Setup -> Sim -> FPGA -> ASIC), mỗi deck gửi duyệt trước khi sang deck sau; build riêng bằng `ONLY=setup`.
 
+- **Dàn ý 1_Sim (chốt 28/11/2026):** Cover · Where Sim Fits · What Runs Inside · Step 1 Before You Start · Step 2 Run the
+  Baseline Sim · Step 3 Read the Results (có ảnh trang status, người dùng gửi; chưa có thì khung "screenshot pending") ·
+  Writing a Testbench for the Flow (1 slide: 5 quy ước, PASS/FAIL, bin functional) · Step 4 Run the Agent (lệnh agent đủ
+  3 bước `--rounds 2`, đã chạy thật; deck Sim chỉ đọc sim-r1/r2) · Step 5 Read an Agent Round · Gate and Accept Rule ·
+  Results NoCG vs CG · What the Agent Added · Takeaways · Second Design: ASCON. Ví dụ xuyên suốt: ALU NoCG.
+
 ## 3. Bộ slide hiện có (`guides/`, sinh bởi `src/build_guides.js`)
 
 | File | Slide |
