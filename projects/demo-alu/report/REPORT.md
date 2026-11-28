@@ -34,11 +34,23 @@ do session làm việc cập nhật.
   sim-r1 (agent tự viết mô hình tham chiếu Ascon-AEAD128 + 10 corner case), `Netlists match` LVS baseline (12,4 s); FPGA ASCON: dòng bảng tóm tắt `methodology.rpt` (TIMING-18 Warning 120, không có rule Critical).
 - Style: nền trắng, Times New Roman (code Courier New), thang xám, `LAYOUT_WIDE`.
 
+- **Chốt 28/11/2026 (thay các quy ước style/cỡ chữ cũ ở trên):** slide vừa để trình bày vừa dùng như tài liệu làm lại từng
+  bước (người không muốn đọc md). Style "Paper and Instruments" theo Impeccable: nền trắng, Calibri (lệnh/log/đường dẫn
+  Courier New), nhãn mục mono chữ hoa; màu có nghĩa: vàng đậm `C98F00` chỉ cho chấm bước hiện tại (không làm màu chữ), xanh
+  patina `1E6E6A` = Done when / kết quả nhận, đỏ son `B33A1E` chỉ cho If it fails; biểu đồ xám + patina; bảng chỉ kẻ ngang.
+  Chữ nhỏ nhất 12 pt. Không eyebrow trên tiêu đề, không "→" ở dòng kết luận (dùng "->" trong chữ), dòng kết luận tuỳ slide.
+- **Slide "Step N"** (`H.step`): dải tiến độ, Where, lệnh copy được (cả bề ngang), What it does, Done when (dòng log thật),
+  Output hoặc "Other distros · not tested", If it fails. Lệnh lấy đúng từ `docs/reinstall.md`, `docs/setup-bazzite.md`,
+  `flow/README.md`. Máy người khác có thể dùng distro khác: ghi yêu cầu chung, lệnh Bazzite đã kiểm chứng, lệnh Ubuntu/Fedora
+  gắn "not tested". Vivado chỉ là một dòng trong Prerequisites.
+- **Làm từng deck một** (Setup -> Sim -> FPGA -> ASIC), mỗi deck gửi duyệt trước khi sang deck sau; build riêng bằng `ONLY=setup`.
+
 ## 3. Bộ slide hiện có (`guides/`, sinh bởi `src/build_guides.js`)
 
 | File | Slide |
 |---|---|
-| `0_Setup.pptx` (15) | Cover · How CHIA Runs Work · Example: One Simulation Task Through CHIA · Machine and Software Used · Setup Process · Steps 1-2 Host and Python · Tools Live on the Host, Workers Mount Them · Steps 3-4 Installing the Tools · Step 5 The Block Cluster · Bring-up and Smoke Test · Remote Workers: Architecture (PLAN) · Remote Workers: Planned Steps (PLAN) · Shared Flow: A New Design Needs Three Files · Proof: ASCON Through the Same Flow · Setup Status |
+| `0_Setup.pptx` (21, khung Step từ 28/11) | Cover · How CHIA Runs Work · Example task · Prerequisites · The Ten Steps · Step 1-7 · How the Tools Reach the Workers · Step 8-10 · Remote (PLAN, 2) · After Setup: Three Files · Proof: ASCON · Setup Status |
+| `0_Setup.pptx` cũ (15) | Cover · How CHIA Runs Work · Example: One Simulation Task Through CHIA · Machine and Software Used · Setup Process · Steps 1-2 Host and Python · Tools Live on the Host, Workers Mount Them · Steps 3-4 Installing the Tools · Step 5 The Block Cluster · Bring-up and Smoke Test · Remote Workers: Architecture (PLAN) · Remote Workers: Planned Steps (PLAN) · Shared Flow: A New Design Needs Three Files · Proof: ASCON Through the Same Flow · Setup Status |
 | `1_Sim.pptx` (8; slide ASCON đặt cuối, sau Takeaways) | Cover · Where Sim Fits · Running the Baseline Sim on CHIA · Agent: Improve the Testbench · NoCG vs CG: Same Test, Different Clocking · What the Agent Added · Takeaways and Limits |
 | `2_FPGA.pptx` (9) | Cover · Where FPGA Fits · Running the FPGA Build on CHIA · Agent: Tune the FPGA Build · Baseline: Clock Gating Hurts on FPGA (3 biểu đồ) · Three Ways to Gate a Clock on FPGA · Agent Rounds: CG r1 Accepted · Second Design: ASCON, Out-of-Context · Takeaways and Limits |
 | `3_ASIC.pptx` (9; slide ASCON đặt cuối, chừa chỗ ảnh layout) | Cover · Where ASIC Fits · Running the ASIC Flow on CHIA · Agent: Tune config.mk · Baseline: Clock Gating Pays Off on ASIC · What the Agent Changed (biểu đồ %) · Layouts, Same Scale · Takeaways and Limits |

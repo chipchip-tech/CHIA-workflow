@@ -9,9 +9,12 @@ const pptxgen = require("pptxgenjs");
 const path = require("path");
 const OUT = process.argv[2] || path.join(__dirname, "..", "guides");
 const IMG = path.join(__dirname, "..", "img") + "/";
-const F = "Times New Roman", M = "Courier New";
-const K = { black: "000000", ink: "262626", mute: "5A5A5A", cap: "9A9A9A", line: "BFBFBF", head: "D9D9D9", soft: "F2F2F2", grid: "A6A6A6", bar: "A6A6A6" };
-const FS = 14; // cỡ chữ nhỏ nhất của nội dung
+// Style "Paper and Instruments" (theo Impeccable, chốt 28/11/2026): giấy trắng, mực đen, Calibri; mono chỉ cho lệnh/log/đường dẫn.
+// Màu có nghĩa: vàng đậm = bước hiện tại (không làm màu chữ), xanh patina = xong / kết quả nhận, đỏ son = lỗi.
+const F = "Calibri", M = "Courier New";
+const K = { black: "111111", ink: "1F1F1F", mute: "5E5E5E", cap: "7A7A7A", line: "E3E3E3", edge: "8C8C8C", head: "FFFFFF",
+  soft: "F0F0F0", grid: "E3E3E3", bar: "BDBDBD", patina: "1E6E6A", patinaPale: "E3F1F0", verm: "B33A1E", gold: "C98F00", goldEdge: "7A5600" };
+const FS = 14; // cỡ chữ thường; nhỏ nhất 12 pt (bảng, lệnh, log)
 
 function deck(name, titleText) {
   const pres = new pptxgen();
@@ -19,77 +22,89 @@ function deck(name, titleText) {
   pres.title = titleText;
   pres.theme = { headFontFace: F, bodyFontFace: F };
   let n = 0;
+  const T = (s, t, o) => s.addText(t, Object.assign({ fontFace: F, color: K.ink, margin: 0, isTextBox: true }, o));
   const H = {
     pres,
     slide(t) {
       const s = pres.addSlide(); n += 1;
-      if (t) s.addText(t, { x: 0.85, y: 0.45, w: 11.65, h: 0.7, fontFace: F, fontSize: 28, bold: true, color: K.black, margin: 0, isTextBox: true });
-      s.addText(name, { x: 0.85, y: 7.0, w: 6, h: 0.3, fontFace: F, fontSize: 10, color: K.cap, margin: 0, isTextBox: true });
-      s.addText(String(n), { x: 12.2, y: 7.0, w: 0.5, h: 0.3, fontFace: F, fontSize: 10, color: K.cap, align: "right", margin: 0, isTextBox: true });
+      s.background = { color: "FFFFFF" };
+      if (t) T(s, t, { x: 0.85, y: 0.5, w: 8.4, h: 0.75, fontSize: 30, bold: true, color: K.black, fit: "shrink" });
+      T(s, name, { x: 0.85, y: 7.0, w: 6, h: 0.3, fontSize: 10, color: K.cap });
+      T(s, String(n), { x: 12.2, y: 7.0, w: 0.5, h: 0.3, fontSize: 10, color: K.cap, align: "right" });
       return s;
     },
-    head(s, t, x, y, w) {
-      s.addText(t, { x, y, w, h: 0.38, fontFace: F, fontSize: 17, bold: true, color: K.black, margin: 0, isTextBox: true });
+    // nhãn mục: mono, chữ hoa, giãn chữ
+    head(s, t, x, y, w, color) {
+      T(s, t.toUpperCase(), { x, y, w, h: 0.3, fontFace: M, fontSize: 12, bold: true, charSpacing: 2, color: color || K.mute });
+    },
+    dot(s, x, y, color) {
+      s.addShape(pres.shapes.OVAL, { x, y, w: 0.13, h: 0.13, fill: { color }, line: { color } });
     },
     bullets(s, items, o) {
-      const runs = [];
-      items.forEach((it, i) => {
-        runs.push({ text: it, options: { bullet: { indent: 16 }, paraSpaceAfter: 6, color: K.ink, breakLine: i < items.length - 1 } });
-      });
-      s.addText(runs, { fontFace: F, fontSize: o.fs || 15, valign: "top", margin: 0, isTextBox: true, x: o.x, y: o.y, w: o.w, h: o.h });
+      const runs = items.map((it, i) => ({ text: it, options: { bullet: { indent: 14 }, paraSpaceAfter: 5, color: K.ink, breakLine: i < items.length - 1 } }));
+      T(s, runs, { fontSize: o.fs || 15, valign: "top", x: o.x, y: o.y, w: o.w, h: o.h });
     },
     para(s, t, o) {
-      s.addText(t, { fontFace: F, fontSize: o.fs || 15, color: o.color || K.ink, valign: o.valign || "top", margin: 0, isTextBox: true, x: o.x, y: o.y, w: o.w, h: o.h, italic: !!o.italic, bold: !!o.bold, align: o.align });
+      T(s, t, { fontSize: o.fs || 15, color: o.color || K.ink, valign: o.valign || "top", x: o.x, y: o.y, w: o.w, h: o.h, italic: !!o.italic, bold: !!o.bold, align: o.align });
     },
-    // dòng kết luận đậm cuối slide
+    // dòng kết luận đậm cuối slide (không mũi tên, không gạch)
     msg(s, t) {
-      s.addShape(pres.shapes.LINE, { x: 0.85, y: 6.2, w: 11.65, h: 0, line: { color: K.line, width: 1 } });
-      s.addText("→  " + t, { x: 0.85, y: 6.27, w: 11.65, h: 0.55, fontFace: F, fontSize: 17, bold: true, color: K.black, valign: "middle", margin: 0, isTextBox: true });
+      T(s, t, { x: 0.85, y: 6.25, w: 11.65, h: 0.5, fontSize: 17, bold: true, color: K.black, valign: "middle" });
     },
-    // một dòng lệnh chính
-    cmd(s, t, x, y, w) {
-      s.addText([{ text: "Run  ", options: { fontFace: F, bold: true, color: K.mute } }, { text: t, options: { fontFace: M, color: K.black } }],
-        { x, y, w, h: 0.45, fontSize: FS, fill: { color: K.soft }, line: { color: K.line, width: 0.75 }, valign: "middle", margin: [2, 8, 2, 8], isTextBox: true });
+    // khối lệnh: nền xám nhạt, mono; t là chuỗi hoặc mảng dòng
+    cmd(s, t, x, y, w, fs) {
+      const lines = Array.isArray(t) ? t : [t];
+      const f = fs || 13, h = 0.14 + lines.length * f / 50;
+      s.addText(lines.map((l, i) => ({ text: l, options: { breakLine: i < lines.length - 1 } })), {
+        shape: pres.shapes.ROUNDED_RECTANGLE, rectRadius: 0.06, x, y, w, h, fontFace: M, fontSize: f, color: K.black,
+        fill: { color: K.soft }, line: { color: K.line, width: 0.75 }, valign: "middle", margin: [4, 12, 4, 12] });
+      return y + h;
     },
     result(s, t, x, y, w, h, label) {
-      s.addText([{ text: (label || "Result") + "  ", options: { bold: true, color: K.black } }, { text: t, options: { color: K.ink } }],
-        { x, y, w, h: h || 0.5, fontFace: F, fontSize: FS, valign: "middle", margin: [4, 8, 4, 8], line: { color: K.ink, width: 1, dashType: "dash" }, isTextBox: true });
-    },
-    // trích nguyên văn từ log/report thật
-    evidence(s, src, lines, x, y, w) {
-      const runs = [{ text: "From " + src, options: { fontFace: F, italic: true, color: K.mute, breakLine: true } }];
-      lines.forEach((l, i) => runs.push({ text: l, options: { fontFace: M, color: K.black, breakLine: i < lines.length - 1 } }));
-      s.addText(runs, { x, y, w, h: 0.3 + 0.3 * lines.length, fontSize: FS, valign: "top", margin: [3, 8, 3, 8], line: { color: K.line, width: 0.75 }, isTextBox: true });
+      s.addText([{ text: (label || "Result") + "  ", options: { bold: true, color: K.patina } }, { text: t, options: { color: K.ink } }],
+        { shape: pres.shapes.ROUNDED_RECTANGLE, rectRadius: 0.08, x, y, w, h: h || 0.5, fontFace: F, fontSize: FS, valign: "middle", margin: [4, 10, 4, 10], fill: { color: K.patinaPale }, line: { color: K.patinaPale } });
     },
     caption(s, t, x, y, w, h) {
-      s.addText(t, { x, y, w, h: h || 0.32, fontFace: F, fontSize: FS, italic: true, color: K.mute, margin: 0, isTextBox: true });
+      T(s, t, { x, y, w, h: h || 0.32, fontSize: 13, color: K.mute });
+    },
+    // trích nguyên văn log thật
+    evidence(s, src, lines, x, y, w) {
+      const h = 0.2 + 0.24 * lines.length;
+      H.head(s, "From " + src, x, y, w);
+      s.addText(lines.map((l, i) => ({ text: l, options: { breakLine: i < lines.length - 1 } })),
+        { shape: pres.shapes.ROUNDED_RECTANGLE, rectRadius: 0.06, x, y: y + 0.34, w, h, fontFace: M, fontSize: 12, color: K.black,
+          fill: { color: K.soft }, line: { color: K.line, width: 0.75 }, valign: "middle", margin: [3, 10, 3, 10] });
     },
     box(s, a, b, x, y, w, h, dark, fs) {
       fs = fs || FS;
       const parts = [{ text: a, options: { bold: true, fontSize: fs, breakLine: !!b } }];
-      if (b) parts.push({ text: b, options: { fontSize: FS } });
+      if (b) parts.push({ text: b, options: { fontSize: 13, color: dark ? "E6E6E6" : K.mute } });
       s.addText(parts, { shape: pres.shapes.ROUNDED_RECTANGLE, rectRadius: 0.08, x, y, w, h, fontFace: F, align: "center", valign: "middle",
-        color: dark ? "FFFFFF" : K.black, fill: { color: dark ? K.ink : "FFFFFF" }, line: { color: K.ink, width: 1 }, margin: 3 });
+        color: dark ? "FFFFFF" : K.black, fill: { color: dark ? K.ink : "FFFFFF" }, line: { color: dark ? K.ink : K.edge, width: 0.75 }, margin: 3 });
     },
     frame(s, x, y, w, h) {
-      s.addShape(pres.shapes.RECTANGLE, { x, y, w, h, fill: { color: K.soft }, line: { color: K.line, width: 0.75, dashType: "dash" } });
+      s.addShape(pres.shapes.ROUNDED_RECTANGLE, { rectRadius: 0.1, x, y, w, h, fill: { color: K.soft }, line: { color: K.line, width: 0.75 } });
     },
-    tag(s, t) {
-      s.addText(t, { shape: pres.shapes.ROUNDED_RECTANGLE, rectRadius: 0.06, x: 9.9, y: 0.55, w: 2.6, h: 0.45, fontFace: F, fontSize: FS, bold: true,
-        align: "center", valign: "middle", color: K.black, fill: { color: "FFFFFF" }, line: { color: K.ink, width: 1.25, dashType: "dash" }, margin: 2 });
+    // nhãn trạng thái lặng (vd PLAN · NOT TESTED)
+    tag(s, t, x, y) {
+      s.addText(t, { shape: pres.shapes.ROUNDED_RECTANGLE, rectRadius: 0.04, x: x || 9.9, y: y || 0.62, w: 2.6, h: 0.36, fontFace: M, fontSize: 12, bold: true,
+        charSpacing: 1, align: "center", valign: "middle", color: K.mute, fill: { color: K.soft }, line: { color: K.soft }, margin: 2 });
     },
     arrow(s, x1, y1, x2, y2) {
-      const o = { x: Math.min(x1, x2), y: Math.min(y1, y2), w: Math.abs(x2 - x1), h: Math.abs(y2 - y1), line: { color: K.ink, width: 1.25, endArrowType: "triangle" } };
+      const o = { x: Math.min(x1, x2), y: Math.min(y1, y2), w: Math.abs(x2 - x1), h: Math.abs(y2 - y1), line: { color: K.edge, width: 1.25, endArrowType: "triangle" } };
       if (x2 < x1) o.flipH = true;
       if (y2 < y1) o.flipV = true;
       s.addShape(pres.shapes.LINE, o);
     },
+    // bảng: chỉ kẻ ngang mảnh; o.mono: cột dùng font mono
     table(s, rows, o) {
+      const hdr = !o.noHeader;
       const data = rows.map((r, i) => r.map((c, j) => ({ text: String(c), options: {
-        bold: (i === 0 && !o.noHeader) || (o.boldFirstCol && j === 0), fill: { color: i === 0 && !o.noHeader ? K.head : "FFFFFF" },
-        fontFace: (o.monoCols || []).includes(j) && i > 0 ? M : F } })));
-      s.addTable(data, { fontFace: F, fontSize: o.fs || FS, color: K.black, border: { type: "solid", pt: 0.75, color: K.grid },
-        margin: [3, 6, 3, 6], valign: "middle", autoPage: false, x: o.x, y: o.y, w: o.w, colW: o.colW, rowH: o.rowH });
+        bold: (i === 0 && hdr) || (o.boldFirstCol && j === 0), color: i === 0 && hdr ? K.mute : K.ink,
+        fontFace: ((o.monoCols || []).includes(j) && (i > 0 || !hdr)) ? M : F,
+        border: [{ type: "none" }, { type: "none" }, { type: "solid", pt: 0.75, color: K.line }, { type: "none" }] } })));
+      s.addTable(data, { fontFace: F, fontSize: o.fs || FS, color: K.ink, margin: [3, 6, 3, 0], valign: "middle", autoPage: false,
+        x: o.x, y: o.y, w: o.w, colW: o.colW, rowH: o.rowH });
     },
     hflow(s, items, y, h, o) {
       o = o || {};
@@ -110,42 +125,47 @@ function deck(name, titleText) {
       });
       H.caption(s, "each step starts only after the gate of the previous one passes", 10.15, y + 0.05, 2.35, 0.75);
     },
-    // slide hướng dẫn một bước: dải tiến độ, Where, lệnh, giải thích, Done when, output, If it fails
+    // dải tiến độ: chấm + số; bước hiện tại chấm vàng
+    progress(s, n, total) {
+      const sp = total > 7 ? 0.36 : 0.5, x0 = 12.5 - total * sp;
+      for (let i = 0; i < total; i++) {
+        const x = x0 + i * sp, cur = i + 1 === n;
+        s.addShape(pres.shapes.OVAL, { x: x + sp / 2 - 0.08, y: 0.6, w: 0.16, h: 0.16, fill: { color: cur ? K.gold : K.line }, line: { color: cur ? K.goldEdge : K.line, width: 0.5 } });
+        T(s, String(i + 1), { x, y: 0.82, w: sp, h: 0.26, fontFace: M, fontSize: 12, bold: cur, align: "center", color: cur ? K.black : K.cap });
+      }
+    },
+    // slide một bước: Where, lệnh (cả bề ngang), What it does | Done when, tuỳ chọn Other distros / Output, If it fails
     step(o) {
       const s = H.slide(o.title);
-      // dải tiến độ các bước, bước hiện tại tô đậm
-      const n = o.steps.length, bw = 0.42, g = 0.08, x0 = 12.5 - n * bw - (n - 1) * g;
-      o.steps.forEach((t, i) => {
-        const cur = i + 1 === o.n;
-        s.addText(String(i + 1), { shape: pres.shapes.ROUNDED_RECTANGLE, rectRadius: 0.05, x: x0 + i * (bw + g), y: 0.6, w: bw, h: 0.38,
-          fontFace: F, fontSize: 12, bold: cur, align: "center", valign: "middle", margin: 0,
-          color: cur ? "FFFFFF" : K.mute, fill: { color: cur ? K.ink : "FFFFFF" }, line: { color: cur ? K.ink : K.line, width: 0.75 } });
-      });
-      const L = 0.85, LW = 7.2, R = 8.45, RW = 4.05;
-      s.addText([{ text: "Where  ", options: { bold: true, color: K.black } }, { text: o.where, options: { color: K.ink } }],
-        { x: L, y: 1.3, w: LW, h: 0.32, fontFace: F, fontSize: 14, margin: 0, isTextBox: true });
-      const lines = o.cmds.map((c, i) => ({ text: c, options: { breakLine: i < o.cmds.length - 1 } }));
-      const ch = 0.16 + 0.27 * o.cmds.length;
-      s.addText(lines, { x: L, y: 1.72, w: LW, h: ch, fontFace: M, fontSize: 13, color: K.black, fill: { color: K.soft },
-        line: { color: K.line, width: 0.75 }, valign: "top", margin: [5, 10, 5, 10], isTextBox: true });
-      let y = 1.72 + ch + 0.3;
+      H.progress(s, o.n, o.total);
+      const L = 0.85, W = 11.65, LW = 6.85, R = 8.2, RW = 4.3;
+      H.head(s, "Where", L, 1.47, 1.2);
+      T(s, o.where, { x: L + 1.05, y: 1.42, w: W - 1.05, h: 0.36, fontSize: 15 });
+      let y = H.cmd(s, o.cmds, L, 1.9, W, o.cmdFs) + 0.32;
+      const top = y;
       H.head(s, "What it does", L, y, LW);
-      H.bullets(s, o.does, { x: L, y: y + 0.4, w: LW, h: 1.6, fs: 14 });
-      // cột phải: Done when + output
-      H.head(s, "Done when", R, 1.3, RW);
-      const dl = [{ text: o.done.say, options: { fontFace: F, color: K.ink, breakLine: true } }];
+      H.bullets(s, o.does, { x: L, y: y + 0.36, w: LW, h: 1.5, fs: 14 });
+      // Done when
+      const dh = 0.62 + 0.24 * o.done.log.length;
+      s.addShape(pres.shapes.ROUNDED_RECTANGLE, { x: R, y: top - 0.05, w: RW, h: dh, rectRadius: 0.08, fill: { color: K.patinaPale }, line: { color: K.patinaPale } });
+      H.dot(s, R + 0.18, top + 0.1, K.patina);
+      H.head(s, "Done when", R + 0.4, top + 0.02, 3, K.patina);
+      const dl = [{ text: o.done.say, options: { fontFace: F, fontSize: 14, color: K.ink, breakLine: o.done.log.length > 0 } }];
       o.done.log.forEach((l, i) => dl.push({ text: l, options: { fontFace: M, fontSize: 12, color: K.black, breakLine: i < o.done.log.length - 1 } }));
-      s.addText(dl, { x: R, y: 1.72, w: RW, h: 0.36 + 0.25 * o.done.log.length, fontSize: 14, valign: "top",
-        margin: [5, 8, 5, 8], line: { color: K.ink, width: 1 }, isTextBox: true });
-      const oy = 1.72 + 0.36 + 0.25 * o.done.log.length + 0.3;
-      H.head(s, "Output", R, oy, RW);
-      s.addText(o.out.map((l, i) => ({ text: l, options: { breakLine: i < o.out.length - 1 } })),
-        { x: R, y: oy + 0.4, w: RW, h: 0.27 * o.out.length + 0.1, fontFace: M, fontSize: 12, color: K.ink, margin: 0, valign: "top", isTextBox: true });
-      // If it fails
+      T(s, dl, { x: R + 0.18, y: top + 0.32, w: RW - 0.3, h: dh - 0.42, valign: "top" });
+      let ry = top - 0.05 + dh + 0.25;
+      if (o.alt) {
+        H.head(s, "Other distros · not tested", R, ry, RW);
+        H.table(s, o.alt, { x: R, y: ry + 0.32, w: RW, colW: [1.0, RW - 1.0], noHeader: true, boldFirstCol: true, monoCols: [1], fs: 12 });
+      } else if (o.out) {
+        H.head(s, "Output", R, ry, RW);
+        T(s, o.out.map((l, i) => ({ text: l, options: { breakLine: i < o.out.length - 1 } })), { x: R, y: ry + 0.34, w: RW, h: 0.24 * o.out.length + 0.1, fontFace: M, fontSize: 12, valign: "top" });
+      }
       if (o.fails) {
-        const fy = 6.55 - 0.3 * o.fails.length;
-        H.head(s, "If it fails", L, fy - 0.42, 11.65);
-        H.table(s, o.fails, { x: L, y: fy, w: 11.65, colW: [4.6, 7.05], noHeader: true, fs: 12, boldFirstCol: true });
+        const fy = 6.62 - 0.31 * o.fails.length;
+        H.dot(s, L, fy - 0.36, K.verm);
+        H.head(s, "If it fails", L + 0.22, fy - 0.44, 4, K.verm);
+        H.table(s, o.fails, { x: L, y: fy - 0.1, w: W, colW: [4.3, W - 4.3], noHeader: true, boldFirstCol: true, fs: 12 });
       }
       return s;
     },
@@ -160,35 +180,35 @@ function deck(name, titleText) {
         if (i < st.length - 1) H.arrow(s, x + w, y + 0.55, x + w + g, y + 0.55);
       });
     },
-    // biểu đồ cột (thang xám), series = [{name, labels, values}]
+    // biểu đồ cột: xám + một màu nhấn (patina)
     bars(s, series, o) {
       s.addChart(pres.charts.BAR, series, {
-        x: o.x, y: o.y, w: o.w, h: o.h, barDir: o.dir || "col", barGrouping: "clustered", barGapWidthPct: 60,
-        chartColors: o.colors || [K.bar, K.ink], showTitle: !!o.title, title: o.title, titleFontFace: F, titleFontSize: 15, titleColor: K.black,
-        showValue: true, dataLabelPosition: o.labelPos || "outEnd", dataLabelFontFace: F, dataLabelFontSize: FS, dataLabelColor: K.black,
+        x: o.x, y: o.y, w: o.w, h: o.h, barDir: o.dir || "col", barGrouping: "clustered", barGapWidthPct: 70,
+        chartColors: o.colors || [K.bar, K.patina], showTitle: !!o.title, title: o.title, titleFontFace: F, titleFontSize: 14, titleColor: K.mute,
+        showValue: true, dataLabelPosition: o.labelPos || "outEnd", dataLabelFontFace: F, dataLabelFontSize: 13, dataLabelColor: K.black,
         dataLabelFormatCode: o.fmt || "General",
-        catAxisLabelFontFace: F, catAxisLabelFontSize: FS, catAxisLabelColor: K.ink, catAxisLineShow: true,
+        catAxisLabelFontFace: F, catAxisLabelFontSize: FS, catAxisLabelColor: K.ink, catAxisLineShow: true, catAxisLineColor: K.edge,
         valAxisHidden: true, catAxisHidden: !!o.noCat, valGridLine: { style: "none" }, catGridLine: { style: "none" },
         valAxisMinVal: o.min, valAxisMaxVal: o.max,
-        showLegend: !!o.legend, legendPos: "b", legendFontFace: F, legendFontSize: FS,
+        showLegend: !!o.legend, legendPos: "b", legendFontFace: F, legendFontSize: 13, legendColor: K.ink,
       });
     },
     legend(s, x, y) {
-      [["NoCG", K.bar], ["CG", K.ink]].forEach(([t, c], i) => {
-        s.addShape(pres.shapes.RECTANGLE, { x: x + i * 1.5, y: y + 0.07, w: 0.25, h: 0.25, fill: { color: c }, line: { color: c } });
-        s.addText(t, { x: x + i * 1.5 + 0.33, y, w: 1.0, h: 0.38, fontFace: F, fontSize: FS, color: K.ink, margin: 0, valign: "middle", isTextBox: true });
+      [["NoCG", K.bar], ["CG", K.patina]].forEach(([t, c], i) => {
+        s.addShape(pres.shapes.RECTANGLE, { x: x + i * 1.5, y: y + 0.08, w: 0.22, h: 0.22, fill: { color: c }, line: { color: c } });
+        T(s, t, { x: x + i * 1.5 + 0.32, y, w: 1.0, h: 0.38, fontSize: FS, valign: "middle" });
       });
     },
+    // bìa: không eyebrow; tiêu đề + phụ đề + người trình bày
     cover(kicker, t1, t2, sub) {
       const s = pres.addSlide(); n += 1;
-      s.addText(kicker, { x: 0.4, y: 1.45, w: 9, h: 0.35, fontFace: F, fontSize: 14, color: K.mute, charSpacing: 3, margin: 0, isTextBox: true });
-      s.addText([{ text: t1, options: { breakLine: true } }, { text: t2 }],
-        { x: 0.4, y: 2.0, w: 12, h: 1.5, fontFace: F, fontSize: 34, bold: true, color: K.black, valign: "middle", margin: 0, isTextBox: true });
-      s.addText(sub, { x: 0.4, y: 3.55, w: 12, h: 0.4, fontFace: F, fontSize: 16, color: K.mute, margin: 0, isTextBox: true });
-      s.addShape(pres.shapes.LINE, { x: 0.5, y: 4.3, w: 4.2, h: 0, line: { color: K.line, width: 1 } });
-      s.addText([{ text: "Advisor: MSc. Phạm Thế Hùng", options: { breakLine: true } }, { text: "Student: Phan Thành Nhân" }],
-        { x: 0.5, y: 4.5, w: 6, h: 0.8, fontFace: F, fontSize: 16, color: K.black, margin: 0, isTextBox: true });
-      s.addText("Report series: 0 Setup · 1 Sim · 2 FPGA · 3 ASIC", { x: 0.5, y: 6.6, w: 8, h: 0.3, fontFace: F, fontSize: 14, color: K.cap, margin: 0, isTextBox: true });
+      s.background = { color: "FFFFFF" };
+      T(s, [{ text: t1, options: { breakLine: true } }, { text: t2 }], { x: 0.85, y: 1.9, w: 11.6, h: 1.6, fontSize: 36, bold: true, color: K.black, valign: "bottom" });
+      T(s, sub, { x: 0.85, y: 3.65, w: 11.6, h: 0.45, fontSize: 18, color: K.mute });
+      s.addShape(pres.shapes.OVAL, { x: 0.85, y: 4.55, w: 0.16, h: 0.16, fill: { color: K.gold }, line: { color: K.goldEdge, width: 0.5 } });
+      T(s, [{ text: "Advisor: MSc. Phạm Thế Hùng", options: { breakLine: true } }, { text: "Student: Phan Thành Nhân" }],
+        { x: 0.85, y: 4.85, w: 6, h: 0.75, fontSize: 16, color: K.ink });
+      T(s, kicker + "  ·  Report series: 0 Setup, 1 Sim, 2 FPGA, 3 ASIC", { x: 0.85, y: 6.85, w: 10, h: 0.3, fontSize: 12, color: K.cap });
       return s;
     },
     save(file) { return pres.writeFile({ fileName: path.join(OUT, file) }); },
@@ -200,242 +220,262 @@ function deck(name, titleText) {
 // 0. SETUP
 // ====================================================================================
 async function setupDeck() {
-  const H = deck("Part 0 · Setup", "Part 0: How the CHIA Framework Was Set Up");
-  H.cover("PART 0 · FRAMEWORK SETUP", "Setting up CHIA:", "How the Framework Was Installed",
-    "A single-machine cluster of tool containers, used for the ALU demo, and a plan for remote / cloud workers");
+  const H = deck("Part 0 · Setup", "Part 0: Setting Up CHIA, Step by Step");
+  H.cover("Part 0 · Setup", "Setting Up CHIA,", "Step by Step",
+    "From a fresh Linux machine to a working cluster of tool containers; tested on Bazzite-DX");
+  const TOTAL = 10;
 
-  // 2. CHIA chạy thế nào
+  // Cách CHIA chạy
   {
     const s = H.slide("How CHIA Runs Work");
-    H.box(s, "Head (user's PC)", "Ray head · driver script", 3.9, 1.35, 5.5, 0.85, true);
+    H.box(s, "Head (your PC)", "Ray head · driver script", 3.9, 1.4, 5.5, 0.85, true);
     [["chipyard", "Chisel, Verilator build"], ["verilator", "run simulations"], ["vivado", "FPGA build"], ["asic", "Yosys + OpenROAD"], ["claude", "LLM agent"]]
       .forEach(([a, b], i) => {
         const x = 0.85 + i * 2.37;
-        H.box(s, a + " worker", b, x, 2.75, 2.15, 0.95);
-        H.arrow(s, 6.65, 2.2, x + 1.075, 2.75);
+        H.box(s, a + " worker", b, x, 2.8, 2.15, 0.95);
+        H.arrow(s, 6.65, 2.25, x + 1.075, 2.8);
       });
-    H.caption(s, "Each worker is one Docker container with one set of tools; here all of them run on the head machine.", 0.85, 3.8, 11.65);
+    H.caption(s, "Each worker is one Docker container with one set of tools; here all of them run on the head machine.", 0.85, 3.9, 11.65);
     H.table(s, [["Term", "Meaning"],
       ["Worker", "Container with one tool set; it offers a resource name, e.g. vivado"],
       ["Task", "Python function marked with the resource it needs; Ray runs it on a matching worker"],
       ["Gate", "Check in the driver on a task's result; the next step starts only if it passes"]],
-      { x: 0.85, y: 4.3, w: 11.65, colW: [1.6, 10.05], boldFirstCol: true });
-    H.msg(s, "Each tool runs in its own container; the driver asks for a resource and Ray picks the container.");
+      { x: 0.85, y: 4.4, w: 11.65, colW: [1.6, 10.05], boldFirstCol: true });
   }
 
-  // 3. Ví dụ một task
+  // Ví dụ một task
   {
     const s = H.slide("Example: One Simulation Task Through CHIA");
     H.box(s, "Head: driver script", "calls the run task, waits", 0.85, 1.45, 3.2, 1.1, true);
     H.box(s, "Ray scheduler", "who offers verilator_run?", 5.05, 1.45, 3.0, 1.1);
     H.box(s, "verilator worker", "runs the simulation", 9.05, 1.45, 3.45, 1.1);
-    H.box(s, "Gate in the driver", "RESULT: PASS → next task", 0.85, 3.4, 3.2, 1.0);
+    H.box(s, "Gate in the driver", "RESULT: PASS -> next task", 0.85, 3.4, 3.2, 1.0);
     H.box(s, "Shared run folder", "binary, log, waveform", 9.05, 3.4, 3.45, 1.0);
     H.arrow(s, 4.05, 2.0, 5.05, 2.0); H.arrow(s, 8.05, 2.0, 9.05, 2.0);
     H.arrow(s, 10.775, 2.55, 10.775, 3.4); H.arrow(s, 9.05, 2.55, 4.05, 3.4);
     H.arrow(s, 2.45, 2.55, 2.45, 3.4);
-    H.para(s, "(1)", { x: 4.25, y: 1.6, w: 0.6, h: 0.35, fs: 15, bold: true, align: "center" });
-    H.para(s, "(2)", { x: 8.25, y: 1.6, w: 0.6, h: 0.35, fs: 15, bold: true, align: "center" });
-    H.para(s, "(3)", { x: 10.85, y: 2.8, w: 0.6, h: 0.35, fs: 15, bold: true, align: "center" });
-    H.para(s, "(4) result via get()", { x: 5.6, y: 3.1, w: 2.6, h: 0.35, fs: 15, bold: true, align: "center" });
-    H.para(s, "(5)", { x: 2.55, y: 2.8, w: 0.6, h: 0.35, fs: 15, bold: true });
+    [["1", 4.3, 1.6], ["2", 8.3, 1.6], ["3", 10.9, 2.8], ["4  result via get()", 5.6, 3.05], ["5", 2.6, 2.8]].forEach(([t, x, y]) =>
+      H.para(s, t, { x, y, w: t.length > 2 ? 2.6 : 0.4, h: 0.32, fs: 14, bold: true, color: K.mute }));
     H.table(s, [
       ["1", "The driver calls the run task, which needs the resource verilator_run"],
       ["2", "Ray sends the task to the container that offers it"],
       ["3", "The container runs the binary in the shared run folder and writes the log there"],
       ["4", "The result (PASS / FAIL, number of checks) comes back to the driver"],
       ["5", "The driver checks the gate; only on PASS does the next task start"]],
-      { x: 0.85, y: 4.6, w: 11.65, colW: [0.5, 11.15], boldFirstCol: true, noHeader: true });
-    H.msg(s, "The driver only names a resource; CHIA and Ray decide where the task runs and bring the result back.");
+      { x: 0.85, y: 4.65, w: 11.65, colW: [0.5, 11.15], boldFirstCol: true, noHeader: true });
   }
 
-  // 4. Máy và phiên bản
+  // Yêu cầu
   {
-    const s = H.slide("Machine and Software Used");
-    H.head(s, "Host (head node)", 0.85, 1.3, 5.3);
-    H.table(s, [["", "Value"], ["OS", "Bazzite-DX (Fedora Atomic)"], ["CPU / RAM", "20 cores / 23 GB"],
-      ["Disk", "≈ 259 GB free"], ["Containers", "Docker, no sudo"], ["Other machines", "none yet (plan: slides 11-12)"]],
-      { x: 0.85, y: 1.7, w: 5.3, colW: [1.75, 3.55], boldFirstCol: true });
-    H.head(s, "Software", 6.55, 1.3, 5.95);
-    H.table(s, [["Component", "Version"], ["Python", "3.10.19 (conda env)"], ["Ray", "2.54.0"], ["CHIA", "chialoops 2.0.1"],
-      ["Chipyard", "1.15.0 (upstream, tag pinned)"], ["Verilator", "5.022 (from Chipyard)"], ["Vivado", "2025.1"],
-      ["Yosys / OpenROAD", "0.68 / ORFS"], ["Agent", "Claude Code"]],
-      { x: 6.55, y: 1.7, w: 5.95, colW: [2.3, 3.65], boldFirstCol: true });
-    H.msg(s, "Every version is pinned: Ray needs exactly the same Python (3.10.19) on the head and in every worker.");
+    const s = H.slide("Before You Start: Prerequisites");
+    H.head(s, "Machine", 0.85, 1.45, 5.6);
+    H.table(s, [["CPU", "x86_64; tested with 20 cores"], ["RAM", "32 GB recommended; 23 GB worked"], ["Disk", "≥ 150 GB free (Chipyard image and build)"],
+      ["OS", "Linux with systemd; tested on Bazzite-DX (Fedora Atomic)"], ["Network", "access to GitHub, conda-forge, ghcr.io"]],
+      { x: 0.85, y: 1.8, w: 5.6, colW: [1.2, 4.4], noHeader: true, boldFirstCol: true });
+    H.head(s, "Installed by you, outside these steps", 6.9, 1.45, 5.6);
+    H.table(s, [["Vivado 2025.1", "at ~/tools/Xilinx/2025.1 (AMD installer; free edition covers Artix-7 100T); only for FPGA"],
+      ["Claude Code", "logged in once on the host (~/.claude); only for the agent"], ["git, curl", "from the distro"]],
+      { x: 6.9, y: 1.8, w: 5.6, colW: [1.6, 4.0], noHeader: true, boldFirstCol: true });
+    H.head(s, "Versions that must match", 0.85, 4.35, 11.65);
+    H.table(s, [["Python 3.10.19", "Ray 2.54.0", "chialoops 2.0.1", "Chipyard 1.15.0", "Verilator 5.022", "Yosys 0.68 + ORFS"]],
+      { x: 0.85, y: 4.7, w: 11.65, colW: [1.95, 1.75, 1.95, 2.0, 1.9, 2.1], noHeader: true, monoCols: [0, 1, 2, 3, 4, 5], fs: 13 });
+    H.msg(s, "Ray checks Python down to the patch level: the head must run 3.10.19, the same as every worker image.");
   }
 
-  // 5. Quy trình
+  // Lộ trình
   {
-    const s = H.slide("Setup Process");
-    H.hflow(s, [["1. Host", "Docker, SSH, linger"], ["2. Python + CHIA", "conda env"], ["3. Chipyard", "1.15.0"],
-      ["4. FPGA, ASIC, agent", "Vivado, ORFS, Claude"], ["5. Cluster", "up + smoke test"]], 1.4, 1.0, { dark: [4] });
-    H.table(s, [["Step", "Check that passed"],
-      ["1. Host", "Docker without sudo, SSH to itself, environment check script passes"],
-      ["2. Python + CHIA", "Python 3.10.19, Ray 2.54.0, chia command works"],
-      ["3. Chipyard", "RocketConfig builds in Verilator, a RISC-V test program exits with 0"],
-      ["4. FPGA, ASIC, agent", "Vivado 2025.1 found in its container; ORFS runs an example to GDS; Claude logged in"],
-      ["5. Cluster", "All resources visible; smoke test prints KẾT QUẢ: OK"]],
-      { x: 0.85, y: 2.75, w: 11.65, colW: [2.6, 9.05], boldFirstCol: true });
-    H.caption(s, "08/11 first install · 14/11 removed and reinstalled from the written steps · 15/11 shutdown checked · 20-21/11 ALU demo", 0.85, 5.55, 11.65);
-    H.msg(s, "Reinstalled from scratch on 14/11/2026 by following the written guide (docs/reinstall.md); every check passed.");
+    const s = H.slide("The Ten Steps");
+    H.table(s, [["Step", "What", "Time", "Done when"],
+      ["1", "Docker without sudo", "10 min", "docker run hello-world works"],
+      ["2", "SSH to itself, linger", "5 min", "passwordless ssh to own IP"],
+      ["3", "conda env + CHIA", "10 min", "Python 3.10.19, ray 2.54.0"],
+      ["4", "Clone repo, check host", "2 min", "All required checks passed."],
+      ["5", "Build Chipyard 1.15.0", "several hours", "VERIFY_OK"],
+      ["6", "SoC config (base for projects)", "5 min", "MIXIN_OK"],
+      ["7", "ORFS image (ASIC tools)", "20 min", "VERIFY_OK"],
+      ["8", "Bring up the block cluster", "5 min", "five worker containers running"],
+      ["9", "Smoke test through CHIA", "15-30 min", "KẾT QUẢ: OK"],
+      ["10", "Shut down", "1 min", "no container left"]],
+      { x: 0.85, y: 1.4, w: 11.65, colW: [0.8, 4.2, 1.8, 4.85], boldFirstCol: true, monoCols: [3], fs: 13 });
+    H.caption(s, "Steps 1-4 prepare the host and differ by distro; steps 5-10 run the same scripts on any Linux.", 0.85, 5.75, 11.65);
   }
 
-  // 6. Host + Python
-  {
-    const s = H.slide("Steps 1-2 · Host and Python Environment");
-    H.table(s, [["Requirement", "Why CHIA needs it", "How it was set up"],
-      ["Docker without sudo", "CHIA calls docker to start every worker", "Bazzite-DX docker group"],
-      ["SSH to its own IP", "chia up logs into the head over SSH, even with one machine", "sshd on, key without password"],
-      ["Linger", "Keeps the Ray head running after that SSH session ends", "loginctl enable-linger"],
-      ["Python 3.10.19", "Must equal the Python inside the worker images", "conda env chia_env"],
-      ["CHIA + Ray", "The framework and its cluster commands", "pip, chialoops 2.0.1"]],
-      { x: 0.85, y: 1.35, w: 11.65, colW: [2.6, 5.45, 3.6], boldFirstCol: true });
-    H.cmd(s, "pip install chialoops==2.0.1", 0.85, 4.0, 6.0);
-    H.msg(s, "The host only needs Docker, SSH and one conda env; all hardware tools run inside containers.");
-  }
+  H.step({ n: 1, total: TOTAL, title: "Step 1 · Docker Without sudo",
+    where: "host terminal; needs one reboot or re-login",
+    cmds: ["ujust dx-group                # Bazzite-DX: adds you to the docker group", "systemctl reboot", "docker run --rm hello-world"],
+    does: ["CHIA calls docker for every worker, without sudo.", "On plain Bazzite, first rebase to bazzite-dx (docs/setup-bazzite.md, part 1)."],
+    done: { say: "The test container prints:", log: ["Hello from Docker!"] },
+    alt: [["Ubuntu", "sudo apt install docker.io"], ["", "sudo usermod -aG docker $USER"], ["Fedora", "sudo dnf install moby-engine"], ["", "sudo usermod -aG docker $USER"]],
+    fails: [["permission denied ... docker.sock", "you are not in the docker group yet: log out and in again"]] });
 
-  // 7. Công cụ trên host, mount vào worker
+  H.step({ n: 2, total: TOTAL, title: "Step 2 · SSH to Itself and Linger",
+    where: "host terminal",
+    cmds: ["sudo systemctl enable --now sshd", "ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 && cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys",
+      "loginctl enable-linger $USER", "ssh $USER@$(hostname -I | awk '{print $1}') 'bash --login -c \"docker ps\"'"],
+    does: ["chia up logs into the head over SSH, even on one machine.", "Linger keeps the Ray head alive after that SSH session closes."],
+    done: { say: "The last command lists containers without asking for a password.", log: [] },
+    alt: [["Ubuntu", "sudo apt install openssh-server"], ["", "sudo systemctl enable --now ssh"]],
+    fails: [["worker: Failed to connect to GCS", "linger is off; run loginctl enable-linger $USER"], ["asks for a password", "key missing from ~/.ssh/authorized_keys or ssh-agent"]] });
+
+  H.step({ n: 3, total: TOTAL, title: "Step 3 · Python Environment and CHIA",
+    where: "host terminal; same on every distro",
+    cmds: ["curl -LO https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh",
+      "bash Miniforge3-Linux-x86_64.sh -b -p ~/miniforge3 && ~/miniforge3/bin/conda init bash", "conda create -n chia_env python=3.10.19 -y",
+      "conda env config vars set PYTHONNOUSERSITE=1 -n chia_env", "conda activate chia_env && pip install chialoops==2.0.1", "python -V; ray --version"],
+    cmdFs: 12,
+    does: ["One env for CHIA and Ray, pinned to the workers' Python.", "PYTHONNOUSERSITE stops pip from mixing in ~/.local packages."],
+    done: { say: "The last command prints:", log: ["Python 3.10.19", "ray, version 2.54.0"] },
+    fails: [["conda: command not found", "open a new terminal after conda init"]] });
+
+  H.step({ n: 4, total: TOTAL, title: "Step 4 · Clone the Repo and Check the Host",
+    where: "host terminal",
+    cmds: ["git clone -b setup https://github.com/chipchip-tech/CHIA-workflow.git ~/CHIA-workflow", "cd ~/CHIA-workflow && scripts/check-bazzite-env.sh"],
+    does: ["Checks docker, sshd, passwordless SSH, linger, chia_env, disk and RAM.", "On another distro the OS line is only a WARN."],
+    done: { say: "The script ends with:", log: ["All required checks passed."] },
+    fails: [["[FAIL] linger off / sshd not active", "go back to step 2"], ["[FAIL] Python must be 3.10.x", "go back to step 3"]] });
+
+  H.step({ n: 5, total: TOTAL, title: "Step 5 · Build Chipyard 1.15.0",
+    where: "host terminal; runs in a temporary container; keep the machine awake",
+    cmds: ["cd ~/CHIA-workflow && scripts/setup-chipyard.sh --verify"],
+    does: ["Clones Chipyard to ~/tools/chipyard, pins tag 1.15.0, runs its 11 setup steps.", "Log: ~/tools/chipyard/setup.log. Run only one build at a time."],
+    done: { say: "After several hours the script prints:", log: ["VERIFY_OK", "== Xong"] },
+    out: ["~/tools/chipyard/", "  .conda-env/riscv-tools/", "  setup.log"],
+    fails: [["stops at step 8-9 (FireMarshal, mount -o loop)", "skip 8-9, then rerun them with --privileged (command printed by the script)"],
+      ["CondaHTTPError at step 1", "network; run the two commands the script prints"],
+      ["any other step", "the script prints the command to resume from that step"]] });
+
+  H.step({ n: 6, total: TOTAL, title: "Step 6 · Install the Base SoC Config",
+    where: "host terminal",
+    cmds: ["cd ~/CHIA-workflow && scripts/install-chipyard-config.sh"],
+    does: ["Adds MinimalSoCConfig (1 Rocket core + 128 KiB L2) to Chipyard.", "Base config for SoC projects; the ALU demo does not need it."],
+    done: { say: "The script prints:", log: ["MIXIN_OK"] } });
+
+  H.step({ n: 7, total: TOTAL, title: "Step 7 · ASIC Tools (ORFS Image)",
+    where: "host terminal",
+    cmds: ["cd ~/CHIA-workflow && docker build -t chia-orfs:latest -f docker/orfs-ray.Dockerfile docker", "scripts/setup-orfs.sh --verify"],
+    does: ["Builds the asic worker image: Yosys + OpenROAD with Ray inside.", "Copies OpenROAD-flow-scripts to ~/tools and runs a small design to GDS."],
+    done: { say: "The second command prints:", log: ["VERIFY_OK"] },
+    out: ["~/tools/OpenROAD-flow-scripts/  (≈ 1.4 GB)"] });
+
+  // Công cụ trên host, mount vào worker
   {
-    const s = H.slide("Tools Live on the Host, Workers Mount Them");
-    H.frame(s, 0.85, 1.35, 4.6, 4.15);
-    H.para(s, "Host  ~/tools/", { x: 1.0, y: 1.42, w: 4.3, h: 0.38, fs: 16, bold: true });
+    const s = H.slide("How the Tools Reach the Workers");
+    H.frame(s, 0.85, 1.4, 4.6, 4.15);
+    H.head(s, "Host  ~/tools/", 1.05, 1.55, 4.2);
     [["chipyard/", "Chipyard 1.15.0"], ["Xilinx/2025.1/", "Vivado, read-only"], ["OpenROAD-flow-scripts/", "ORFS"]]
-      .forEach(([a, b], i) => H.box(s, a, b, 1.05, 1.9 + i * 0.85, 4.2, 0.72));
-    H.box(s, "Shared run folder", "~/chia_demo, read-write", 1.05, 4.6, 4.2, 0.72, true);
-    H.arrow(s, 5.45, 3.4, 6.75, 3.4);
-    H.para(s, "mounted at the same path", { x: 5.4, y: 2.6, w: 1.45, h: 0.75, fs: 14, align: "center" });
+      .forEach(([a, b], i) => H.box(s, a, b, 1.05, 1.95 + i * 0.85, 4.2, 0.72));
+    H.box(s, "Shared run folder", "~/chia_demo, read-write", 1.05, 4.65, 4.2, 0.72, true);
+    H.arrow(s, 5.45, 3.45, 6.75, 3.45);
+    H.para(s, "mounted at the same path", { x: 5.4, y: 2.65, w: 1.45, h: 0.75, fs: 13, align: "center", color: K.mute });
     [["chipyard worker", "mounts chipyard/"], ["verilator worker", "own image only"], ["vivado worker", "mounts chipyard/, Xilinx/"],
      ["asic worker", "mounts ORFS"], ["claude worker", "chipyard/ read-only"]]
-      .forEach(([a, b], i) => H.box(s, a, b, 6.75, 1.35 + i * 0.84, 5.75, 0.72));
-    H.caption(s, "every worker also mounts the shared run folder", 6.75, 5.6, 5.75);
-    H.msg(s, "One copy of each tool on the host, edited with a normal editor, shared by every worker that needs it.");
+      .forEach(([a, b], i) => H.box(s, a, b, 6.75, 1.4 + i * 0.84, 5.75, 0.72));
+    H.caption(s, "Every worker also mounts the shared run folder. Paths are the real ones (on Bazzite /var/home/...).", 0.85, 5.75, 11.65);
   }
 
-  // 8. Cài công cụ
-  {
-    const s = H.slide("Steps 3-4 · Installing the Tools");
-    H.table(s, [["Tool", "Version", "Installed by", "Check that passed"],
-      ["Chipyard", "1.15.0", "setup script: clone, pin tag, full build in a container", "RocketConfig builds, test exits 0"],
-      ["Vivado", "2025.1", "Xilinx installer + Arty board files", "Arty A7-100T bitstream via a CHIA job"],
-      ["ORFS", "Yosys 0.68 + OpenROAD", "chia-orfs image, ORFS copied to ~/tools", "example design to GDS"],
-      ["Claude Code", "-", "one login on the host", "used by the demo agent"]],
-      { x: 0.85, y: 1.35, w: 11.65, colW: [1.65, 2.0, 4.3, 3.7], boldFirstCol: true });
-    H.cmd(s, "scripts/setup-chipyard.sh --verify", 0.85, 3.75, 6.0);
-    H.caption(s, "The Chipyard build takes hours; Vivado, ORFS and the agent are optional per project.", 0.85, 4.4, 11.65);
-    H.msg(s, "All four tools were installed and checked on the user's machine (14/11/2026).");
-  }
+  H.step({ n: 8, total: TOTAL, title: "Step 8 · Bring Up the Block Cluster",
+    where: "host terminal, inside chia_env",
+    cmds: ["conda activate chia_env && cd ~/CHIA-workflow", "python scripts/chia-up-blocks.py --fpga --asic", "docker ps --format '{{.Names}}'"],
+    does: ["Checks the tools, writes cluster.gen.yaml with only the chosen blocks, runs chia up.",
+      "Options: --fpga, --asic, --no-claude; WORK_DIR=... moves the run folder; ASIC_MEM=20g."],
+    done: { say: "docker ps lists one container per block:", log: ["chia-chipyard-<user>-0", "chia-verilator-<user>-0", "... vivado, asic, claude"] },
+    fails: [["script stops before chia up", "it names the missing tool: Chipyard env.sh, Vivado settings64.sh, chia-orfs image, Claude login"],
+      ["chia: command not found", "conda activate chia_env (the base env has no chia)"]] });
 
-  // 9. Cluster theo khối
-  {
-    const s = H.slide("Step 5 · The Block Cluster");
-    H.table(s, [["Block", "Tools inside", "Enabled by", "Used in the demo for"],
-      ["chipyard", "Chipyard, Verilator", "default", "Sim build"], ["verilator", "simulation runtime", "default", "Sim run"],
-      ["vivado", "Vivado 2025.1", "--fpga", "FPGA build and check"], ["asic", "Yosys + OpenROAD", "--asic", "6 ASIC stages"],
-      ["claude", "Claude Code", "default", "agent sessions"]],
-      { x: 0.85, y: 1.35, w: 11.65, colW: [1.8, 3.6, 2.0, 4.25], boldFirstCol: true });
-    H.hflow(s, [["Cluster script", "choose blocks"], ["Check", "tools present?"], ["Write config", "only chosen blocks"], ["chia up", "head + containers"], ["ray status", "all resources"]],
-      4.0, 0.95, { dark: [0] });
-    H.cmd(s, "python scripts/chia-up-blocks.py --fpga --asic", 0.85, 5.3, 7.0);
-    H.msg(s, "One script brings up exactly the blocks a project needs, and shuts them all down with --down.");
-  }
+  H.step({ n: 9, total: TOTAL, title: "Step 9 · Smoke Test Through CHIA",
+    where: "host terminal, inside chia_env, cluster up",
+    cmds: ["cd ~/CHIA-workflow/examples && chia job submit --working-dir . -- python blocks_smoke.py --clean"],
+    does: ["One job touches every block: builds RocketConfig on chipyard, finds Vivado, runs Yosys.", "The first build downloads the JVM cache, so it is slow."],
+    done: { say: "The job log shows:", log: ["SUCCESS=True", "vivado v2025.1", "KẾT QUẢ: OK"] },
+    fails: [["Ctrl+C does not stop the job", "chia job stop <id>"], ["build hangs, java at 0 % CPU", "dead connection to Maven; the JVM cache mount and timeouts fix it, rerun"]] });
 
-  // 10. Smoke test
-  {
-    const s = H.slide("Bring-up and Smoke Test");
-    H.table(s, [["Block", "What the smoke test checks", "Result"],
-      ["chipyard", "Chipyard environment loaded; RocketConfig built through CHIA", "SUCCESS=True"],
-      ["verilator", "Simulation runtime present", "OK"],
-      ["vivado", "Vivado found inside the container", "vivado v2025.1"],
-      ["asic", "Yosys and OpenROAD present, flow folder writable", "Yosys 0.68, writable"],
-      ["all", "Whole smoke job", "KẾT QUẢ: OK"],
-      ["shutdown", "--down removes the Ray head and every container", "nothing left running"]],
-      { x: 0.85, y: 1.35, w: 11.65, colW: [1.6, 6.5, 3.55], boldFirstCol: true });
-    H.cmd(s, "chia job submit --working-dir . -- python blocks_smoke.py", 0.85, 4.35, 7.6);
-    H.msg(s, "KẾT QUẢ: OK on 14/11/2026; the same cluster then ran the whole ALU demo (Parts 1-3).");
-  }
+  H.step({ n: 10, total: TOTAL, title: "Step 10 · Shut Down",
+    where: "host terminal, in ~/CHIA-workflow",
+    cmds: ["python scripts/chia-up-blocks.py --down", "docker ps"],
+    does: ["Stops the Ray head and removes every worker container.", "Tools and the run folder stay on the host."],
+    done: { say: "docker ps shows no chia-* container.", log: [] },
+    fails: [["containers still running after chia down", "call the script with --down, not chia down directly (it needs THIS_MACHINE)"]] });
 
-  // 11. Remote: kiến trúc
+  // Remote: kiến trúc
   {
     const s = H.slide("Remote Workers: Architecture");
     H.tag(s, "PLAN · NOT TESTED");
-    H.box(s, "HEAD (user's PC)", "Ray head · driver · local workers", 0.85, 1.45, 4.2, 1.05, true);
+    H.box(s, "HEAD (your PC)", "Ray head · driver · local workers", 0.85, 1.45, 4.2, 1.05, true);
     H.box(s, "REMOTE (lab PC or cloud VM)", "SSH · Docker · worker containers", 8.3, 1.45, 4.2, 1.05);
     H.arrow(s, 5.05, 1.75, 8.3, 1.75);
     H.arrow(s, 8.3, 2.2, 5.05, 2.2);
-    H.para(s, "SSH: start containers", { x: 5.1, y: 1.33, w: 3.15, h: 0.35, fs: 14, align: "center" });
-    H.para(s, "Ray ports, both ways", { x: 5.1, y: 2.25, w: 3.15, h: 0.35, fs: 14, align: "center" });
-    H.head(s, "The remote machine needs", 0.85, 2.95, 5.5);
-    H.table(s, [["Item", "Value"], ["Software", "SSH server, Docker, rsync"], ["Not needed", "conda, CHIA"],
-      ["Hardware", "x86_64, ≥ 16 GB RAM, ≥ 120 GB disk"]], { x: 0.85, y: 3.35, w: 5.5, colW: [1.6, 3.9], boldFirstCol: true });
-    H.head(s, "What changes", 6.85, 2.95, 5.65);
+    H.para(s, "SSH: start containers", { x: 5.1, y: 1.33, w: 3.15, h: 0.35, fs: 13, align: "center", color: K.mute });
+    H.para(s, "Ray ports, both ways", { x: 5.1, y: 2.25, w: 3.15, h: 0.35, fs: 13, align: "center", color: K.mute });
+    H.head(s, "The remote machine needs", 0.85, 3.0, 5.5);
+    H.table(s, [["Software", "SSH server, Docker, rsync"], ["Not needed", "conda, CHIA"],
+      ["Hardware", "x86_64, ≥ 16 GB RAM, ≥ 120 GB disk"]], { x: 0.85, y: 3.35, w: 5.5, colW: [1.6, 3.9], noHeader: true, boldFirstCol: true });
+    H.head(s, "What changes", 6.85, 3.0, 5.65);
     H.bullets(s, ["Job code: nothing; Ray places tasks by resource.",
       "Firewall: each machine trusts only the other's IP.",
       "Other network or cloud VM: connect through Tailscale."], { x: 6.85, y: 3.35, w: 5.65, h: 2.6 });
-    H.msg(s, "A remote machine only needs SSH, Docker and open Ray ports; the demo code does not change.");
   }
 
-  // 12. Remote: các bước
+  // Remote: các bước
   {
     const s = H.slide("Remote Workers: Planned Steps");
     H.tag(s, "PLAN · NOT TESTED");
-    H.hflow(s, [["1. Prepare remote", "script installs SSH, Docker, firewall"], ["2. Check from head", "check script: no [FAIL]"],
-      ["3. Describe cluster", "head IP, remote IP, user"], ["4. Bring up", "expect 7 nodes"]], 1.4, 1.2, { dark: [3] });
-    H.cmd(s, "chia up configs/cluster-lan.yaml", 0.85, 2.85, 6.0);
+    H.table(s, [["Step", "Where", "Command"],
+      ["1. Prepare the remote", "head, then remote", "scp scripts/prepare-remote-worker.sh <user>@<remote>:  then  bash prepare-remote-worker.sh <head-ip>"],
+      ["2. Open the firewall", "both", "sudo firewall-cmd --permanent --zone=trusted --add-source=<other-ip> (ufw: sudo ufw allow from <ip>)"],
+      ["3. SSH without password", "head", "ssh-copy-id <user>@<remote>; ssh-add"],
+      ["4. Check the remote", "head", "bash scripts/check-remote-worker.sh <user>@<remote> <head-ip>"],
+      ["5. Bring up", "head", "chia up configs/cluster-lan.yaml   (add workers later: chia up --add ...)"]],
+      { x: 0.85, y: 1.45, w: 11.65, colW: [2.4, 1.7, 7.55], boldFirstCol: true, monoCols: [2], fs: 12 });
     H.table(s, [["", "Lab PC on the same LAN", "Cloud VM / other network"],
       ["Connection", "LAN IPs", "Tailscale on both machines"],
-      ["Firewall", "trust the other machine's IP", "Ray ports closed to the Internet"],
       ["To verify", "needs a second PC", "needs a VM with Docker, ≥ 120 GB"]],
-      { x: 0.85, y: 3.6, w: 11.65, colW: [1.9, 4.6, 5.15], boldFirstCol: true });
-    H.msg(s, "Scripts and config are written; testing waits for a second machine (lab PC or cloud VM).");
+      { x: 0.85, y: 4.4, w: 11.65, colW: [1.9, 4.6, 5.15], boldFirstCol: true });
+    H.caption(s, "Details: docs/usage-remote.md", 0.85, 5.75, 11.65);
   }
 
-  // 12b. Mẫu flow dùng chung
+  // Mẫu flow dùng chung
   {
-    const s = H.slide("Shared Flow: A New Design Needs Three Files");
-    H.hflow(s, [["RTL", "the design"], ["Testbench", "self-checking"], ["project.py", "≈ 20 lines"]], 1.35, 0.9, { w: 6.2, dark: [2] });
-    H.arrow(s, 7.05, 1.8, 7.55, 1.8);
-    H.box(s, "flow/ generates", "sim script, config.mk, SDC, Vivado build.tcl, SAIF and GLS scripts", 7.55, 1.35, 4.95, 0.9);
-    H.head(s, "5 testbench rules", 0.85, 2.6, 6.2);
+    const s = H.slide("After Setup: A New Design Needs Three Files");
+    H.hflow(s, [["RTL", "the design"], ["Testbench", "self-checking"], ["project.py", "≈ 20 lines"]], 1.45, 0.9, { w: 6.2, dark: [2] });
+    H.arrow(s, 7.05, 1.9, 7.55, 1.9);
+    H.box(s, "flow/ generates", "sim script, config.mk, SDC, Vivado build.tcl, SAIF and GLS scripts", 7.55, 1.45, 4.95, 0.9);
+    H.head(s, "5 testbench rules", 0.85, 2.75, 6.2);
     H.bullets(s, ["Prints its own PASS / FAIL (RESULT: line or a regex).", "Reads only DUT ports, so it also runs on netlists (GLS).",
       "Types and constants in a separate .svh file.", "Reset ≥ 100 ns (Xilinx global reset).", "One clock; SV that Verilator 5.022 and Yosys 0.68 read."],
-      { x: 0.85, y: 3.0, w: 6.2, h: 2.6, fs: 14 });
-    H.head(s, "4 steps", 7.55, 2.6, 4.95);
-    H.table(s, [["1", "create project (flow/new.py)"], ["2", "baseline"], ["3", "agent --rounds N"], ["4", "clean the run folders"]],
-      { x: 7.55, y: 3.0, w: 4.95, colW: [0.5, 4.45], noHeader: true, boldFirstCol: true });
-    H.cmd(s, "python flow/run.py <project> baseline", 7.55, 4.75, 4.95);
-    H.msg(s, "Tested with a second design, the ASCON core: only RTL, testbench and project.py were added.");
+      { x: 0.85, y: 3.1, w: 6.2, h: 2.6, fs: 14 });
+    H.head(s, "4 commands", 7.3, 2.75, 5.2);
+    H.cmd(s, ["python flow/new.py projects/<p> --top <mod> ...", "python flow/run.py projects/<p> baseline",
+      "python flow/run.py projects/<p> agent --rounds 2", "python flow/clean_runs.py --only <p>"], 7.3, 3.1, 5.2, 12);
+    H.caption(s, "Parts 1-3 walk through these commands for the ALU demo.", 7.3, 4.4, 5.2, 0.6);
   }
 
-  // 12c. ASCON chứng minh mẫu flow
+  // ASCON chứng minh mẫu flow
   {
     const s = H.slide("Proof: ASCON Through the Same Flow");
-    H.head(s, "What was added", 0.85, 1.3, 5.6);
-    H.bullets(s, ["Ascon-AEAD128 decrypt + tag check, 32-bit bus; never run on CHIA before.", "RTL (2 files), testbench, project.py (≈ 20 lines).",
-      "No change to flow/: same driver, tasks, gates and agent rules as the ALU."], { x: 0.85, y: 1.7, w: 5.6, h: 2.0 });
+    H.head(s, "What was added", 0.85, 1.45, 5.6);
+    H.bullets(s, ["Ascon-AEAD128 decrypt + tag check, 32-bit bus.", "RTL (2 files), testbench, project.py (≈ 20 lines).",
+      "No change to flow/: same driver, tasks, gates and agent rules as the ALU."], { x: 0.85, y: 1.8, w: 5.6, h: 1.8 });
     H.head(s, "Testbench fixes it needed", 0.85, 3.7, 5.6);
-    H.bullets(s, ["Read fsm_q inside the DUT → wait for auth_valid.", "Package split into ascon_pkg.svh.", "Key loaded at 45 ns → reset ≥ 100 ns (GSR)."],
-      { x: 0.85, y: 4.1, w: 5.6, h: 1.3 });
-    H.head(s, "Result", 6.85, 1.3, 5.65);
-    H.table(s, [["Run", "Result"], ["Baseline, Sim → FPGA → ASIC", "OK, 13.3 min"], ["Baseline again", "identical numbers"], ["Agent, 1 round per step", "OK; Sim accepted"]],
-      { x: 6.85, y: 1.7, w: 5.65, colW: [3.35, 2.3], boldFirstCol: true });
-    H.cmd(s, "python flow/run.py projects/ascon-core baseline", 0.85, 5.5, 7.0);
-    H.msg(s, "A design the flow had never seen ran end to end with only RTL, testbench and project.py.");
+    H.bullets(s, ["Read fsm_q inside the DUT -> wait for auth_valid.", "Package split into ascon_pkg.svh.", "Key loaded at 45 ns -> reset ≥ 100 ns (GSR)."],
+      { x: 0.85, y: 4.05, w: 5.6, h: 1.3 });
+    H.head(s, "Result", 6.85, 1.45, 5.65);
+    H.table(s, [["Run", "Result"], ["Baseline, Sim -> FPGA -> ASIC", "OK, 13.3 min"], ["Baseline again", "identical numbers"], ["Agent, 1 round per step", "OK; Sim accepted"]],
+      { x: 6.85, y: 1.8, w: 5.65, colW: [3.35, 2.3], boldFirstCol: true });
+    H.cmd(s, "python flow/run.py projects/ascon-core baseline", 6.85, 3.7, 5.65);
   }
 
-  // 13. Trạng thái
+  // Trạng thái
   {
     const s = H.slide("Setup Status");
     H.table(s, [["Item", "Status"],
-      ["Single-machine cluster with five blocks", "verified 14/11/2026"],
-      ["Reinstall from scratch with the written guide", "verified 14/11/2026"],
-      ["Clean shutdown", "verified 15/11/2026"],
+      ["Steps 1-10 on Bazzite-DX, reinstalled from scratch", "verified 14/11/2026"],
+      ["Clean shutdown with --down", "verified 15/11/2026"],
       ["Shared run folder between blocks", "verified 20/11/2026"],
-      ["ALU demo: Sim, FPGA, ASIC, baseline and agent", "verified 20-21/11/2026"],
-      ["Sign-off gates (coverage, LVS, STA, GLS ...), agent rerun", "verified 25-26/11/2026"],
+      ["ALU demo: Sim, FPGA, ASIC, baseline and agent", "verified 20-26/11/2026"],
       ["Shared flow/ with a second design (ASCON)", "verified 26/11/2026"],
-      ["Remote worker on a LAN", "written, not tested"],
-      ["Cloud VM through Tailscale", "written, not tested"]],
-      { x: 0.85, y: 1.35, w: 11.65, colW: [7.65, 4.0] });
+      ["Steps 1-2 on Ubuntu / Fedora", "not tested"],
+      ["Remote worker on a LAN, cloud VM through Tailscale", "written, not tested"]],
+      { x: 0.85, y: 1.45, w: 11.65, colW: [7.65, 4.0] });
     H.msg(s, "Next: run the remote plan on a second machine, then spread simulations and ASIC runs over both.");
   }
   await H.save("0_Setup.pptx");
@@ -786,28 +826,13 @@ async function asicDeck() {
   await H.save("3_ASIC.pptx");
 }
 
-// slide mẫu để duyệt khung "Step"
-async function previewDeck() {
-  const H = deck("Part 1 · Simulation", "Preview: Step slide");
-  H.step({
-    title: "Step 2 · Run the Baseline Sim", n: 2,
-    steps: ["Before you start", "Run baseline", "What runs inside", "Read results", "Run agent", "Read a round"],
-    where: "host terminal, in ~/CHIA-workflow, cluster already up (Step 1)",
-    cmds: ["conda activate chia_env", "cd ~/CHIA-workflow", "python flow/run.py projects/demo-alu/NoCG baseline --stages sim"],
-    does: ["Submits one CHIA job: lint, build on the chipyard block, run on the verilator block.",
-      "Opens the status page in the browser; it refreshes by itself."],
-    done: { say: "In about 1 min the job log ends with:", log: ["RESULT: PASS dut=NoCG_alu ...", "KẾT QUẢ: OK"] },
-    out: ["~/chia_demo/demo-alu/NoCG/", "  baseline-<date>-<time>/", "    sim/  rtl/  results/", "    profile/  status.html"],
-    fails: [["chia: command not found", "run conda activate chia_env first"],
-      ["no resource 'chipyard' / job waits forever", "cluster is not up: python scripts/chia-up-blocks.py --fpga --asic"],
-      ["Sim FAIL but the testbench printed PASS", "the PASS pattern in project.py does not match the line"]],
-  });
-  await H.save("preview_step.pptx");
-}
-
 (async () => {
   require("fs").mkdirSync(OUT, { recursive: true });
-  if (process.env.PREVIEW) { await previewDeck(); console.log('preview'); return; }
-  await setupDeck(); await simDeck(); await fpgaDeck(); await asicDeck();
+  // ONLY=setup,sim,fpga,asic để build từng deck
+  const only = (process.env.ONLY || 'setup,sim,fpga,asic').split(',');
+  if (only.includes('setup')) await setupDeck();
+  if (only.includes('sim')) await simDeck();
+  if (only.includes('fpga')) await fpgaDeck();
+  if (only.includes('asic')) await asicDeck();
   console.log("written to", OUT);
 })();
