@@ -146,7 +146,7 @@ function deck(name, titleText) {
       H.head(s, "What it does", L, y, LW);
       H.bullets(s, o.does, { x: L, y: y + 0.36, w: LW, h: 1.5, fs: 14 });
       // Done when
-      const dh = 0.62 + 0.24 * o.done.log.length;
+      const dh = 0.62 + 0.24 * o.done.log.length + (o.done.log.length === 0 && o.done.say.length > 45 ? 0.24 : 0);
       s.addShape(pres.shapes.ROUNDED_RECTANGLE, { x: R, y: top - 0.05, w: RW, h: dh, rectRadius: 0.08, fill: { color: K.patinaPale }, line: { color: K.patinaPale } });
       H.dot(s, R + 0.18, top + 0.1, K.patina);
       H.head(s, "Done when", R + 0.4, top + 0.02, 3, K.patina);
@@ -489,55 +489,119 @@ async function setupDeck() {
 // 1. SIM
 // ====================================================================================
 async function simDeck() {
-  const H = deck("Part 1 · Simulation", "Part 1: Simulation with Verilator");
-  H.cover("PART 1 · SIMULATION", "Step 1 of the Flow:", "Simulation with Verilator",
-    "Build and run the ALU testbench on CHIA, then let Claude extend the testbench");
+  const H = deck("Part 1 · Simulation", "Part 1: Simulation, Step by Step");
+  H.cover("Part 1 · Simulation", "Simulation with Verilator,", "Step by Step",
+    "Run the testbench through CHIA, read the coverage, then let Claude extend the testbench");
+  const TOTAL = 5;
 
   {
     const s = H.slide("Where Sim Fits");
-    H.flow(s, "Sim", 1.35);
-    H.head(s, "Input", 0.85, 2.55, 5.5);
-    H.bullets(s, ["ALU RTL: 8 bit, 8 ops, 2-stage pipeline (locked).", "Self-checking testbench with its own reference model.",
-      "Seed 1, 20 000 cycles, en active 30 % of cycles."], { x: 0.85, y: 2.95, w: 5.5, h: 3.0 });
-    H.head(s, "Output", 6.85, 2.55, 5.65);
-    H.bullets(s, ["RESULT line: PASS / FAIL and errors.", "Coverage: functional bins (fixed file) + line, toggle, branch.", "Lint (verilator -Wall), waveform."],
-      { x: 6.85, y: 2.95, w: 5.65, h: 3.0 });
+    H.flow(s, "Sim", 1.45);
+    H.head(s, "Input", 0.85, 2.65, 5.5);
+    H.bullets(s, ["RTL of the design (locked: the agent never edits it).", "Self-checking testbench with its own reference model.",
+      "ALU defaults: seed 1, 20 000 cycles, en active 30 % of cycles."], { x: 0.85, y: 3.0, w: 5.5, h: 2.6 });
+    H.head(s, "Output", 6.85, 2.65, 5.65);
+    H.bullets(s, ["RESULT line: PASS / FAIL, checks, errors.", "Coverage: functional bins (fixed file) + line, toggle, branch of the DUT.",
+      "Lint report (verilator -Wall) and a waveform (VCD)."], { x: 6.85, y: 3.0, w: 5.65, h: 2.6 });
     H.msg(s, "Sim is the first gate: FPGA and ASIC start only after lint is clean and the testbench passes.");
   }
 
   {
-    const s = H.slide("Running the Baseline Sim on CHIA");
-    H.box(s, "Driver", "runs on the head", 0.85, 1.4, 2.6, 0.95, true);
-    H.box(s, "Build task", "chipyard worker · Verilator", 4.2, 1.4, 3.3, 0.95);
-    H.box(s, "Run task", "verilator worker", 4.2, 2.85, 3.3, 0.95);
-    H.box(s, "Shared run folder", "binary, log, waveform", 8.4, 2.1, 4.1, 0.95);
-    H.box(s, "Gate", "lint + PASS ?", 4.2, 4.3, 3.3, 0.8);
-    H.box(s, "FPGA step", "Part 2", 8.4, 4.3, 4.1, 0.8);
-    H.arrow(s, 3.45, 1.875, 4.2, 1.875); H.arrow(s, 5.85, 2.35, 5.85, 2.85); H.arrow(s, 5.85, 3.8, 5.85, 4.3);
-    H.arrow(s, 7.5, 1.875, 8.4, 2.4); H.arrow(s, 8.4, 2.8, 7.5, 3.325); H.arrow(s, 7.5, 4.7, 8.4, 4.7);
-    H.para(s, "writes", { x: 7.45, y: 1.6, w: 1.0, h: 0.32, fs: 14, align: "center" });
-    H.para(s, "reads", { x: 7.45, y: 3.45, w: 1.0, h: 0.32, fs: 14, align: "center" });
-    H.para(s, "pass", { x: 7.5, y: 4.3, w: 0.9, h: 0.32, fs: 14, align: "center" });
-    H.result(s, "ALU NoCG and CG: both PASS", 0.85, 2.85, 2.95, 1.25);
-    H.cmd(s, "python flow/run.py projects/demo-alu/NoCG baseline", 0.85, 5.45, 7.0);
-    H.msg(s, "Build and run are split over two containers that share one run folder.");
+    const s = H.slide("What Runs Inside a Sim Step");
+    H.box(s, "Driver", "on the head", 0.85, 1.5, 2.3, 0.95, true);
+    H.box(s, "Build task", "chipyard worker · lint + Verilator 5.022", 3.75, 1.5, 3.6, 0.95);
+    H.box(s, "Run task", "verilator worker · runs the binary", 3.75, 3.0, 3.6, 0.95);
+    H.box(s, "Shared run folder", "sim/build/: binary, sim.log, wave.vcd, coverage.dat", 8.0, 2.25, 4.5, 0.95);
+    H.box(s, "Gate", "lint clean + PASS -> FPGA", 3.75, 4.5, 3.6, 0.85);
+    H.arrow(s, 3.15, 1.975, 3.75, 1.975); H.arrow(s, 5.55, 2.45, 5.55, 3.0); H.arrow(s, 5.55, 3.95, 5.55, 4.5);
+    H.arrow(s, 7.35, 1.975, 8.0, 2.5); H.arrow(s, 8.0, 2.95, 7.35, 3.475);
+    H.para(s, "writes", { x: 7.3, y: 1.75, w: 0.8, h: 0.3, fs: 13, color: K.mute, align: "center" });
+    H.para(s, "reads", { x: 7.3, y: 3.35, w: 0.8, h: 0.3, fs: 13, color: K.mute, align: "center" });
+    H.caption(s, "Measured run: build 5 s on chipyard, run under 1 s on verilator (ALU NoCG, 25/11/2026).", 0.85, 5.6, 11.65);
+  }
+
+  H.step({ n: 1, total: TOTAL, title: "Step 1 · Before You Start",
+    where: "host terminal",
+    cmds: ["conda activate chia_env && cd ~/CHIA-workflow", "python scripts/chia-up-blocks.py --fpga --asic      # Setup, step 8", "ls projects/demo-alu/NoCG"],
+    does: ["Sim needs only the chipyard and verilator blocks; --fpga --asic keeps the cluster ready for Parts 2-3.",
+      "The project folder holds the RTL, testbench and project.py; the job copies them into a new run folder."],
+    done: { say: "The project folder lists:", log: ["asic  fpga  project.py  rtl  sim"] },
+    fails: [["chia: command not found", "conda activate chia_env (the base env has no chia)"]] });
+
+  H.step({ n: 2, total: TOTAL, title: "Step 2 · Run the Baseline Sim",
+    where: "host terminal, in ~/CHIA-workflow, inside chia_env",
+    cmds: ["python flow/run.py projects/demo-alu/NoCG baseline --stages sim"],
+    does: ["Submits one CHIA job: lint and build on chipyard, run on verilator, then the gate.",
+      "Opens the status page in the browser; it refreshes by itself. Drop --stages to run Sim, FPGA and ASIC."],
+    done: { say: "In about 1 min the job log shows:", log: ["RESULT: PASS dut=NoCG_alu ... errors=0", "FCOV: hit=51 total=55", "KẾT QUẢ: OK"] },
+    out: ["baseline-<time>/sim/build/", "  sim.log  wave.vcd  coverage.dat", "baseline-<time>/results/baseline.json"],
+    fails: [["no resource 'chipyard', job waits", "cluster is not up: Setup, step 8"],
+      ["Sim FAIL but the testbench printed PASS", "sim.pass_patterns in project.py does not match the log line"]] });
+
+  {
+    const s = H.slide("Step 3 · Read the Results");
+    H.progress(s, 3, TOTAL);
+    const iw = 7.0, ih = iw * 1440 / 2560;
+    s.addImage({ path: IMG + "status_nocg_baseline.png", x: 0.85, y: 1.45, w: iw, h: ih });
+    s.addShape(H.pres.shapes.RECTANGLE, { x: 0.85, y: 1.45, w: iw, h: ih, fill: { type: "none" }, line: { color: K.line, width: 0.75 } });
+    H.caption(s, "status.html of the NoCG baseline (25/11/2026, page labels were still Vietnamese).", 0.85, 1.55 + ih, iw);
+    H.head(s, "Where each number lives", 8.25, 1.45, 4.25);
+    H.table(s, [["Pass / fail", "sim/build/sim.log"], ["Functional bins", "FCOV lines in sim.log"],
+      ["Line, toggle, branch", "sim/build/coverage.dat"], ["Waveform", "sim/build/wave.vcd"], ["All numbers", "results/baseline.json"]],
+      { x: 8.25, y: 1.8, w: 4.25, colW: [1.55, 2.7], noHeader: true, boldFirstCol: true, monoCols: [1], fs: 12 });
+    H.evidence(s, "sim.log, NoCG baseline", ["FCOV: hit=51 total=55", "FCOV_MISS: reset_while_en_q,..."], 8.25, 4.15, 4.25);
+    H.caption(s, "The 4 missing bins are all reset mid-run: the next target.", 8.25, 5.35, 4.25, 0.6);
   }
 
   {
-    const s = H.slide("Agent: Improve the Testbench");
-    H.loop(s, 1.4, "testbench only", "coverage must rise");
-    H.head(s, "Rules for the agent", 0.85, 2.85, 5.6);
-    H.bullets(s, ["Edits only the testbench; the RTL is the reference.", "Edits to other files are undone before measuring.",
-      "Each round works in its own copy; prompt, diff and summary are kept."], { x: 0.85, y: 3.25, w: 5.6, h: 2.1 });
-    H.head(s, "Gate and rule", 6.85, 2.85, 5.65);
-    H.table(s, [["", "Sim"], ["Gate", "lint + testbench PASS"], ["Accept", "no coverage drops, more bins covered"], ["Rounds", "up to 2"]],
-      { x: 6.85, y: 3.25, w: 5.65, colW: [1.3, 4.35], boldFirstCol: true });
-    H.cmd(s, "python flow/run.py projects/demo-alu/NoCG agent --rounds 2", 0.85, 5.45, 8.4);
+    const s = H.slide("Writing a Testbench for the Flow");
+    H.head(s, "5 rules", 0.85, 1.45, 6.0);
+    H.table(s, [["1", "Prints its own result: RESULT: PASS / FAIL, or any line matched by a regex"],
+      ["2", "Reads only DUT ports; the same testbench later runs on the netlists (GLS)"],
+      ["3", "Types and constants in a separate .svh / .vh file"], ["4", "Holds reset ≥ 100 ns (Xilinx global reset in GLS)"],
+      ["5", "One clock; SystemVerilog that Verilator 5.022 and Yosys 0.68 read"]],
+      { x: 0.85, y: 1.8, w: 6.0, colW: [0.4, 5.6], noHeader: true, boldFirstCol: true, fs: 13 });
+    H.head(s, "Declared in project.py", 7.3, 1.45, 5.2);
+    H.table(s, [["sim.pass_patterns", "regex that must appear (default: RESULT: PASS)"], ["sim.fail_patterns", "regex that must not appear"],
+      ["sim.lint", "errors (default) · strict · False"], ["sim.fcov_module", "optional functional-coverage module"]],
+      { x: 7.3, y: 1.8, w: 5.2, colW: [1.85, 3.35], noHeader: true, monoCols: [0], fs: 12 });
+    H.head(s, "Functional coverage (optional)", 7.3, 3.75, 5.2);
+    H.bullets(s, ["sim/fcov_<dut>.sv binds to the DUT and lists the cases to hit.", "Prints FCOV: hit=<n> total=<m> and FCOV_MISS: ...",
+      "Fixed: the agent may not edit it. Without it, the rule uses line / toggle / branch."], { x: 7.3, y: 4.1, w: 5.2, h: 1.9, fs: 13 });
+    H.cmd(s, ["python flow/new.py projects/<p> --top <mod> --rtl <files> --tb <tb> --clock clk:10"], 0.85, 4.3, 6.0, 12);
+    H.caption(s, "new.py copies the files, writes project.py and warns if the testbench reads internal signals.", 0.85, 4.75, 6.0, 0.6);
+  }
+
+  H.step({ n: 4, total: TOTAL, title: "Step 4 · Run the Agent",
+    where: "host terminal, inside chia_env; a baseline with KẾT QUẢ: OK must exist",
+    cmds: ["python flow/run.py projects/demo-alu/NoCG agent --rounds 2"],
+    does: ["Runs all three steps (about 15-20 min); this part covers rounds sim-r1 and sim-r2.",
+      "In Sim, Claude may edit only the testbench; CHIA undoes any other edit, then re-runs the step."],
+    done: { say: "The job ends with:", log: ["... so sánh: .../results/compare.md", "KẾT QUẢ: OK"] },
+    out: ["agent-<time>/sim-r1/  sim-r2/ ...", "agent-<time>/results/compare.md"],
+    fails: [["agent refuses the baseline", "the baseline must come from flow/run.py; pass --baseline <run_dir>"],
+      ["Timeout on attempt 1/3", "the agent tried to build; it only edits, CHIA measures"]] });
+
+  H.step({ n: 5, total: TOTAL, title: "Step 5 · Read an Agent Round",
+    where: "any terminal or file browser on the host",
+    cmds: ["cd ~/chia_demo/demo-alu/NoCG/agent-<date>-<time>", "ls sim-r1/agent        # TASK.md  context/  stream.log  summary.md  changes.diff",
+      "cat sim-r1/agent/changes.diff; cat results/compare.md"],
+    does: ["TASK.md is the prompt; context/ holds the reports it read; stream.log is the full session.",
+      "summary.md is the agent's own explanation; changes.diff is what was kept after the revert."],
+    done: { say: "compare.md lists each round as accepted or rejected, with the numbers.", log: [] },
+    out: ["sim-r1/{rtl,sim,fpga,asic}/  copy", "sim-r1/agent/  prompt, diff"] });
+
+  {
+    const s = H.slide("Gate and Accept Rule for Sim");
+    H.loop(s, 1.5, "testbench only", "coverage must rise");
+    H.table(s, [["", "Sim"], ["Agent may edit", "the testbench (tb_<dut>.v); RTL and fcov file are locked"], ["Gate", "lint clean + testbench PASS"],
+      ["Accept", "no coverage number drops, and more functional bins are hit"], ["Rounds", "up to 2; an accepted round becomes the base for the next one"]],
+      { x: 0.85, y: 3.05, w: 11.65, colW: [2.2, 9.45], boldFirstCol: true });
     H.msg(s, "More comparisons alone do not count: a round must cover a case not covered before.");
   }
 
   {
-    const s = H.slide("Example · NoCG vs CG: Same Test, Different Clocking");
+    const s = H.slide("Result · NoCG vs CG: Same Test, Different Clocking");
     H.head(s, "NoCG: clock enable", 0.85, 1.3, 5.6);
     H.box(s, "a, b", null, 0.85, 1.75, 1.0, 0.65);
     H.box(s, "MUX", "en ? a : a_q", 2.2, 1.75, 1.65, 0.65);
@@ -558,9 +622,8 @@ async function simDeck() {
     H.evidence(s, "the Sim log, NoCG baseline", ["RESULT: PASS dut=NoCG_alu seed=1 cycles=20249 ... checked=6272 errors=0"], 0.85, 5.35, 11.65);
     H.msg(s, "Same test, same result: Sim cannot see the cost of clock gating; FPGA and ASIC can.");
   }
-
   {
-    const s = H.slide("Example · What the Agent Added");
+    const s = H.slide("Result · What the Agent Added");
     H.table(s, [["Round 1", "Baseline", "Agent"], ["ALU NoCG: bins", "51/55", "55/55"], ["ALU CG: bins · branch", "51/57 · 8/10", "57/57 · 10/10"],
       ["ALU comparisons", "6 272", "6 277 / 6 305"]],
       { x: 0.85, y: 1.35, w: 6.6, colW: [2.8, 1.9, 1.9], boldFirstCol: true });
@@ -571,18 +634,17 @@ async function simDeck() {
     H.caption(s, "Under the old rule (count comparisons) the agent added 0.5-1.5 million comparisons.", 0.85, 5.15, 6.6, 0.7);
     H.msg(s, "Full functional coverage in one round with a few dozen checks; every round 1 accepted.");
   }
-
-
   {
     const s = H.slide("Takeaways and Limits");
-    H.head(s, "What this step shows", 0.85, 1.3, 5.6);
+    H.head(s, "What this step shows", 0.85, 1.45, 5.6);
     H.bullets(s, ["CHIA splits one step over two containers and gates the rest of the flow on its result.",
-      "Coverage tells the agent where the gaps are; it closed them in one round."], { x: 0.85, y: 1.7, w: 5.6, h: 4.2 });
-    H.head(s, "Limits", 6.85, 1.3, 5.65);
-    H.bullets(s, ["Functional bins are hand-written.",
-      "One clock; no CDC / RDC check.", "Two rounds, one run each; the agent is not deterministic."], { x: 6.85, y: 1.7, w: 5.65, h: 4.2 });
+      "Coverage tells the agent where the gaps are; it closed them in one round."], { x: 0.85, y: 1.8, w: 5.6, h: 4.0 });
+    H.head(s, "Limits", 6.85, 1.45, 5.65);
+    H.bullets(s, ["Functional bins are hand-written.", "One clock; no CDC / RDC check.", "Two rounds, one run each; the agent is not deterministic."],
+      { x: 6.85, y: 1.8, w: 5.65, h: 4.0 });
     H.msg(s, "Next, Part 2: the same ALU goes through Vivado to a bitstream.");
   }
+
   {
     const s = H.slide("Second Design · ASCON in the Sim Step");
     H.bars(s, [{ name: "baseline", labels: ["Line", "Toggle", "Branch"], values: [71.4, 87.5, 73.3] },
