@@ -110,6 +110,45 @@ function deck(name, titleText) {
       });
       H.caption(s, "each step starts only after the gate of the previous one passes", 10.15, y + 0.05, 2.35, 0.75);
     },
+    // slide hướng dẫn một bước: dải tiến độ, Where, lệnh, giải thích, Done when, output, If it fails
+    step(o) {
+      const s = H.slide(o.title);
+      // dải tiến độ các bước, bước hiện tại tô đậm
+      const n = o.steps.length, bw = 0.42, g = 0.08, x0 = 12.5 - n * bw - (n - 1) * g;
+      o.steps.forEach((t, i) => {
+        const cur = i + 1 === o.n;
+        s.addText(String(i + 1), { shape: pres.shapes.ROUNDED_RECTANGLE, rectRadius: 0.05, x: x0 + i * (bw + g), y: 0.6, w: bw, h: 0.38,
+          fontFace: F, fontSize: 12, bold: cur, align: "center", valign: "middle", margin: 0,
+          color: cur ? "FFFFFF" : K.mute, fill: { color: cur ? K.ink : "FFFFFF" }, line: { color: cur ? K.ink : K.line, width: 0.75 } });
+      });
+      const L = 0.85, LW = 7.2, R = 8.45, RW = 4.05;
+      s.addText([{ text: "Where  ", options: { bold: true, color: K.black } }, { text: o.where, options: { color: K.ink } }],
+        { x: L, y: 1.3, w: LW, h: 0.32, fontFace: F, fontSize: 14, margin: 0, isTextBox: true });
+      const lines = o.cmds.map((c, i) => ({ text: c, options: { breakLine: i < o.cmds.length - 1 } }));
+      const ch = 0.16 + 0.27 * o.cmds.length;
+      s.addText(lines, { x: L, y: 1.72, w: LW, h: ch, fontFace: M, fontSize: 13, color: K.black, fill: { color: K.soft },
+        line: { color: K.line, width: 0.75 }, valign: "top", margin: [5, 10, 5, 10], isTextBox: true });
+      let y = 1.72 + ch + 0.3;
+      H.head(s, "What it does", L, y, LW);
+      H.bullets(s, o.does, { x: L, y: y + 0.4, w: LW, h: 1.6, fs: 14 });
+      // cột phải: Done when + output
+      H.head(s, "Done when", R, 1.3, RW);
+      const dl = [{ text: o.done.say, options: { fontFace: F, color: K.ink, breakLine: true } }];
+      o.done.log.forEach((l, i) => dl.push({ text: l, options: { fontFace: M, fontSize: 12, color: K.black, breakLine: i < o.done.log.length - 1 } }));
+      s.addText(dl, { x: R, y: 1.72, w: RW, h: 0.36 + 0.25 * o.done.log.length, fontSize: 14, valign: "top",
+        margin: [5, 8, 5, 8], line: { color: K.ink, width: 1 }, isTextBox: true });
+      const oy = 1.72 + 0.36 + 0.25 * o.done.log.length + 0.3;
+      H.head(s, "Output", R, oy, RW);
+      s.addText(o.out.map((l, i) => ({ text: l, options: { breakLine: i < o.out.length - 1 } })),
+        { x: R, y: oy + 0.4, w: RW, h: 0.27 * o.out.length + 0.1, fontFace: M, fontSize: 12, color: K.ink, margin: 0, valign: "top", isTextBox: true });
+      // If it fails
+      if (o.fails) {
+        const fy = 6.55 - 0.3 * o.fails.length;
+        H.head(s, "If it fails", L, fy - 0.42, 11.65);
+        H.table(s, o.fails, { x: L, y: fy, w: 11.65, colW: [4.6, 7.05], noHeader: true, fs: 12, boldFirstCol: true });
+      }
+      return s;
+    },
     // vòng agent: chung cho 3 deck
     loop(s, y, edit, rule) {
       const g = 0.28, w = (11.65 - 5 * g) / 6;
@@ -747,8 +786,28 @@ async function asicDeck() {
   await H.save("3_ASIC.pptx");
 }
 
+// slide mẫu để duyệt khung "Step"
+async function previewDeck() {
+  const H = deck("Part 1 · Simulation", "Preview: Step slide");
+  H.step({
+    title: "Step 2 · Run the Baseline Sim", n: 2,
+    steps: ["Before you start", "Run baseline", "What runs inside", "Read results", "Run agent", "Read a round"],
+    where: "host terminal, in ~/CHIA-workflow, cluster already up (Step 1)",
+    cmds: ["conda activate chia_env", "cd ~/CHIA-workflow", "python flow/run.py projects/demo-alu/NoCG baseline --stages sim"],
+    does: ["Submits one CHIA job: lint, build on the chipyard block, run on the verilator block.",
+      "Opens the status page in the browser; it refreshes by itself."],
+    done: { say: "In about 1 min the job log ends with:", log: ["RESULT: PASS dut=NoCG_alu ...", "KẾT QUẢ: OK"] },
+    out: ["~/chia_demo/demo-alu/NoCG/", "  baseline-<date>-<time>/", "    sim/  rtl/  results/", "    profile/  status.html"],
+    fails: [["chia: command not found", "run conda activate chia_env first"],
+      ["no resource 'chipyard' / job waits forever", "cluster is not up: python scripts/chia-up-blocks.py --fpga --asic"],
+      ["Sim FAIL but the testbench printed PASS", "the PASS pattern in project.py does not match the line"]],
+  });
+  await H.save("preview_step.pptx");
+}
+
 (async () => {
   require("fs").mkdirSync(OUT, { recursive: true });
+  if (process.env.PREVIEW) { await previewDeck(); console.log('preview'); return; }
   await setupDeck(); await simDeck(); await fpgaDeck(); await asicDeck();
   console.log("written to", OUT);
 })();
